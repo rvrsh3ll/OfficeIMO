@@ -1,0 +1,343 @@
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Threading;
+
+namespace OfficeIMO.Pdf;
+
+internal static class PdfFileAssembler {
+    internal static byte[] Assemble(
+        IReadOnlyList<byte[]> objects,
+        int catalogId,
+        int infoId,
+        PdfFileVersion fileVersion = PdfFileVersion.Pdf14,
+        PdfStandardEncryptionOptions? encryption = null,
+        long objectMemoryLimitBytes = PdfObjectStore.DefaultMemoryLimitBytes,
+        string? trailerIdEntry = null,
+        CancellationToken cancellationToken = default) {
+        using var stream = new MemoryStream();
+        Assemble(stream, objects, catalogId, infoId, fileVersion, encryption, objectMemoryLimitBytes, trailerIdEntry, cancellationToken);
+        return stream.ToArray();
+    }
+
+    internal static long Assemble(
+        Stream destination,
+        IReadOnlyList<byte[]> objects,
+        int catalogId,
+        int infoId,
+        PdfFileVersion fileVersion = PdfFileVersion.Pdf14,
+        PdfStandardEncryptionOptions? encryption = null,
+        long objectMemoryLimitBytes = PdfObjectStore.DefaultMemoryLimitBytes,
+        string? trailerIdEntry = null,
+        CancellationToken cancellationToken = default) =>
+        AssembleWithEvidenceCore(
+            destination,
+            objects,
+            catalogId,
+            infoId,
+            fileVersion,
+            encryption,
+            objectMemoryLimitBytes,
+            trailerIdEntry,
+            permanentFileId: null,
+            cancellationToken,
+            out _);
+
+    internal static byte[] AssemblePreservingPermanentId(
+        IReadOnlyList<byte[]> objects,
+        int catalogId,
+        int infoId,
+        PdfFileVersion fileVersion,
+        PdfStandardEncryptionOptions? encryption,
+        byte[] permanentFileId,
+        long objectMemoryLimitBytes = PdfObjectStore.DefaultMemoryLimitBytes,
+        CancellationToken cancellationToken = default) {
+        using var stream = new MemoryStream();
+        AssemblePreservingPermanentId(
+            stream, objects, catalogId, infoId, fileVersion, encryption, permanentFileId, objectMemoryLimitBytes, cancellationToken);
+        return stream.ToArray();
+    }
+
+    internal static long AssemblePreservingPermanentId(
+        Stream destination,
+        IReadOnlyList<byte[]> objects,
+        int catalogId,
+        int infoId,
+        PdfFileVersion fileVersion,
+        PdfStandardEncryptionOptions? encryption,
+        byte[] permanentFileId,
+        long objectMemoryLimitBytes = PdfObjectStore.DefaultMemoryLimitBytes,
+        CancellationToken cancellationToken = default) {
+        Guard.NotNull(permanentFileId, nameof(permanentFileId));
+        return AssembleWithEvidenceCore(
+            destination,
+            objects,
+            catalogId,
+            infoId,
+            fileVersion,
+            encryption,
+            objectMemoryLimitBytes,
+            trailerIdEntry: null,
+            permanentFileId,
+            cancellationToken,
+            out _);
+    }
+
+    internal static byte[] AssembleWithEvidence(
+        IReadOnlyList<byte[]> objects,
+        int catalogId,
+        int infoId,
+        PdfFileVersion fileVersion,
+        PdfStandardEncryptionOptions? encryption,
+        long objectMemoryLimitBytes,
+        CancellationToken cancellationToken,
+        out PdfFileAssemblyBufferEvidence bufferEvidence) {
+        using var stream = new MemoryStream();
+        AssembleWithEvidenceCore(
+            stream,
+            objects,
+            catalogId,
+            infoId,
+            fileVersion,
+            encryption,
+            objectMemoryLimitBytes,
+            trailerIdEntry: null,
+            permanentFileId: null,
+            cancellationToken,
+            out bufferEvidence);
+        return stream.ToArray();
+    }
+
+    internal static long AssembleWithEvidence(
+        Stream destination,
+        IReadOnlyList<byte[]> objects,
+        int catalogId,
+        int infoId,
+        PdfFileVersion fileVersion,
+        PdfStandardEncryptionOptions? encryption,
+        long objectMemoryLimitBytes,
+        string? trailerIdEntry,
+        CancellationToken cancellationToken,
+        out PdfFileAssemblyBufferEvidence bufferEvidence) =>
+        AssembleWithEvidenceCore(
+            destination,
+            objects,
+            catalogId,
+            infoId,
+            fileVersion,
+            encryption,
+            objectMemoryLimitBytes,
+            trailerIdEntry,
+            permanentFileId: null,
+            cancellationToken,
+            out bufferEvidence);
+
+    private static long AssembleWithEvidenceCore(
+        Stream destination,
+        IReadOnlyList<byte[]> objects,
+        int catalogId,
+        int infoId,
+        PdfFileVersion fileVersion,
+        PdfStandardEncryptionOptions? encryption,
+        long objectMemoryLimitBytes,
+        string? trailerIdEntry,
+        byte[]? permanentFileId,
+        CancellationToken cancellationToken,
+        out PdfFileAssemblyBufferEvidence bufferEvidence) {
+        cancellationToken.ThrowIfCancellationRequested();
+        Guard.FileVersion(fileVersion, nameof(fileVersion));
+        Guard.NotNull(destination, nameof(destination));
+        Guard.NotNull(objects, nameof(objects));
+        if (!destination.CanWrite) throw new ArgumentException("Destination stream must be writable.", nameof(destination));
+        if (objectMemoryLimitBytes < 0L) throw new ArgumentOutOfRangeException(nameof(objectMemoryLimitBytes), objectMemoryLimitBytes, "PDF object-buffer memory limit cannot be negative.");
+
+        long sourceRetainedBytes = GetRetainedMemoryBytes(objects, cancellationToken);
+        long sourcePeakRetainedBytes = GetPeakRetainedMemoryBytes(objects, cancellationToken);
+        bool sourceSpilled = objects is PdfObjectStore sourceStore && sourceStore.IsSpilled;
+        using PdfEncryptionAssembly? encryptionAssembly = encryption == null
+            ? null
+            : PdfStandardSecurityWriter.Encrypt(objects, encryption, objectMemoryLimitBytes, cancellationToken);
+        if (encryptionAssembly != null) {
+            fileVersion = RequireAtLeast(fileVersion, GetMinimumEncryptionVersion(encryption!.Algorithm));
+            objects = encryptionAssembly.Objects;
+        }
+
+        long assemblyPeakRetainedBytes = encryptionAssembly == null
+            ? sourcePeakRetainedBytes
+            : AddWithoutOverflow(sourceRetainedBytes, GetPeakRetainedMemoryBytes(objects, cancellationToken));
+        bool assemblySpilled = sourceSpilled || objects is PdfObjectStore assemblyStore && assemblyStore.IsSpilled;
+        bufferEvidence = new PdfFileAssemblyBufferEvidence(
+            assemblyPeakRetainedBytes,
+            assemblySpilled,
+            isForwardOnlyObjectSerialization: false,
+            largestSerializedObjectBytes: GetLargestObjectBytes(objects, cancellationToken));
+
+        byte[] header = PdfEncoding.Latin1GetBytes("%PDF-" + GetHeaderVersion(fileVersion) + "\n%\u00e2\u00e3\u00cf\u00d3\n");
+        using HashAlgorithm? fileIdHash = encryptionAssembly == null ? SHA256.Create() : null;
+        fileIdHash?.TransformBlock(header, 0, header.Length, header, 0);
+        destination.Write(header, 0, header.Length);
+        long written = header.LongLength;
+
+        var offsets = new List<long> { 0L };
+        for (int i = 0; i < objects.Count; i++) {
+            cancellationToken.ThrowIfCancellationRequested();
+            offsets.Add(written);
+            if (objects is PdfObjectStore objectStore) {
+                objectStore.CopyTo(i, destination, fileIdHash, cancellationToken);
+                written += objectStore.GetLength(i);
+            } else {
+                byte[] obj = objects[i];
+                fileIdHash?.TransformBlock(obj, 0, obj.Length, obj, 0);
+                destination.Write(obj, 0, obj.Length);
+                written += obj.LongLength;
+            }
+        }
+
+        byte[] fileId = encryptionAssembly?.FileId ?? FinalizeFileId(fileIdHash!);
+
+        long xrefPos = written;
+        var trailer = new StringBuilder();
+        trailer.Append("xref\n");
+        trailer.Append("0 ").Append((objects.Count + 1).ToString(CultureInfo.InvariantCulture)).Append('\n');
+        trailer.Append("0000000000 65535 f \n");
+        for (int i = 1; i <= objects.Count; i++) {
+            trailer.Append(offsets[i].ToString("0000000000", CultureInfo.InvariantCulture)).Append(" 00000 n \n");
+        }
+
+        trailer.Append("trailer\n");
+        trailer.Append("<< /Size ").Append((objects.Count + 1).ToString(CultureInfo.InvariantCulture))
+            .Append(" /Root ").Append(PdfSyntaxEscaper.IndirectReference(catalogId))
+            .Append(infoId > 0 ? " /Info " + PdfSyntaxEscaper.IndirectReference(infoId) : string.Empty)
+            .Append(BuildTrailerEntries(encryptionAssembly, fileId, trailerIdEntry, permanentFileId)).Append(" >>\n");
+        trailer.Append("startxref\n").Append(xrefPos.ToString(CultureInfo.InvariantCulture)).Append("\n%%EOF\n");
+        byte[] trailerBytes = Encoding.ASCII.GetBytes(trailer.ToString());
+        destination.Write(trailerBytes, 0, trailerBytes.Length);
+        return written + trailerBytes.LongLength;
+    }
+
+    private static long GetRetainedMemoryBytes(IReadOnlyList<byte[]> objects, CancellationToken cancellationToken) {
+        if (objects is PdfObjectStore store) return store.RetainedMemoryBytes;
+        long total = 0L;
+        for (int index = 0; index < objects.Count; index++) {
+            cancellationToken.ThrowIfCancellationRequested();
+            total = AddWithoutOverflow(total, objects[index].LongLength);
+        }
+        return total;
+    }
+
+    private static long GetPeakRetainedMemoryBytes(IReadOnlyList<byte[]> objects, CancellationToken cancellationToken) =>
+        objects is PdfObjectStore store ? store.PeakRetainedMemoryBytes : GetRetainedMemoryBytes(objects, cancellationToken);
+
+    private static long GetLargestObjectBytes(IReadOnlyList<byte[]> objects, CancellationToken cancellationToken) {
+        long largest = 0L;
+        if (objects is PdfObjectStore store) {
+            for (int index = 0; index < store.Count; index++) {
+                cancellationToken.ThrowIfCancellationRequested();
+                largest = Math.Max(largest, store.GetLength(index));
+            }
+            return largest;
+        }
+        for (int index = 0; index < objects.Count; index++) {
+            cancellationToken.ThrowIfCancellationRequested();
+            largest = Math.Max(largest, objects[index].LongLength);
+        }
+        return largest;
+    }
+
+    private static long AddWithoutOverflow(long left, long right) =>
+        left > long.MaxValue - right ? long.MaxValue : left + right;
+
+    private static string BuildTrailerEntries(
+        PdfEncryptionAssembly? encryptionAssembly,
+        byte[] fileId,
+        string? trailerIdEntry,
+        byte[]? permanentFileId) {
+        if (encryptionAssembly == null && !string.IsNullOrWhiteSpace(trailerIdEntry)) {
+            return trailerIdEntry!;
+        }
+
+        string id = PdfSyntaxEscaper.HexString(fileId);
+        string encryptionEntry = encryptionAssembly == null
+            ? string.Empty
+            : " /Encrypt " + PdfSyntaxEscaper.IndirectReference(encryptionAssembly.EncryptionObjectNumber);
+        string permanentId = permanentFileId == null ? id : PdfSyntaxEscaper.HexString(permanentFileId);
+        return encryptionEntry + " /ID [" + permanentId + " " + id + "]";
+    }
+
+    private static byte[] FinalizeFileId(HashAlgorithm hash) {
+        hash.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+        byte[] fullHash = hash.Hash ?? throw new InvalidOperationException("Unable to calculate the PDF trailer file identifier.");
+        var fileId = new byte[16];
+        Buffer.BlockCopy(fullHash, 0, fileId, 0, fileId.Length);
+        return fileId;
+    }
+
+    private static PdfFileVersion GetMinimumEncryptionVersion(PdfStandardEncryptionAlgorithm algorithm) {
+        switch (algorithm) {
+            case PdfStandardEncryptionAlgorithm.Aes256:
+                return PdfFileVersion.Pdf20;
+            case PdfStandardEncryptionAlgorithm.Aes128:
+                return PdfFileVersion.Pdf16;
+            case PdfStandardEncryptionAlgorithm.LegacyRc4:
+                return PdfFileVersion.Pdf14;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(algorithm), algorithm, "Unsupported PDF Standard encryption algorithm.");
+        }
+    }
+
+    internal static string GetHeaderVersion(PdfFileVersion fileVersion) {
+        switch (fileVersion) {
+            case PdfFileVersion.Pdf14:
+                return "1.4";
+            case PdfFileVersion.Pdf15:
+                return "1.5";
+            case PdfFileVersion.Pdf16:
+                return "1.6";
+            case PdfFileVersion.Pdf17:
+                return "1.7";
+            case PdfFileVersion.Pdf20:
+                return "2.0";
+            default:
+                Guard.FileVersion(fileVersion, nameof(fileVersion));
+                return "1.4";
+        }
+    }
+
+    internal static PdfFileVersion RequireAtLeast(PdfFileVersion fileVersion, PdfFileVersion minimumVersion) {
+        Guard.FileVersion(fileVersion, nameof(fileVersion));
+        Guard.FileVersion(minimumVersion, nameof(minimumVersion));
+        return fileVersion < minimumVersion ? minimumVersion : fileVersion;
+    }
+
+    internal static PdfFileVersion ParseHeaderVersionOrDefault(string? headerVersion) {
+        switch (headerVersion) {
+            case "1.5":
+                return PdfFileVersion.Pdf15;
+            case "1.6":
+                return PdfFileVersion.Pdf16;
+            case "1.7":
+                return PdfFileVersion.Pdf17;
+            case "2.0":
+                return PdfFileVersion.Pdf20;
+            default:
+                return PdfFileVersion.Pdf14;
+        }
+    }
+}
+
+internal readonly struct PdfFileAssemblyBufferEvidence {
+    internal PdfFileAssemblyBufferEvidence(
+        long peakRetainedObjectBytes,
+        bool objectBufferSpilled,
+        bool isForwardOnlyObjectSerialization,
+        long largestSerializedObjectBytes) {
+        PeakRetainedObjectBytes = peakRetainedObjectBytes;
+        ObjectBufferSpilled = objectBufferSpilled;
+        IsForwardOnlyObjectSerialization = isForwardOnlyObjectSerialization;
+        LargestSerializedObjectBytes = largestSerializedObjectBytes;
+    }
+
+    internal long PeakRetainedObjectBytes { get; }
+    internal bool ObjectBufferSpilled { get; }
+    internal bool IsForwardOnlyObjectSerialization { get; }
+    internal long LargestSerializedObjectBytes { get; }
+}

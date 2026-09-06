@@ -1,0 +1,289 @@
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Spreadsheet;
+using OfficeIMO.Excel;
+using System;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using Xunit;
+
+namespace OfficeIMO.Tests {
+    public class ExcelNamedRangesAndLinksTests {
+        [Fact]
+        public void DefinedNameNormalizationReturnsTheNameThatWillBeEmitted() {
+            Assert.Equal("_R1C1", ExcelDocument.NormalizeDefinedName("R1C1"));
+            Assert.Equal("Sales_Total", ExcelDocument.NormalizeDefinedName("Sales Total"));
+            Assert.Equal("\\Rate", ExcelDocument.NormalizeDefinedName("\\Rate"));
+            Assert.Equal("\\Rate", ExcelDocument.NormalizeDefinedName(
+                "\\Rate", ExcelDefinedNameValidationMode.Strict));
+            Assert.Throws<ArgumentException>(() => ExcelDocument.NormalizeDefinedName(
+                "R1C1", ExcelDefinedNameValidationMode.Strict));
+        }
+
+        [Theory]
+        [InlineData("Sales Total")]
+        [InlineData(" SalesTotal")]
+        [InlineData("1Sales")]
+        [InlineData("Sales-Total")]
+        public void DefinedNameStrictValidationRejectsAuthoredInputInsteadOfSanitizingIt(string name) {
+            Assert.Throws<ArgumentException>(() => ExcelDocument.NormalizeDefinedName(
+                name, ExcelDefinedNameValidationMode.Strict));
+        }
+
+        [Fact]
+        public void NamedRange_SingleCellReferenceDoesNotThrow() {
+            string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".xlsx");
+            using (var doc = ExcelDocument.Create(path)) {
+                doc.AddWorksheet("Data");
+                var exception = Record.Exception(() =>
+                    doc.SetNamedRange("Single", "A1", save: false, hidden: false, validationMode: ExcelDefinedNameValidationMode.Sanitize));
+                Assert.Null(exception);
+                Assert.Equal("$A$1", doc.GetNamedRange("Single"));
+            }
+            File.Delete(path);
+        }
+
+        [Fact]
+        public void NamedRange_SanitizeClampsOutOfBounds() {
+            string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".xlsx");
+            using (var doc = ExcelDocument.Create(path)) {
+                var data = doc.AddWorksheet("Data");
+                doc.SetNamedRange("TooBig", "'Data'!A1:B2000000", save: false, hidden: false, validationMode: ExcelDefinedNameValidationMode.Sanitize);
+                var value = doc.GetNamedRange("TooBig");
+                Assert.Equal("'Data'!$A$1:$B$1048576", value);
+            }
+            File.Delete(path);
+        }
+
+        [Fact]
+        public void NamedRange_Sanitize_ResolvesExistingSanitizedSheetPrefix() {
+            string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".xlsx");
+            using (var doc = ExcelDocument.Create(path)) {
+                var data = doc.AddWorksheet("Data??");
+                doc.SetNamedRange("OnData", "Data??!A1", save: false, hidden: false, validationMode: ExcelDefinedNameValidationMode.Sanitize);
+
+                var value = doc.GetNamedRange("OnData");
+                Assert.Equal($"'{data.Name}'!$A$1", value);
+            }
+            File.Delete(path);
+        }
+
+        [Fact]
+        public void NamedRange_QuotedSheetNameContainingBang_NormalizesCorrectly() {
+            string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".xlsx");
+            using (var doc = ExcelDocument.Create(path)) {
+                doc.AddWorksheet("Report!2026");
+                doc.SetNamedRange("BangSheet", "'Report!2026'!A1:B2", save: false, hidden: false, validationMode: ExcelDefinedNameValidationMode.Strict);
+
+                var value = doc.GetNamedRange("BangSheet");
+                Assert.Equal("'Report!2026'!$A$1:$B$2", value);
+            }
+            File.Delete(path);
+        }
+
+        [Fact]
+        public void NamedRange_StrictAcceptsAbsoluteReferences() {
+            string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".xlsx");
+            using (var doc = ExcelDocument.Create(path)) {
+                doc.AddWorksheet("Data");
+                doc.SetNamedRange("AbsoluteRange", "'Data'!$A$1:$B$2", save: false, hidden: false, validationMode: ExcelDefinedNameValidationMode.Strict);
+
+                Assert.Equal("'Data'!$A$1:$B$2", doc.GetNamedRange("AbsoluteRange"));
+            }
+            File.Delete(path);
+        }
+
+        [Fact]
+        public void NamedRange_LocalScope_PreservesAlreadyQualifiedRange() {
+            string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".xlsx");
+            using (var doc = ExcelDocument.Create(path)) {
+                var data = doc.AddWorksheet("Data");
+                data.SetNamedRange("LocalQualified", "'Data'!A1", save: false, hidden: false, validationMode: ExcelDefinedNameValidationMode.Strict);
+
+                var definedName = doc._spreadSheetDocument.WorkbookPart!.Workbook.DefinedNames!
+                    .Elements<DefinedName>()
+                    .Single(d => d.Name == "LocalQualified");
+
+                Assert.Equal("'Data'!$A$1", definedName.Text);
+                Assert.Equal("$A$1", data.GetNamedRange("LocalQualified"));
+            }
+            File.Delete(path);
+        }
+
+        [Fact]
+        public void NamedRange_LocalScope_PreservesCrossSheetQualifiedRange() {
+            string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".xlsx");
+            using (var doc = ExcelDocument.Create(path)) {
+                var data = doc.AddWorksheet("Data");
+                doc.AddWorksheet("Other");
+                data.SetNamedRange("LocalCrossSheet", "'Other'!A1:B2", save: false, hidden: false, validationMode: ExcelDefinedNameValidationMode.Strict);
+
+                var definedName = doc._spreadSheetDocument.WorkbookPart!.Workbook.DefinedNames!
+                    .Elements<DefinedName>()
+                    .Single(d => d.Name == "LocalCrossSheet");
+
+                Assert.Equal("'Other'!$A$1:$B$2", definedName.Text);
+                Assert.Equal("'Other'!$A$1:$B$2", data.GetNamedRange("LocalCrossSheet"));
+            }
+            File.Delete(path);
+        }
+        [Fact]
+        public void NamedRange_StrictThrowsOutOfBounds() {
+            string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".xlsx");
+            using (var doc = ExcelDocument.Create(path)) {
+                doc.AddWorksheet("Data");
+                Assert.Throws<ArgumentOutOfRangeException>(() =>
+                    doc.SetNamedRange("TooBigS", "'Data'!A1:B2000000", save: false, hidden: false, validationMode: ExcelDefinedNameValidationMode.Strict));
+            }
+            File.Delete(path);
+        }
+
+        [Fact]
+        public void InternalLink_QuotingForApostropheSheetName() {
+            string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".xlsx");
+            using (var doc = ExcelDocument.Create(path)) {
+                var main = doc.AddWorksheet("Main");
+                var target = doc.AddWorksheet("O'Brien");
+                main.SetInternalLink(1, 1, target, "A1", display: "Go");
+
+                // Inspect hyperlinks
+                var wsPartField = typeof(ExcelSheet).GetField("_worksheetPart", BindingFlags.NonPublic | BindingFlags.Instance);
+                Assert.NotNull(wsPartField);
+                var wsPart = (WorksheetPart)wsPartField!.GetValue(main)!;
+                var links = wsPart.Worksheet.Elements<Hyperlinks>().FirstOrDefault();
+                Assert.NotNull(links);
+                var hl = links!.Elements<Hyperlink>().FirstOrDefault();
+                Assert.NotNull(hl);
+                Assert.Equal("'O''Brien'!A1", hl!.Location!.Value);
+            }
+            File.Delete(path);
+        }
+
+        [Fact]
+        public void InternalLink_LocationString_ResolvesExistingSanitizedSheetName() {
+            string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".xlsx");
+            using (var doc = ExcelDocument.Create(path)) {
+                var main = doc.AddWorksheet("Main");
+                var target = doc.AddWorksheet("Summary??");
+
+                main.SetInternalLink(1, 1, "Summary??!A1", style: false);
+
+                var wsPartField = typeof(ExcelSheet).GetField("_worksheetPart", BindingFlags.NonPublic | BindingFlags.Instance);
+                Assert.NotNull(wsPartField);
+                var wsPart = (WorksheetPart)wsPartField!.GetValue(main)!;
+                var links = wsPart.Worksheet.Elements<Hyperlinks>().FirstOrDefault();
+                Assert.NotNull(links);
+                var hl = links!.Elements<Hyperlink>().Single();
+                Assert.Equal($"'{target.Name}'!A1", hl.Location!.Value);
+            }
+            File.Delete(path);
+        }
+
+        [Fact]
+        public void InternalLink_LocationString_PreservesExternalWorkbookReference() {
+            string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".xlsx");
+            using (var doc = ExcelDocument.Create(path)) {
+                var main = doc.AddWorksheet("Main");
+
+                main.SetInternalLink(1, 1, "'[Other.xlsx]Summary'!A1", style: false);
+
+                var wsPartField = typeof(ExcelSheet).GetField("_worksheetPart", BindingFlags.NonPublic | BindingFlags.Instance);
+                Assert.NotNull(wsPartField);
+                var wsPart = (WorksheetPart)wsPartField!.GetValue(main)!;
+                var links = wsPart.Worksheet.Elements<Hyperlinks>().FirstOrDefault();
+                Assert.NotNull(links);
+                var hl = links!.Elements<Hyperlink>().Single();
+                Assert.Equal("'[Other.xlsx]Summary'!A1", hl.Location!.Value);
+            }
+            File.Delete(path);
+        }
+
+        [Fact]
+        public void LinkCellsToInternalSheets_EscapesSpacesAndQuotes() {
+            string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".xlsx");
+            using (var doc = ExcelDocument.Create(path)) {
+                var main = doc.AddWorksheet("Main");
+                doc.AddWorksheet("Summary Sheet");
+                doc.AddWorksheet("Quote's Sheet");
+
+                main.CellValue(1, 1, "Name");
+                main.CellValue(2, 1, "Summary Sheet");
+                main.CellValue(3, 1, "Quote's Sheet");
+
+                main.LinkCellsToInternalSheets("A2:A3", text => text, targetA1: "B2", display: null, styled: false);
+
+                var wsPartField = typeof(ExcelSheet).GetField("_worksheetPart", BindingFlags.NonPublic | BindingFlags.Instance);
+                Assert.NotNull(wsPartField);
+                var wsPart = (WorksheetPart)wsPartField!.GetValue(main)!;
+                var links = wsPart.Worksheet.Elements<Hyperlinks>().FirstOrDefault();
+                Assert.NotNull(links);
+                var hyperlinkItems = links!.Elements<Hyperlink>().ToList();
+                Assert.Equal(2, hyperlinkItems.Count);
+                Assert.Equal("'Summary Sheet'!B2", hyperlinkItems[0].Location!.Value);
+                Assert.Equal("'Quote''s Sheet'!B2", hyperlinkItems[1].Location!.Value);
+            }
+            File.Delete(path);
+        }
+
+        [Fact]
+        public void LinkCellsToInternalSheets_ResolvesSanitizedExistingSheetNames() {
+            string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".xlsx");
+            using (var doc = ExcelDocument.Create(path)) {
+                var main = doc.AddWorksheet("Main");
+                var target = doc.AddWorksheet("Summary??");
+
+                main.CellValue(1, 1, "Name");
+                main.CellValue(2, 1, "Summary??");
+
+                main.LinkCellsToInternalSheets("A2:A2", text => text, targetA1: "B2", display: null, styled: false);
+
+                var wsPartField = typeof(ExcelSheet).GetField("_worksheetPart", BindingFlags.NonPublic | BindingFlags.Instance);
+                Assert.NotNull(wsPartField);
+                var wsPart = (WorksheetPart)wsPartField!.GetValue(main)!;
+                var links = wsPart.Worksheet.Elements<Hyperlinks>().FirstOrDefault();
+                Assert.NotNull(links);
+                var hyperlink = links!.Elements<Hyperlink>().Single();
+                Assert.Equal($"'{target.Name}'!B2", hyperlink.Location!.Value);
+            }
+            File.Delete(path);
+        }
+
+        [Fact]
+        public void Preflight_KeepsValidDrawingAndTable() {
+            string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".xlsx");
+            using (var doc = ExcelDocument.Create(path)) {
+                var s = doc.AddWorksheet("Assets");
+
+                // Headers and one data row
+                s.CellValue(1, 1, "Col1"); s.CellValue(1, 2, "Col2");
+                s.CellValue(2, 1, 1); s.CellValue(2, 2, 2);
+                s.AddTable("A1:B2", hasHeader: true, name: "T", style: OfficeIMO.Excel.ExcelTableStyle.TableStyleMedium2, includeAutoFilter: true);
+
+                // Add a tiny 1x1 PNG as drawing
+                var png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=");
+                s.AddImageAt(1, 1, png, "image/png", widthPixels: 1, heightPixels: 1);
+
+                // Preflight should not remove valid references
+                doc.PreflightWorkbook();
+
+                // Assert drawing exists
+                var wsPartField = typeof(ExcelSheet).GetField("_worksheetPart", BindingFlags.NonPublic | BindingFlags.Instance);
+                var wsPart = (WorksheetPart)wsPartField!.GetValue(s)!;
+                var drawing = wsPart.Worksheet.GetFirstChild<DocumentFormat.OpenXml.Spreadsheet.Drawing>();
+                Assert.NotNull(drawing);
+
+                // Assert tableparts exist
+                var parts = wsPart.Worksheet.Elements<TableParts>().FirstOrDefault();
+                Assert.NotNull(parts);
+                Assert.True(parts!.Elements<TablePart>().Any());
+
+                doc.Save();
+            }
+
+            using (var verify = ExcelDocument.Load(path, new OfficeIMO.Excel.ExcelLoadOptions { AccessMode = OfficeIMO.DocumentAccessMode.ReadOnly })) {
+                Assert.Empty(verify.ValidateOpenXml());
+            }
+            File.Delete(path);
+        }
+    }
+}

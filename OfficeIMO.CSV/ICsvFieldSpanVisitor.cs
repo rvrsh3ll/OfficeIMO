@@ -1,0 +1,105 @@
+#nullable enable
+
+namespace OfficeIMO.CSV;
+
+#if NET8_0_OR_GREATER
+/// <summary>
+/// Receives CSV fields as transient spans during a single-pass read.
+/// </summary>
+internal interface ICsvFieldSpanVisitor
+{
+    /// <summary>
+    /// Visits one parsed field. The span is valid only for the duration of the call.
+    /// </summary>
+    /// <param name="recordIndex">Zero-based emitted record index.</param>
+    /// <param name="fieldIndex">Zero-based field index within the record.</param>
+    /// <param name="value">The field value. Do not capture the span beyond this method.</param>
+    void VisitField(int recordIndex, int fieldIndex, ReadOnlySpan<char> value);
+
+    /// <summary>
+    /// Visits a field that is already known to be an unchanged range of a parser buffer.
+    /// Visitors that retain ranges can override this to avoid reconstructing the source offset
+    /// from a span; other visitors use the normal transient-span callback.
+    /// </summary>
+    void VisitFieldRange(
+        int recordIndex,
+        int fieldIndex,
+        char[] buffer,
+        int start,
+        int length)
+    {
+        VisitField(recordIndex, fieldIndex, buffer.AsSpan(start, length));
+    }
+
+    /// <summary>
+    /// Optionally visits an escaped quoted field without forcing the parser to compact doubled quotes into a scratch buffer.
+    /// </summary>
+    /// <param name="recordIndex">Zero-based emitted record index.</param>
+    /// <param name="fieldIndex">Zero-based field index within the record.</param>
+    /// <param name="escapedValue">The quoted field content without surrounding quotes, preserving doubled quote escape sequences.</param>
+    /// <param name="unescapedLength">Length of the field after CSV quote unescaping.</param>
+    /// <returns><see langword="true" /> when the visitor consumed the escaped field; otherwise the parser falls back to <see cref="VisitField" /> with an unescaped span.</returns>
+    bool TryVisitEscapedField(int recordIndex, int fieldIndex, ReadOnlySpan<char> escapedValue, int unescapedLength)
+    {
+        return false;
+    }
+
+    /// <summary>
+    /// Visits one parsed string field. Implement this to avoid copying fields that were already materialized while parsing quoted records.
+    /// </summary>
+    /// <param name="recordIndex">Zero-based emitted record index.</param>
+    /// <param name="fieldIndex">Zero-based field index within the record.</param>
+    /// <param name="value">The field value.</param>
+    void VisitFieldValue(int recordIndex, int fieldIndex, string value)
+    {
+        VisitField(recordIndex, fieldIndex, value.AsSpan());
+    }
+}
+
+/// <summary>
+/// Optional extension for field-span visitors that only consume selected fields.
+/// </summary>
+internal interface ICsvProjectedFieldSpanVisitor : ICsvFieldSpanVisitor
+{
+    /// <summary>
+    /// Indicates whether the visitor wants to receive a parsed field. The parser still validates record structure and field counts.
+    /// </summary>
+    /// <param name="recordIndex">Zero-based emitted record index.</param>
+    /// <param name="fieldIndex">Zero-based field index within the record.</param>
+    /// <returns><see langword="true" /> to receive the field; otherwise the parser skips materializing or dispatching it when possible.</returns>
+    bool ShouldVisitField(int recordIndex, int fieldIndex);
+}
+
+internal static class CsvFieldSpanProjection
+{
+    internal static bool ShouldVisitField(ICsvProjectedFieldSpanVisitor? projectedVisitor, int recordIndex, int fieldIndex)
+    {
+        return projectedVisitor is null || projectedVisitor.ShouldVisitField(recordIndex, fieldIndex);
+    }
+}
+
+internal readonly struct CsvFieldSpanActionVisitor : ICsvFieldSpanVisitor
+{
+    private readonly CsvFieldSpanAction _action;
+
+    public CsvFieldSpanActionVisitor(CsvFieldSpanAction action)
+    {
+        _action = action ?? throw new ArgumentNullException(nameof(action));
+    }
+
+    public void VisitField(int recordIndex, int fieldIndex, ReadOnlySpan<char> value)
+    {
+        _action(recordIndex, fieldIndex, value);
+    }
+
+    public void VisitFieldRange(
+        int recordIndex,
+        int fieldIndex,
+        char[] buffer,
+        int start,
+        int length)
+    {
+        _action(recordIndex, fieldIndex, buffer.AsSpan(start, length));
+    }
+}
+#endif

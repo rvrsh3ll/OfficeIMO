@@ -1,0 +1,375 @@
+namespace OfficeIMO.Markdown;
+
+/// <summary>
+/// Options controlling HTML rendering style and asset delivery.
+/// </summary>
+public delegate string? MarkdownCodeBlockHtmlRenderer(CodeBlock block, HtmlOptions options);
+
+/// <summary>
+/// Options controlling HTML rendering style and asset delivery.
+/// </summary>
+public delegate string? MarkdownSemanticFencedBlockHtmlRenderer(SemanticFencedBlock block, HtmlOptions options);
+
+/// <summary>
+/// Options controlling HTML rendering style and asset delivery.
+/// </summary>
+public delegate string? MarkdownTocHtmlRenderer(TocOptions tocOptions, IReadOnlyList<TocBlock.Entry> entries, HtmlOptions options);
+
+/// <summary>
+/// Options controlling HTML rendering style and asset delivery.
+/// </summary>
+public delegate string? MarkdownFootnoteSectionHtmlRenderer(IReadOnlyList<FootnoteDefinitionBlock> footnotes, HtmlOptions options);
+
+/// <summary>Resolves an explicitly requested external CSS or JavaScript resource for offline rendering.</summary>
+public delegate string? MarkdownExternalTextResolver(Uri uri);
+
+/// <summary>
+/// Options controlling HTML rendering style and asset delivery.
+/// </summary>
+public sealed class HtmlOptions {
+    /// <summary>
+    /// Creates a fragment-oriented HTML rendering profile for GitHub Flavored Markdown comparison/output.
+    /// This enables cmark-gfm-style task-list HTML, footnote HTML, and the GFM raw HTML tag filter while
+    /// leaving raw HTML otherwise allowed. Use a stricter <see cref="RawHtmlHandling"/> value for untrusted hosts.
+    /// </summary>
+    public static HtmlOptions CreateGitHubFlavoredMarkdownProfile() {
+        return new HtmlOptions {
+            Kind = HtmlKind.Fragment,
+            Style = HtmlStyle.Plain,
+            CssDelivery = CssDelivery.None,
+            BodyClass = null,
+            GitHubTaskListHtml = true,
+            GitHubFootnoteHtml = true,
+            GitHubHtmlTagFilter = true,
+            HeadingIdentifierStyle = MarkdownHeadingIdentifierStyle.GitHub,
+            RawHtmlHandling = RawHtmlHandling.Allow,
+            NormalizeUrlHostsToIdn = false,
+            EscapeNonAsciiText = false
+        };
+    }
+
+    /// <summary>Fragment vs full document. Default: <see cref="HtmlKind.Document"/> when used with <see cref="MarkdownDoc.ToHtmlDocument"/>.</summary>
+    public HtmlKind Kind { get; set; } = HtmlKind.Fragment;
+    /// <summary>Built-in style preset. Default: <see cref="HtmlStyle.Clean"/>.</summary>
+    public HtmlStyle Style { get; set; } = HtmlStyle.Clean;
+    /// <summary>How to deliver CSS. Default: <see cref="CssDelivery.Inline"/>.</summary>
+    public CssDelivery CssDelivery { get; set; } = CssDelivery.Inline;
+    /// <summary>Connectivity mode for external assets (CDNs). Default: <see cref="AssetMode.Online"/>.</summary>
+    public AssetMode AssetMode { get; set; } = AssetMode.Online;
+    /// <summary>Optional explicit CSS URL for <see cref="CssDelivery.LinkHref"/>.</summary>
+    public string? CssHref { get; set; }
+    /// <summary>Additional CSS URLs to include (link or inline depending on <see cref="AssetMode"/>).</summary>
+    public List<string> AdditionalCssHrefs { get; } = new();
+    /// <summary>Additional JS URLs to include (script src or inline depending on <see cref="AssetMode"/>).</summary>
+    public List<string> AdditionalJsHrefs { get; } = new();
+    /// <summary>
+    /// Optional caller-owned resolver used to inline HTTP or HTTPS CSS and JavaScript in offline mode.
+    /// OfficeIMO never performs hidden synchronous network requests; return <see langword="null"/> to omit a resource.
+    /// </summary>
+    public MarkdownExternalTextResolver? ExternalTextResolver { get; set; }
+    /// <summary>Page title for full document rendering. Default: "Document".</summary>
+    public string Title { get; set; } = "Document";
+    /// <summary>Wrap content in &lt;article&gt; with this CSS class. Set to null to avoid wrapper. Default: "markdown-body".</summary>
+    public string? BodyClass { get; set; } = "markdown-body";
+    /// <summary>
+    /// When <c>true</c>, headings render automatic <c>id</c> attributes. Default: <c>true</c> to preserve
+    /// OfficeIMO's existing HTML output behavior.
+    /// </summary>
+    public bool AutoHeadingIdentifiers { get; set; } = true;
+    /// <summary>
+    /// Controls the slug algorithm used for automatic heading identifiers.
+    /// </summary>
+    public MarkdownHeadingIdentifierStyle HeadingIdentifierStyle { get; set; } = MarkdownHeadingIdentifierStyle.OfficeIMO;
+    /// <summary>Include per-heading anchor links (e.g. '#') in HTML rendering. Default: false.</summary>
+    public bool IncludeAnchorLinks { get; set; } = false;
+    /// <summary>When true, show a small anchor icon next to headings (on hover by default).</summary>
+    public bool ShowAnchorIcons { get; set; } = false;
+    /// <summary>Glyph or text for the anchor icon (e.g., "🔗", "¶"). Default: "🔗".</summary>
+    public string AnchorIcon { get; set; } = "🔗";
+    /// <summary>When true, clicking the anchor icon copies a deep link to the clipboard.</summary>
+    public bool CopyHeadingLinkOnClick { get; set; } = false;
+    /// <summary>Render small "Back to top" links for headings at or below the given level. 1=H1, 2=H2, etc. Set to false to disable.</summary>
+    public bool BackToTopLinks { get; set; } = false;
+    /// <summary>Heading level threshold for BackToTopLinks. Default: 2 (H2+).</summary>
+    public int BackToTopMinLevel { get; set; } = 2;
+    /// <summary>Text for the back-to-top link.</summary>
+    public string BackToTopText { get; set; } = "Back to top";
+    /// <summary>When true, writes a small theme toggle control if <see cref="Style"/> supports it. Default: false.</summary>
+    public bool ThemeToggle { get; set; } = false;
+    /// <summary>Emit tags vs manifest-only. Default: <see cref="AssetEmitMode.Emit"/>.</summary>
+    public AssetEmitMode EmitMode { get; set; } = AssetEmitMode.Emit;
+    /// <summary>Optional Prism highlighting configuration.</summary>
+    public PrismOptions? Prism { get; set; }
+    /// <summary>
+    /// Optional callback that can replace HTML emitted for individual code blocks.
+    /// Returning <see langword="null"/> falls back to the default <c>&lt;pre&gt;&lt;code&gt;</c> rendering.
+    /// </summary>
+    public MarkdownCodeBlockHtmlRenderer? CodeBlockHtmlRenderer { get; set; }
+    /// <summary>
+    /// Optional callback that can replace HTML emitted for semantic fenced blocks.
+    /// Returning <see langword="null"/> falls back to standard fenced-code presentation.
+    /// </summary>
+    public MarkdownSemanticFencedBlockHtmlRenderer? SemanticFencedBlockHtmlRenderer { get; set; }
+    /// <summary>
+    /// Optional callback that can replace HTML emitted for realized TOC placeholders.
+    /// Returning <see langword="null"/> falls back to the built-in enhanced TOC rendering.
+    /// </summary>
+    public MarkdownTocHtmlRenderer? TocHtmlRenderer { get; set; }
+    /// <summary>
+    /// Optional callback that can replace HTML emitted for the aggregated footnote section.
+    /// Returning <see langword="null"/> falls back to the built-in section/ordered-list rendering.
+    /// </summary>
+    public MarkdownFootnoteSectionHtmlRenderer? FootnoteSectionHtmlRenderer { get; set; }
+    /// <summary>
+    /// When <c>true</c>, task lists render using GitHub/cmark-gfm style HTML without OfficeIMO task-list CSS classes.
+    /// Default: <c>false</c>.
+    /// </summary>
+    public bool GitHubTaskListHtml { get; set; } = false;
+    /// <summary>
+    /// When <c>true</c>, footnote references and sections render using GitHub/cmark-gfm style ids, data attributes,
+    /// numbering by reference order, and omission of undefined/unused footnotes. Default: <c>false</c>.
+    /// </summary>
+    public bool GitHubFootnoteHtml { get; set; } = false;
+    /// <summary>
+    /// When <c>true</c>, raw HTML rendering applies cmark-gfm's tag filter by escaping the leading
+    /// <c>&lt;</c> on dangerous raw HTML tags such as <c>script</c>, <c>style</c>, <c>textarea</c>, and <c>xmp</c>.
+    /// Default: <c>false</c>.
+    /// </summary>
+    public bool GitHubHtmlTagFilter { get; set; } = false;
+    /// <summary>
+    /// When <c>true</c>, non-ASCII authority host labels in rendered URL attributes are normalized to IDNA.
+    /// Disable this for cmark-gfm-style output, which percent-encodes those host characters instead.
+    /// </summary>
+    public bool NormalizeUrlHostsToIdn { get; set; } = true;
+    /// <summary>
+    /// When <c>true</c>, rendered URL attributes percent-encode the ASCII tilde character (<c>~</c>).
+    /// Default: <c>false</c>; enable for Markdig-compatible URL attribute output.
+    /// </summary>
+    public bool PercentEncodeTildeInUrlAttributes { get; set; } = false;
+    /// <summary>
+    /// When <c>true</c>, HTML text rendering uses the historical .NET encoder behavior that may emit numeric
+    /// character references for non-ASCII text. Set to <c>false</c> for Markdig/cmark-style output that keeps
+    /// non-ASCII text literal while still escaping HTML-sensitive characters such as <c>&amp;</c>, <c>&lt;</c>,
+    /// <c>&gt;</c>, quotes, and apostrophes.
+    /// </summary>
+    public bool EscapeNonAsciiText { get; set; } = true;
+    /// <summary>
+    /// Optional block render extensions that can override HTML emitted for specific block types.
+    /// Later registrations win when block types overlap.
+    /// </summary>
+    public List<MarkdownBlockHtmlRenderExtension> BlockRenderExtensions { get; } = new();
+    /// <summary>
+    /// Optional inline render extensions that can override HTML emitted for specific inline types.
+    /// Later registrations win when inline types overlap.
+    /// </summary>
+    public List<MarkdownInlineHtmlRenderExtension> InlineRenderExtensions { get; } = new();
+    /// <summary>
+    /// Optional block render extensions that can override HTML emitted for parsed blocks with specific final syntax kinds.
+    /// Later registrations win when syntax kinds overlap. These extensions run before type-based block extensions.
+    /// </summary>
+    public List<MarkdownSyntaxBlockHtmlRenderExtension> SyntaxBlockRenderExtensions { get; } = new();
+    /// <summary>
+    /// Optional inline render extensions that can override HTML emitted for parsed inlines with specific final syntax kinds.
+    /// Later registrations win when syntax kinds overlap. These extensions run before type-based inline extensions.
+    /// </summary>
+    public List<MarkdownSyntaxInlineHtmlRenderExtension> SyntaxInlineRenderExtensions { get; } = new();
+    /// <summary>Prefix selectors in emitted CSS with this scope selector to avoid collisions. Default: "article.markdown-body".</summary>
+    public string? CssScopeSelector { get; set; } = "article.markdown-body";
+
+    /// <summary>
+    /// Controls how raw HTML blocks and inline fragments are emitted. Default: <see cref="RawHtmlHandling.Allow"/>.
+    /// For untrusted chat scenarios, prefer <see cref="RawHtmlHandling.Strip"/> or <see cref="RawHtmlHandling.Escape"/>.
+    /// </summary>
+    public RawHtmlHandling RawHtmlHandling { get; set; } = RawHtmlHandling.Allow;
+
+    /// <summary>
+    /// When true, external HTTP(S) links are rendered with <c>target="_blank"</c>.
+    /// Default: false.
+    /// </summary>
+    public bool ExternalLinksTargetBlank { get; set; } = false;
+
+    /// <summary>
+    /// Optional <c>rel</c> attribute value to apply to external HTTP(S) links.
+    /// Common safe value: <c>noopener noreferrer</c>.
+    /// Default: empty (no rel attribute added).
+    /// </summary>
+    public string ExternalLinksRel { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional <c>referrerpolicy</c> value to apply to external HTTP(S) links.
+    /// Common privacy value: <c>no-referrer</c>.
+    /// Default: empty (no referrerpolicy attribute added).
+    /// </summary>
+    public string ExternalLinksReferrerPolicy { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional base URI used for origin-based restrictions during HTML rendering.
+    /// When set and <see cref="RestrictHttpLinksToBaseOrigin"/>/<see cref="RestrictHttpImagesToBaseOrigin"/> are enabled,
+    /// absolute HTTP(S) links/images that are cross-origin are suppressed.
+    /// Default: null.
+    /// </summary>
+    public Uri? BaseUri { get; set; }
+
+    /// <summary>
+    /// When true and <see cref="BaseUri"/> is an absolute HTTP(S) URI, suppresses cross-origin absolute HTTP(S) links.
+    /// Relative links and non-HTTP schemes (e.g., mailto) are not affected.
+    /// Default: false.
+    /// </summary>
+    public bool RestrictHttpLinksToBaseOrigin { get; set; } = false;
+
+    /// <summary>
+    /// When true and <see cref="BaseUri"/> is an absolute HTTP(S) URI, suppresses cross-origin absolute HTTP(S) images.
+    /// Relative image URLs are not affected.
+    /// Default: false.
+    /// </summary>
+    public bool RestrictHttpImagesToBaseOrigin { get; set; } = false;
+
+    /// <summary>
+    /// When true, suppresses absolute external HTTP(S) images regardless of <see cref="BaseUri"/>.
+    /// Useful for privacy-sensitive/untrusted content. Default: false.
+    /// </summary>
+    public bool BlockExternalHttpImages { get; set; } = false;
+
+    /// <summary>
+    /// When true, emits <c>loading="lazy"</c> on rendered <c>&lt;img&gt;</c> tags. Default: false.
+    /// </summary>
+    public bool ImagesLoadingLazy { get; set; } = false;
+
+    /// <summary>
+    /// When true, emits <c>decoding="async"</c> on rendered <c>&lt;img&gt;</c> tags. Default: false.
+    /// </summary>
+    public bool ImagesDecodingAsync { get; set; } = false;
+
+    /// <summary>
+    /// Optional <c>referrerpolicy</c> value to apply to rendered <c>&lt;img&gt;</c> tags.
+    /// Common privacy value: <c>no-referrer</c>. Default: empty (no referrerpolicy attribute added).
+    /// </summary>
+    public string ImagesReferrerPolicy { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional allowlist of host patterns for absolute HTTP(S) links during HTML rendering.
+    /// When non-empty, absolute HTTP(S) links are suppressed unless their host matches an entry.
+    /// Supported patterns:
+    /// - <c>example.com</c>: exact host match
+    /// - <c>.example.com</c>: example.com and any subdomain
+    /// - <c>*.example.com</c>: any subdomain only (not the apex)
+    /// Default: empty (allow all hosts).
+    /// </summary>
+    public List<string> AllowedHttpLinkHosts { get; } = new();
+
+    /// <summary>
+    /// Additional URL schemes permitted for rendered hyperlinks beyond the built-in
+    /// <c>http</c>, <c>https</c>, <c>mailto</c>, <c>tel</c>, <c>ftp</c>,
+    /// and <c>urn</c> schemes.
+    /// Keep this list empty for untrusted Markdown. Add only application-specific
+    /// schemes whose protocol handlers are safe for the rendering host.
+    /// </summary>
+    public List<string> AdditionalAllowedLinkSchemes { get; } = new();
+
+    /// <summary>
+    /// Optional allowlist of host patterns for absolute HTTP(S) images during HTML rendering.
+    /// When non-empty, absolute HTTP(S) images are suppressed unless their host matches an entry.
+    /// Pattern rules match <see cref="AllowedHttpLinkHosts"/>.
+    /// Default: empty (allow all hosts).
+    /// </summary>
+    public List<string> AllowedHttpImageHosts { get; } = new();
+
+    // The following are used internally by the renderer; not part of the public API surface.
+    internal string? ExternalCssOutputPath { get; set; }
+    internal string? _externalCssContentToWrite { get; set; }
+
+    /// <summary>Shared visual theme used to keep Markdown HTML, PDF, and Word exports visually aligned.</summary>
+    public MarkdownVisualTheme? Theme { get; set; }
+
+    /// <summary>Applies the shared default visual theme when <see cref="Theme"/> is omitted and the selected HTML style supports document theming.</summary>
+    public bool ApplyDefaultTheme { get; set; } = true;
+
+    /// <summary>
+    /// Optional additional color overrides for links, headings, and TOC.
+    /// Values set here override colors derived from <see cref="Theme"/>.
+    /// </summary>
+    public MarkdownHtmlColorOverrides ColorOverrides { get; set; } = new MarkdownHtmlColorOverrides();
+
+    // TOC injection (used by higher-level pipelines like Word→Markdown→HTML)
+    /// <summary>
+    /// When true, injects a Table of Contents at the top of the document before rendering HTML.
+    /// This is applied by host pipelines that have access to the MarkdownDoc model.
+    /// </summary>
+    public bool InjectTocAtTop { get; set; } = false;
+    /// <summary>Title for the injected TOC. Default: "Contents".</summary>
+    public string InjectTocTitle { get; set; } = "Contents";
+    /// <summary>Minimum heading level to include in injected TOC. Default: 1.</summary>
+    public int InjectTocMinLevel { get; set; } = 1;
+    /// <summary>Maximum heading level to include in injected TOC. Default: 3.</summary>
+    public int InjectTocMaxLevel { get; set; } = 3;
+    /// <summary>Whether the injected TOC should be ordered (true) or unordered (false). Default: false.</summary>
+    public bool InjectTocOrdered { get; set; } = false;
+    /// <summary>Heading level used for the TOC title. Default: 2.</summary>
+    public int InjectTocTitleLevel { get; set; } = 2;
+
+    internal HtmlOptions CloneForRender(HtmlKind? kind = null) {
+        var clone = new HtmlOptions {
+            Kind = kind ?? Kind,
+            Style = Style,
+            CssDelivery = CssDelivery,
+            AssetMode = AssetMode,
+            CssHref = CssHref,
+            ExternalTextResolver = ExternalTextResolver,
+            Title = Title,
+            BodyClass = BodyClass,
+            AutoHeadingIdentifiers = AutoHeadingIdentifiers,
+            HeadingIdentifierStyle = HeadingIdentifierStyle,
+            IncludeAnchorLinks = IncludeAnchorLinks,
+            ShowAnchorIcons = ShowAnchorIcons,
+            AnchorIcon = AnchorIcon,
+            CopyHeadingLinkOnClick = CopyHeadingLinkOnClick,
+            BackToTopLinks = BackToTopLinks,
+            BackToTopMinLevel = BackToTopMinLevel,
+            BackToTopText = BackToTopText,
+            ThemeToggle = ThemeToggle,
+            EmitMode = EmitMode,
+            Prism = Prism?.CloneForRender(),
+            CodeBlockHtmlRenderer = CodeBlockHtmlRenderer,
+            SemanticFencedBlockHtmlRenderer = SemanticFencedBlockHtmlRenderer,
+            TocHtmlRenderer = TocHtmlRenderer,
+            FootnoteSectionHtmlRenderer = FootnoteSectionHtmlRenderer,
+            GitHubTaskListHtml = GitHubTaskListHtml,
+            GitHubFootnoteHtml = GitHubFootnoteHtml,
+            GitHubHtmlTagFilter = GitHubHtmlTagFilter,
+            NormalizeUrlHostsToIdn = NormalizeUrlHostsToIdn,
+            PercentEncodeTildeInUrlAttributes = PercentEncodeTildeInUrlAttributes,
+            EscapeNonAsciiText = EscapeNonAsciiText,
+            CssScopeSelector = CssScopeSelector,
+            RawHtmlHandling = RawHtmlHandling,
+            ExternalLinksTargetBlank = ExternalLinksTargetBlank,
+            ExternalLinksRel = ExternalLinksRel,
+            ExternalLinksReferrerPolicy = ExternalLinksReferrerPolicy,
+            BaseUri = BaseUri,
+            RestrictHttpLinksToBaseOrigin = RestrictHttpLinksToBaseOrigin,
+            RestrictHttpImagesToBaseOrigin = RestrictHttpImagesToBaseOrigin,
+            BlockExternalHttpImages = BlockExternalHttpImages,
+            ImagesLoadingLazy = ImagesLoadingLazy,
+            ImagesDecodingAsync = ImagesDecodingAsync,
+            ImagesReferrerPolicy = ImagesReferrerPolicy,
+            Theme = Theme?.Clone(),
+            ApplyDefaultTheme = ApplyDefaultTheme,
+            ColorOverrides = ColorOverrides?.CloneForRender() ?? new MarkdownHtmlColorOverrides(),
+            InjectTocAtTop = InjectTocAtTop,
+            InjectTocTitle = InjectTocTitle,
+            InjectTocMinLevel = InjectTocMinLevel,
+            InjectTocMaxLevel = InjectTocMaxLevel,
+            InjectTocOrdered = InjectTocOrdered,
+            InjectTocTitleLevel = InjectTocTitleLevel
+        };
+        clone.AdditionalCssHrefs.AddRange(AdditionalCssHrefs);
+        clone.AdditionalJsHrefs.AddRange(AdditionalJsHrefs);
+        clone.BlockRenderExtensions.AddRange(BlockRenderExtensions);
+        clone.InlineRenderExtensions.AddRange(InlineRenderExtensions);
+        clone.SyntaxBlockRenderExtensions.AddRange(SyntaxBlockRenderExtensions);
+        clone.SyntaxInlineRenderExtensions.AddRange(SyntaxInlineRenderExtensions);
+        clone.AllowedHttpLinkHosts.AddRange(AllowedHttpLinkHosts);
+        clone.AdditionalAllowedLinkSchemes.AddRange(AdditionalAllowedLinkSchemes);
+        clone.AllowedHttpImageHosts.AddRange(AllowedHttpImageHosts);
+        return clone;
+    }
+}

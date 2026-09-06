@@ -1,7 +1,12 @@
-using DocumentFormat.OpenXml.Wordprocessing;
 using DocumentFormat.OpenXml.Drawing.Wordprocessing;
 using DocumentFormat.OpenXml.Office2010.Word.DrawingShape;
+using DocumentFormat.OpenXml.Wordprocessing;
+using A = DocumentFormat.OpenXml.Drawing;
+using DrawingHorizontalAlignment = DocumentFormat.OpenXml.Drawing.Wordprocessing.HorizontalAlignment;
+using DrawingVerticalAlignment = DocumentFormat.OpenXml.Drawing.Wordprocessing.VerticalAlignment;
 using Graphic = DocumentFormat.OpenXml.Drawing.Graphic;
+using V = DocumentFormat.OpenXml.Vml;
+using WordDrawing = DocumentFormat.OpenXml.Wordprocessing.Drawing;
 
 namespace OfficeIMO.Word {
     /// <summary>
@@ -10,8 +15,9 @@ namespace OfficeIMO.Word {
     public class WordTextBox : WordElement {
         private readonly WordDocument _document;
         private readonly WordParagraph _wordParagraph;
-        private readonly WordHeaderFooter _headerFooter;
-        private Run _run => _wordParagraph._run;
+        private readonly WordHeaderFooter? _headerFooter;
+        private Run _run => _wordParagraph._run!;
+        private V.TextBox? _vmlTextBox;
 
         /// <summary>
         /// Add a new text box to the document
@@ -19,10 +25,9 @@ namespace OfficeIMO.Word {
         /// <param name="wordDocument"></param>
         /// <param name="text"></param>
         /// <param name="wrapTextImage"></param>
-        public WordTextBox(WordDocument wordDocument, string text, WrapTextImage wrapTextImage) {
+        public WordTextBox(WordDocument wordDocument, string text, WordImageTextWrapping wrapTextImage) {
             var paragraph = new WordParagraph(wordDocument, true, true);
             wordDocument.AddParagraph(paragraph);
-            paragraph._run.Append(new RunProperties());
             AddAlternateContent(wordDocument, paragraph, text, wrapTextImage);
 
             _document = wordDocument;
@@ -35,9 +40,10 @@ namespace OfficeIMO.Word {
         /// <param name="wordDocument"></param>
         /// <param name="paragraph"></param>
         /// <param name="run"></param>
-        public WordTextBox(WordDocument wordDocument, Paragraph paragraph, Run run) {
+        internal WordTextBox(WordDocument wordDocument, Paragraph paragraph, Run run) {
             _document = wordDocument;
             _wordParagraph = new WordParagraph(wordDocument, paragraph, run);
+            _vmlTextBox = run.Descendants<V.TextBox>().FirstOrDefault();
         }
 
         /// <summary>
@@ -47,12 +53,11 @@ namespace OfficeIMO.Word {
         /// <param name="wordHeaderFooter"></param>
         /// <param name="text"></param>
         /// <param name="wrapTextImage"></param>
-        public WordTextBox(WordDocument wordDocument, WordHeaderFooter wordHeaderFooter, string text, WrapTextImage wrapTextImage) {
+        public WordTextBox(WordDocument wordDocument, WordHeaderFooter wordHeaderFooter, string text, WordImageTextWrapping wrapTextImage) {
             _document = wordDocument;
             _headerFooter = wordHeaderFooter;
 
             var paragraph = wordHeaderFooter.AddParagraph(newRun: true);
-            paragraph._run.Append(new RunProperties());
             AddAlternateContent(wordDocument, paragraph, text, wrapTextImage);
 
             _wordParagraph = paragraph;
@@ -65,10 +70,9 @@ namespace OfficeIMO.Word {
         /// <param name="paragraph"></param>
         /// <param name="text"></param>
         /// <param name="wrapTextImage"></param>
-        public WordTextBox(WordDocument wordDocument, WordParagraph paragraph, string text, WrapTextImage wrapTextImage) {
+        public WordTextBox(WordDocument wordDocument, WordParagraph paragraph, string text, WordImageTextWrapping wrapTextImage) {
             _document = wordDocument;
 
-            paragraph._run.Append(new RunProperties());
             AddAlternateContent(wordDocument, paragraph, text, wrapTextImage);
 
             _wordParagraph = paragraph;
@@ -80,35 +84,45 @@ namespace OfficeIMO.Word {
         /// </summary>
         public List<WordParagraph> Paragraphs {
             get {
-                if (_textBoxInfo2 != null) {
-                    return _textBoxInfo2.Descendants<Run>().Select(run => new WordParagraph(_document, _paragraph, run)).ToList();
+                var content = GetTextBoxContent();
+                if (content == null) {
+                    return new List<WordParagraph>();
                 }
-                return new List<WordParagraph>();
+
+                if (_textBoxInfo2 != null) {
+                    return content.Descendants<Run>().Select(run => new WordParagraph(_document, _paragraph!, run)).ToList();
+                }
+
+                return content.Descendants<Run>()
+                    .Select(run => new WordParagraph(_document, run.Ancestors<Paragraph>().FirstOrDefault()!, run))
+                    .ToList();
+            }
+        }
+        /// <summary>
+        /// Gets the direct child elements contained in the text box in document order.
+        /// </summary>
+        public List<WordElement> Elements => GetWordElements();
+
+        /// <summary>Gets or sets the accessibility description for the text box.</summary>
+        public string? Description {
+            get => (_anchor?.GetFirstChild<DocProperties>() ?? _inline?.DocProperties)?.Description?.Value
+                ?? VmlShape?.Alternate?.Value;
+            set {
+                DocProperties? properties = _anchor?.GetFirstChild<DocProperties>() ?? _inline?.DocProperties;
+                if (properties != null) properties.Description = value;
+                if (VmlShape != null) VmlShape.Alternate = value;
             }
         }
 
         /// <summary>
         /// Gets or sets horizontal relative position of the text box
         /// </summary>
-        public HorizontalRelativePositionValues? HorizontalPositionRelativeFrom {
-            get {
-                var anchor = _anchor;
-                if (anchor != null) {
-                    var horizontalPosition = anchor.HorizontalPosition;
-                    if (horizontalPosition != null) {
-                        return horizontalPosition.RelativeFrom;
-                    }
-                }
-
-                return null;
-            }
+        public WordHorizontalRelativePosition? HorizontalPositionRelativeFrom {
+            get => _anchor?.HorizontalPosition?.RelativeFrom?.Value.ToOfficeEnum();
             set {
-                var anchor = _anchor;
-                if (anchor != null) {
-                    var horizontalPosition = anchor.HorizontalPosition;
-                    if (horizontalPosition != null) {
-                        horizontalPosition.RelativeFrom = value;
-                    }
+                var horizontalPosition = _anchor?.HorizontalPosition;
+                if (horizontalPosition != null && value.HasValue) {
+                    horizontalPosition.RelativeFrom = value.Value.ToOpenXml();
                 }
             }
         }
@@ -116,39 +130,40 @@ namespace OfficeIMO.Word {
         /// <summary>
         /// Gets or sets the wrap text of the text box
         /// </summary>
-        public WrapTextImage? WrapText {
-            get => WordWrapTextImage.GetWrapTextImage(_anchor, _inline);
-            set => WordWrapTextImage.SetWrapTextImage(_drawing, _anchor, _inline, value);
+        public WordImageTextWrapping? WrapText {
+            get => WordWrapTextImage.GetWrapTextImage(_anchor!, _inline!);
+            set => WordWrapTextImage.SetWrapTextImage(_drawing!, _anchor!, _inline!, value);
         }
 
         /// <summary>
         /// Gets or sets the horizontal alignment of the text box
         /// </summary>
-        public WordHorizontalAlignmentValues HorizontalAlignment {
+        public WordTextBoxHorizontalAlignment HorizontalAlignment {
             get {
-                var anchor = _anchor;
-                if (anchor != null) {
-                    var horizontalPosition = anchor.HorizontalPosition;
-                    if (horizontalPosition != null && horizontalPosition.HorizontalAlignment != null) {
-                        return HorizontalAlignmentHelper.FromString(horizontalPosition.HorizontalAlignment.Text);
-                    }
+                var alignmentText = _anchor?.HorizontalPosition?.HorizontalAlignment?.Text;
+                if (alignmentText != null) {
+                    return WordTextBoxHorizontalAlignmentSerializer.FromString(alignmentText);
                 }
-                return WordHorizontalAlignmentValues.Center;
+
+                return WordTextBoxHorizontalAlignment.Center;
             }
             set {
                 var anchor = _anchor;
-                if (anchor != null) {
-                    var horizontalPosition = anchor.HorizontalPosition;
-                    if (horizontalPosition == null) {
-                        horizontalPosition = AddHorizontalPosition(anchor, true);
-                    }
-                    if (horizontalPosition.HorizontalAlignment == null) {
-                        horizontalPosition.HorizontalAlignment = new HorizontalAlignment() {
-                            Text = HorizontalAlignmentHelper.ToString(value)
-                        };
-                    } else {
-                        horizontalPosition.HorizontalAlignment.Text = HorizontalAlignmentHelper.ToString(value);
-                    }
+                if (anchor == null) {
+                    return;
+                }
+
+                var horizontalPosition = anchor.HorizontalPosition ?? AddHorizontalPosition(anchor);
+                if (horizontalPosition == null) {
+                    return;
+                }
+
+                if (horizontalPosition.HorizontalAlignment == null) {
+                    horizontalPosition.HorizontalAlignment = new DrawingHorizontalAlignment() {
+                        Text = WordTextBoxHorizontalAlignmentSerializer.ToString(value)
+                    };
+                } else {
+                    horizontalPosition.HorizontalAlignment.Text = WordTextBoxHorizontalAlignmentSerializer.ToString(value);
                 }
             }
         }
@@ -156,24 +171,12 @@ namespace OfficeIMO.Word {
         /// <summary>
         /// Gets or sets the relative4 vertical alignment of the text box
         /// </summary>
-        public VerticalRelativePositionValues VerticalPositionRelativeFrom {
-            get {
-                var anchor = _anchor;
-                if (anchor != null) {
-                    var verticalPosition = anchor.VerticalPosition;
-                    if (verticalPosition != null) {
-                        return verticalPosition.RelativeFrom;
-                    }
-                }
-                return VerticalRelativePositionValues.Page;
-            }
+        public WordVerticalRelativePosition VerticalPositionRelativeFrom {
+            get => _anchor?.VerticalPosition?.RelativeFrom?.Value.ToOfficeEnum() ?? WordVerticalRelativePosition.Page;
             set {
-                var anchor = _anchor;
-                if (anchor != null) {
-                    var verticalPosition = anchor.VerticalPosition;
-                    if (verticalPosition != null) {
-                        verticalPosition.RelativeFrom = value;
-                    }
+                var verticalPosition = _anchor?.VerticalPosition;
+                if (verticalPosition != null) {
+                    verticalPosition.RelativeFrom = value.ToOpenXml();
                 }
             }
         }
@@ -183,23 +186,15 @@ namespace OfficeIMO.Word {
         /// </summary>
         public int? VerticalPositionOffset {
             get {
-                var anchor = _anchor;
-                if (anchor != null) {
-                    var verticalPosition = anchor.VerticalPosition;
-                    if (verticalPosition != null) {
-                        return int.Parse(verticalPosition.PositionOffset.Text);
-                    }
-                }
-
-                return null;
+                var positionOffset = _anchor?.VerticalPosition?.PositionOffset?.Text;
+                return int.TryParse(positionOffset, out var parsed) ? parsed : null;
             }
             set {
                 var anchor = _anchor;
-                if (anchor != null) {
-                    var verticalPosition = AddVerticalPosition(anchor, true);
-                    if (verticalPosition != null) {
-                        verticalPosition.PositionOffset.Text = value.ToString();
-                    }
+                var verticalPosition = anchor == null ? null : AddVerticalPosition(anchor, true);
+                if (verticalPosition != null && value.HasValue) {
+                    verticalPosition.PositionOffset ??= new PositionOffset();
+                    verticalPosition.PositionOffset.Text = value.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 }
             }
         }
@@ -210,22 +205,15 @@ namespace OfficeIMO.Word {
         /// </summary>
         public int? HorizontalPositionOffset {
             get {
-                var anchor = _anchor;
-                if (anchor != null) {
-                    var horizontalPosition = anchor.HorizontalPosition;
-                    if (horizontalPosition != null && horizontalPosition.PositionOffset != null) {
-                        return int.Parse(horizontalPosition.PositionOffset.Text);
-                    }
-                }
-                return null;
+                var positionOffset = _anchor?.HorizontalPosition?.PositionOffset?.Text;
+                return int.TryParse(positionOffset, out var parsed) ? parsed : null;
             }
             set {
                 var anchor = _anchor;
-                if (anchor != null) {
-                    var horizontalPosition = AddHorizontalPosition(anchor, true);
-                    if (horizontalPosition != null) {
-                        horizontalPosition.PositionOffset.Text = value.ToString();
-                    }
+                var horizontalPosition = anchor == null ? null : AddHorizontalPosition(anchor, true);
+                if (horizontalPosition != null && value.HasValue) {
+                    horizontalPosition.PositionOffset ??= new PositionOffset();
+                    horizontalPosition.PositionOffset.Text = value.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 }
             }
         }
@@ -234,15 +222,9 @@ namespace OfficeIMO.Word {
         /// Allows to set horizontally position of the text box in centimeters
         /// </summary>
         public double? HorizontalPositionOffsetCentimeters {
-            get {
-                if (HorizontalPositionOffset != null) {
-                    return Helpers.ConvertEmusToCentimeters(HorizontalPositionOffset.Value);
-                }
-
-                return null;
-            }
+            get => HorizontalPositionOffset.HasValue ? Helpers.ConvertEmusToCentimeters(HorizontalPositionOffset.Value) : null;
             set {
-                if (value != null) {
+                if (value.HasValue) {
                     HorizontalPositionOffset = Helpers.ConvertCentimetersToEmus(value.Value);
                 }
             }
@@ -252,16 +234,10 @@ namespace OfficeIMO.Word {
         /// Allows to set vertically position of the text box in centimeters
         /// </summary>
         public double? VerticalPositionOffsetCentimeters {
-            get {
-                if (VerticalPositionOffset != null) {
-                    return Helpers.ConvertEmusToCentimeters(VerticalPositionOffset.Value);
-                }
-
-                return null;
-            }
+            get => VerticalPositionOffset.HasValue ? Helpers.ConvertEmusToCentimeters(VerticalPositionOffset.Value) : null;
 
             set {
-                if (value != null) {
+                if (value.HasValue) {
                     VerticalPositionOffset = Helpers.ConvertCentimetersToEmus(value.Value);
                 }
             }
@@ -272,44 +248,36 @@ namespace OfficeIMO.Word {
         /// </summary>
         public int? RelativeWidthPercentage {
             get {
-                var anchor = _anchor;
-                if (anchor != null) {
-                    var relativeWidth = anchor.ChildElements.OfType<DocumentFormat.OpenXml.Office2010.Word.Drawing.RelativeWidth>().FirstOrDefault();
-                    if (relativeWidth != null) {
-                        if (relativeWidth.PercentageWidth != null) {
-                            return int.Parse(relativeWidth.PercentageWidth.Text) / 1000;
-                        }
-                    }
+                var percentageWidth = _anchor?
+                    .ChildElements.OfType<DocumentFormat.OpenXml.Office2010.Word.Drawing.RelativeWidth>()
+                    .FirstOrDefault()?
+                    .PercentageWidth?.Text;
+                if (percentageWidth != null) {
+                    return int.Parse(percentageWidth) / 1000;
                 }
+
                 return null;
             }
             set {
                 var anchor = _anchor;
-                if (anchor != null) {
-                    if (value != null) {
-                        var setValue = value.Value * 1000;
-
-                        var relativeWidth = anchor.ChildElements.OfType<DocumentFormat.OpenXml.Office2010.Word.Drawing.RelativeWidth>().FirstOrDefault();
-                        if (relativeWidth == null) {
-                            relativeWidth = new DocumentFormat.OpenXml.Office2010.Word.Drawing.RelativeWidth() {
-                                PercentageWidth = new DocumentFormat.OpenXml.Office2010.Word.Drawing.PercentageWidth() {
-                                    Text = setValue.ToString()
-                                }
-                            };
-                            anchor.Append(relativeWidth);
-                        } else {
-                            if (relativeWidth.PercentageWidth == null) {
-                                relativeWidth.PercentageWidth = new DocumentFormat.OpenXml.Office2010.Word.Drawing.PercentageWidth() {
-                                    Text = setValue.ToString()
-                                };
-                            } else {
-                                relativeWidth.PercentageWidth.Text = setValue.ToString();
-                            }
-                        }
-                    } else {
-                        // value is null
-                    }
+                if (anchor == null || value == null) {
+                    return;
                 }
+
+                var setValue = value.Value * 1000;
+                var relativeWidth = anchor.ChildElements.OfType<DocumentFormat.OpenXml.Office2010.Word.Drawing.RelativeWidth>().FirstOrDefault();
+                if (relativeWidth == null) {
+                    relativeWidth = new DocumentFormat.OpenXml.Office2010.Word.Drawing.RelativeWidth() {
+                        PercentageWidth = new DocumentFormat.OpenXml.Office2010.Word.Drawing.PercentageWidth() {
+                            Text = setValue.ToString()
+                        }
+                    };
+                    anchor.Append(relativeWidth);
+                    return;
+                }
+
+                relativeWidth.PercentageWidth ??= new DocumentFormat.OpenXml.Office2010.Word.Drawing.PercentageWidth();
+                relativeWidth.PercentageWidth.Text = setValue.ToString();
             }
         }
 
@@ -318,85 +286,121 @@ namespace OfficeIMO.Word {
         /// </summary>
         public int? RelativeHeightPercentage {
             get {
-                var anchor = _anchor;
-                if (anchor != null) {
-                    var relativeHeight = anchor.ChildElements.OfType<DocumentFormat.OpenXml.Office2010.Word.Drawing.RelativeHeight>().FirstOrDefault();
-                    if (relativeHeight != null) {
-                        if (relativeHeight.PercentageHeight != null) {
-                            return int.Parse(relativeHeight.PercentageHeight.Text) / 1000;
-                        }
-                    }
+                var percentageHeight = _anchor?
+                    .ChildElements.OfType<DocumentFormat.OpenXml.Office2010.Word.Drawing.RelativeHeight>()
+                    .FirstOrDefault()?
+                    .PercentageHeight?.Text;
+                if (percentageHeight != null) {
+                    return int.Parse(percentageHeight) / 1000;
                 }
+
                 return null;
             }
             set {
                 var anchor = _anchor;
-                if (anchor != null) {
-                    if (value != null) {
-                        var setValue = value.Value * 1000;
-
-                        var relativeHeight = anchor.ChildElements.OfType<DocumentFormat.OpenXml.Office2010.Word.Drawing.RelativeHeight>().FirstOrDefault();
-                        if (relativeHeight == null) {
-                            relativeHeight = new DocumentFormat.OpenXml.Office2010.Word.Drawing.RelativeHeight() {
-                                PercentageHeight = new DocumentFormat.OpenXml.Office2010.Word.Drawing.PercentageHeight() {
-                                    Text = setValue.ToString()
-                                }
-                            };
-                            anchor.Append(relativeHeight);
-                        } else {
-                            if (relativeHeight.PercentageHeight == null) {
-                                relativeHeight.PercentageHeight = new DocumentFormat.OpenXml.Office2010.Word.Drawing.PercentageHeight() {
-                                    Text = setValue.ToString()
-                                };
-                            } else {
-                                relativeHeight.PercentageHeight.Text = setValue.ToString();
-                            }
-                        }
-                    } else {
-                        // value is null
-                    }
+                if (anchor == null || value == null) {
+                    return;
                 }
+
+                var setValue = value.Value * 1000;
+                var relativeHeight = anchor.ChildElements.OfType<DocumentFormat.OpenXml.Office2010.Word.Drawing.RelativeHeight>().FirstOrDefault();
+                if (relativeHeight == null) {
+                    relativeHeight = new DocumentFormat.OpenXml.Office2010.Word.Drawing.RelativeHeight() {
+                        PercentageHeight = new DocumentFormat.OpenXml.Office2010.Word.Drawing.PercentageHeight() {
+                            Text = setValue.ToString()
+                        }
+                    };
+                    anchor.Append(relativeHeight);
+                    return;
+                }
+
+                relativeHeight.PercentageHeight ??= new DocumentFormat.OpenXml.Office2010.Word.Drawing.PercentageHeight();
+                relativeHeight.PercentageHeight.Text = setValue.ToString();
             }
         }
 
         /// <summary>
         /// Gets text body properties
         /// </summary>
-        public TextBodyProperties TextBodyProperties => _wordprocessingShape.ChildElements.OfType<TextBodyProperties>().FirstOrDefault();
+        internal TextBodyProperties TextBodyProperties {
+            get {
+                var wsp = _wordprocessingShape ?? throw new InvalidOperationException("Text box shape is not available.");
+                var tbp = wsp.ChildElements.OfType<TextBodyProperties>().FirstOrDefault();
+                if (tbp == null) {
+                    tbp = new TextBodyProperties();
+                    wsp.Append(tbp);
+                }
+                return tbp;
+            }
+        }
 
         /// <summary>
-        /// Gets or sets auto-fit to text size
+        /// Gets or sets the AutoFit behavior for the textbox.
         /// </summary>
-        public bool AutoFitToTextSize {
-            get => TextBodyProperties.ChildElements.OfType<DocumentFormat.OpenXml.Drawing.ShapeAutoFit>().Any();
+        public WordTextBoxAutoFitType AutoFit {
+            get {
+                if (TextBodyProperties.GetFirstChild<DocumentFormat.OpenXml.Drawing.ShapeAutoFit>() != null) {
+                    return WordTextBoxAutoFitType.ResizeShapeToFitText;
+                }
+
+                if (TextBodyProperties.GetFirstChild<DocumentFormat.OpenXml.Drawing.NormalAutoFit>() != null) {
+                    return WordTextBoxAutoFitType.ShrinkTextOnOverflow;
+                }
+
+                return WordTextBoxAutoFitType.NoAutoFit;
+            }
             set {
-                TextBodyProperties.RemoveChild(TextBodyProperties.ChildElements.OfType<DocumentFormat.OpenXml.Drawing.ShapeAutoFit>().FirstOrDefault());
-                if (value) {
-                    TextBodyProperties.Append(new DocumentFormat.OpenXml.Drawing.ShapeAutoFit());
-                } else {
-                    TextBodyProperties.Append(new DocumentFormat.OpenXml.Drawing.NoAutoFit());
+                TextBodyProperties.RemoveAllChildren<DocumentFormat.OpenXml.Drawing.ShapeAutoFit>();
+                TextBodyProperties.RemoveAllChildren<DocumentFormat.OpenXml.Drawing.NormalAutoFit>();
+                TextBodyProperties.RemoveAllChildren<DocumentFormat.OpenXml.Drawing.NoAutoFit>();
+
+                switch (value) {
+                    case WordTextBoxAutoFitType.ResizeShapeToFitText:
+                        TextBodyProperties.Append(new DocumentFormat.OpenXml.Drawing.ShapeAutoFit());
+                        break;
+                    case WordTextBoxAutoFitType.ShrinkTextOnOverflow:
+                        TextBodyProperties.Append(new DocumentFormat.OpenXml.Drawing.NormalAutoFit());
+                        break;
+                    default:
+                        TextBodyProperties.Append(new DocumentFormat.OpenXml.Drawing.NoAutoFit());
+                        break;
                 }
             }
         }
 
         /// <summary>
+        /// Gets or sets whether the textbox resizes to fit text. Use <see cref="AutoFit"/> for more options.
+        /// </summary>
+        public bool AutoFitToTextSize {
+            get => AutoFit == WordTextBoxAutoFitType.ResizeShapeToFitText;
+            set => AutoFit = value ? WordTextBoxAutoFitType.ResizeShapeToFitText : WordTextBoxAutoFitType.NoAutoFit;
+        }
+
+        /// <summary>
         /// Sets size relative horizontally
         /// </summary>
-        public DocumentFormat.OpenXml.Office2010.Word.Drawing.SizeRelativeHorizontallyValues? SizeRelativeHorizontally {
-            get {
-                var anchor = _anchor;
-                if (anchor != null) {
-                    var relativeWidth = anchor.ChildElements.OfType<DocumentFormat.OpenXml.Office2010.Word.Drawing.RelativeWidth>().FirstOrDefault();
-                    if (relativeWidth != null) {
-                        if (relativeWidth.ObjectId != null) {
-                            return relativeWidth.ObjectId;
-                        }
-                    }
-                }
-                return null;
-            }
+        public WordTextBoxHorizontalSizeReference? SizeRelativeHorizontally {
+            get => _anchor?
+                .ChildElements.OfType<DocumentFormat.OpenXml.Office2010.Word.Drawing.RelativeWidth>()
+                .FirstOrDefault()?
+                .ObjectId?.Value.ToOfficeEnum();
             set {
-
+                var anchor = _anchor;
+                if (anchor == null) return;
+                var relativeWidth = anchor.ChildElements
+                    .OfType<DocumentFormat.OpenXml.Office2010.Word.Drawing.RelativeWidth>()
+                    .FirstOrDefault();
+                if (!value.HasValue) {
+                    relativeWidth?.Remove();
+                    return;
+                }
+                relativeWidth ??= new DocumentFormat.OpenXml.Office2010.Word.Drawing.RelativeWidth();
+                relativeWidth.ObjectId = value.Value.ToOpenXml();
+                relativeWidth.PercentageWidth ??= new DocumentFormat.OpenXml.Office2010.Word.Drawing.PercentageWidth();
+                if (string.IsNullOrWhiteSpace(relativeWidth.PercentageWidth.Text)) {
+                    relativeWidth.PercentageWidth.Text = "0";
+                }
+                if (relativeWidth.Parent == null) anchor.Append(relativeWidth);
             }
         }
 
@@ -404,30 +408,14 @@ namespace OfficeIMO.Word {
         /// Width of the text box
         /// </summary>
         public Int64 Width {
-            get {
-                var anchor = _anchor;
-                if (anchor != null) {
-                    var extent = anchor.ChildElements.OfType<Extent>().FirstOrDefault();
-                    if (extent != null) {
-                        return Int64.Parse(extent.Cx);
-                    }
-                }
-                return 0;
-            }
+            get => _anchorExtent?.Cx?.Value ?? 0L;
             set {
                 var anchor = _anchor;
-                if (anchor != null) {
-                    var extent = anchor.ChildElements.OfType<DocumentFormat.OpenXml.Drawing.Wordprocessing.Extent>().FirstOrDefault();
-                    if (extent == null) {
-                        extent = new DocumentFormat.OpenXml.Drawing.Wordprocessing.Extent() {
-                            Cx = value,
-                            Cy = 0L
-                        };
-                        anchor.Append(extent);
-                    } else {
-                        extent.Cx = value;
-                    }
+                if (anchor == null) {
+                    return;
                 }
+
+                EnsureAnchorExtent(anchor, cx: value, cy: 0L).Cx = value;
             }
         }
 
@@ -435,30 +423,46 @@ namespace OfficeIMO.Word {
         /// Height of the text box
         /// </summary>
         public Int64 Height {
-            get {
-                var anchor = _anchor;
-                if (anchor != null) {
-                    var extent = anchor.ChildElements.OfType<DocumentFormat.OpenXml.Drawing.Wordprocessing.Extent>().FirstOrDefault();
-                    if (extent != null) {
-                        return Int64.Parse(extent.Cy);
-                    }
-                }
-                return 0;
-            }
+            get => _anchorExtent?.Cy?.Value ?? 0L;
             set {
                 var anchor = _anchor;
-                if (anchor != null) {
-                    var extent = anchor.ChildElements.OfType<DocumentFormat.OpenXml.Drawing.Wordprocessing.Extent>().FirstOrDefault();
-                    if (extent == null) {
-                        extent = new DocumentFormat.OpenXml.Drawing.Wordprocessing.Extent() {
-                            Cx = 0L,
-                            Cy = value
-                        };
-                        anchor.Append(extent);
-                    } else {
-                        extent.Cy = value;
-                    }
+                if (anchor == null) {
+                    return;
                 }
+
+                EnsureAnchorExtent(anchor, cx: 0L, cy: value).Cy = value;
+            }
+        }
+
+        /// <summary>Gets or sets the DrawingML text-box fill color as a six-digit RGB value.</summary>
+        public string FillColorHex {
+            get {
+                A.RgbColorModelHex? rgb = DrawingShapeProperties?
+                    .GetFirstChild<A.SolidFill>()?
+                    .GetFirstChild<A.RgbColorModelHex>();
+                return rgb?.Val?.Value?.TrimStart('#').ToUpperInvariant() ?? string.Empty;
+            }
+            set {
+                string normalized = Helpers.NormalizeSixDigitRgb(value, nameof(value));
+                ShapeProperties? properties = DrawingShapeProperties;
+                if (properties == null) return;
+                properties.RemoveAllChildren<A.NoFill>();
+                properties.RemoveAllChildren<A.SolidFill>();
+                properties.RemoveAllChildren<A.GradientFill>();
+                properties.RemoveAllChildren<A.BlipFill>();
+                properties.RemoveAllChildren<A.PatternFill>();
+                properties.RemoveAllChildren<A.GroupFill>();
+                var fill = new A.SolidFill();
+                WordDrawingFillOrdering.InsertAfterGeometryOrBeforeFormatting(properties, fill);
+                fill.Append(new A.RgbColorModelHex { Val = normalized });
+            }
+        }
+
+        /// <summary>Gets or sets the native DrawingML anchor stacking order.</summary>
+        public uint ZOrder {
+            get => _anchor?.RelativeHeight?.Value ?? 0U;
+            set {
+                if (_anchor != null) _anchor.RelativeHeight = value;
             }
         }
 
@@ -488,69 +492,44 @@ namespace OfficeIMO.Word {
             }
         }
 
-        private Drawing _drawing {
-            get {
-                var alternateContent = _run.ChildElements.OfType<AlternateContent>().FirstOrDefault();
-                if (alternateContent != null) {
-                    var alternateContentChoice = alternateContent.ChildElements.OfType<AlternateContentChoice>().FirstOrDefault();
-                    if (alternateContentChoice != null) {
-                        var drawing = alternateContentChoice.ChildElements.OfType<DocumentFormat.OpenXml.Wordprocessing.Drawing>().FirstOrDefault();
-                        if (drawing != null) {
-                            return drawing;
-                        }
-                    }
-                }
+        private AlternateContentChoice? _alternateContentChoice =>
+            _run.ChildElements.OfType<AlternateContent>().FirstOrDefault()?
+                .ChildElements.OfType<AlternateContentChoice>().FirstOrDefault();
 
-                return null;
-            }
-        }
+        private WordDrawing? _drawing => _alternateContentChoice?.ChildElements.OfType<WordDrawing>().FirstOrDefault();
 
-        private Inline _inline {
-            get {
-                var alternateContent = _run.ChildElements.OfType<AlternateContent>().FirstOrDefault();
-                if (alternateContent != null) {
-                    var alternateContentChoice = alternateContent.ChildElements.OfType<AlternateContentChoice>().FirstOrDefault();
-                    if (alternateContentChoice != null) {
-                        var drawing = alternateContentChoice.ChildElements.OfType<DocumentFormat.OpenXml.Wordprocessing.Drawing>().FirstOrDefault();
-                        if (drawing != null) {
-                            var inline = drawing.Inline;
-                            if (inline != null) {
-                                return inline;
-                            }
-                        }
-                    }
-                }
-                return null;
-            }
-        }
+        private Inline? _inline => _drawing?.Inline;
 
-        private Anchor _anchor {
-            get {
-                var alternateContent = _run.ChildElements.OfType<AlternateContent>().FirstOrDefault();
-                if (alternateContent != null) {
-                    var alternateContentChoice = alternateContent.ChildElements.OfType<AlternateContentChoice>().FirstOrDefault();
-                    if (alternateContentChoice != null) {
-                        var drawing = alternateContentChoice.ChildElements.OfType<DocumentFormat.OpenXml.Wordprocessing.Drawing>().FirstOrDefault();
-                        if (drawing != null) {
-                            var anchor = drawing.Anchor;
-                            if (anchor != null) {
-                                return anchor;
-                            }
-                        }
-                    }
-                }
-                return null;
-            }
-        }
+        private Anchor? _anchor => _drawing?.Anchor;
 
-        internal static Anchor ConvertInlineToAnchor(Inline inline, WrapTextImage wrapTextImage) {
+        internal WordDrawing? Drawing => _drawing;
+
+        internal Inline? Inline => _inline;
+
+        internal Anchor? Anchor => _anchor;
+
+        internal V.Shape? VmlShape => _vmlTextBox?.Ancestors<V.Shape>().FirstOrDefault();
+
+        internal V.TextBox? VmlTextBox => _vmlTextBox;
+
+        internal WordDocument Document => _document;
+
+        internal TextBoxContent? Content => GetTextBoxContent();
+
+        internal ShapeProperties? DrawingShapeProperties =>
+            _wordprocessingShape?.GetFirstChild<ShapeProperties>();
+
+        internal TextBodyProperties? DrawingTextBodyProperties =>
+            _wordprocessingShape?.GetFirstChild<TextBodyProperties>();
+
+        internal static Anchor ConvertInlineToAnchor(Inline inline, WordImageTextWrapping wrapTextImage) {
             Anchor anchor1 = new Anchor() { DistanceFromTop = (UInt32Value)91440U, DistanceFromBottom = (UInt32Value)91440U, DistanceFromLeft = (UInt32Value)114300U, DistanceFromRight = (UInt32Value)114300U, SimplePos = false, RelativeHeight = (UInt32Value)251659264U, BehindDoc = false, Locked = false, LayoutInCell = true, AllowOverlap = true, EditId = "39C62DE8", AnchorId = "3E379294" };
             anchor1.AddNamespaceDeclaration("wp14", "http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing");
             anchor1.AddNamespaceDeclaration("wp", "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing");
             SimplePosition simplePosition1 = new SimplePosition() { X = 0L, Y = 0L };
 
             HorizontalPosition horizontalPosition1 = new HorizontalPosition() { RelativeFrom = HorizontalRelativePositionValues.Page };
-            HorizontalAlignment horizontalAlignment1 = new HorizontalAlignment();
+            DrawingHorizontalAlignment horizontalAlignment1 = new DrawingHorizontalAlignment();
             horizontalAlignment1.Text = "center";
             horizontalPosition1.Append(horizontalAlignment1);
 
@@ -560,11 +539,11 @@ namespace OfficeIMO.Word {
             verticalPosition1.Append(positionOffset1);
 
             // Copy INLINE to ANCHOR
-            Extent extent1 = (Extent)inline.Extent.CloneNode(true);
-            EffectExtent effectExtent1 = (EffectExtent)inline.EffectExtent.CloneNode(true);
-            DocProperties docProperties1 = (DocProperties)inline.DocProperties.CloneNode(true);
-            NonVisualGraphicFrameDrawingProperties nonVisualGraphicFrameDrawingProperties1 = (NonVisualGraphicFrameDrawingProperties)inline.NonVisualGraphicFrameDrawingProperties.CloneNode(true);
-            Graphic graphic1 = (Graphic)inline.Graphic.CloneNode(true);
+            Extent extent1 = (Extent)(inline.Extent?.CloneNode(true) ?? new Extent() { Cx = 0L, Cy = 0L });
+            EffectExtent effectExtent1 = (EffectExtent)(inline.EffectExtent?.CloneNode(true) ?? new EffectExtent());
+            DocProperties docProperties1 = (DocProperties)(inline.DocProperties?.CloneNode(true) ?? new DocProperties());
+            NonVisualGraphicFrameDrawingProperties nonVisualGraphicFrameDrawingProperties1 = (NonVisualGraphicFrameDrawingProperties)(inline.NonVisualGraphicFrameDrawingProperties?.CloneNode(true) ?? new NonVisualGraphicFrameDrawingProperties());
+            Graphic graphic1 = (Graphic)(inline.Graphic?.CloneNode(true) ?? new Graphic(new DocumentFormat.OpenXml.Drawing.GraphicData()));
 
             // continuation of anchor
             DocumentFormat.OpenXml.Office2010.Word.Drawing.RelativeWidth relativeWidth1 = new DocumentFormat.OpenXml.Office2010.Word.Drawing.RelativeWidth() { ObjectId = DocumentFormat.OpenXml.Office2010.Word.Drawing.SizeRelativeHorizontallyValues.Margin };
@@ -598,11 +577,11 @@ namespace OfficeIMO.Word {
         internal static Inline ConvertAnchorToInline(Anchor anchor) {
             Inline inline1 = new Inline() { DistanceFromTop = (UInt32Value)0U, DistanceFromBottom = (UInt32Value)0U, DistanceFromLeft = (UInt32Value)0U, DistanceFromRight = (UInt32Value)0U, AnchorId = "29D0141D", EditId = "5A52866D" };
 
-            Extent extent1 = (Extent)anchor.Extent.CloneNode(true);
-            EffectExtent effectExtent1 = (EffectExtent)anchor.EffectExtent.CloneNode(true);
-            DocProperties docProperties1 = (DocProperties)anchor.OfType<DocProperties>().FirstOrDefault()?.CloneNode(true);
-            NonVisualGraphicFrameDrawingProperties nonVisualGraphicFrameDrawingProperties1 = (NonVisualGraphicFrameDrawingProperties)anchor.OfType<NonVisualGraphicFrameDrawingProperties>().FirstOrDefault()?.CloneNode(true);
-            Graphic graphic1 = (Graphic)anchor.OfType<Graphic>().FirstOrDefault()?.CloneNode(true);
+            Extent extent1 = (Extent)(anchor.Extent?.CloneNode(true) ?? new Extent() { Cx = 0L, Cy = 0L });
+            EffectExtent effectExtent1 = (EffectExtent)(anchor.EffectExtent?.CloneNode(true) ?? new EffectExtent());
+            DocProperties docProperties1 = (DocProperties)(anchor.OfType<DocProperties>().FirstOrDefault()?.CloneNode(true) ?? new DocProperties());
+            NonVisualGraphicFrameDrawingProperties nonVisualGraphicFrameDrawingProperties1 = (NonVisualGraphicFrameDrawingProperties)(anchor.OfType<NonVisualGraphicFrameDrawingProperties>().FirstOrDefault()?.CloneNode(true) ?? new NonVisualGraphicFrameDrawingProperties());
+            Graphic graphic1 = (Graphic)(anchor.OfType<Graphic>().FirstOrDefault()?.CloneNode(true) ?? new Graphic(new DocumentFormat.OpenXml.Drawing.GraphicData()));
 
             inline1.Append(extent1);
             inline1.Append(effectExtent1);
@@ -613,98 +592,94 @@ namespace OfficeIMO.Word {
             return inline1;
         }
 
-        private DocumentFormat.OpenXml.Drawing.GraphicData _graphicData {
-            get {
-                var graphic = _anchor.ChildElements.OfType<DocumentFormat.OpenXml.Drawing.Graphic>().FirstOrDefault();
-                if (graphic != null) {
-                    return graphic.GraphicData;
-                }
-                return null;
+        private DocumentFormat.OpenXml.Drawing.GraphicData? _graphicData =>
+            _anchor?.ChildElements.OfType<DocumentFormat.OpenXml.Drawing.Graphic>().FirstOrDefault()?.GraphicData
+            ?? _inline?.ChildElements.OfType<DocumentFormat.OpenXml.Drawing.Graphic>().FirstOrDefault()?.GraphicData;
+
+        private Extent? _anchorExtent => _anchor?.ChildElements.OfType<Extent>().FirstOrDefault();
+
+        private DocumentFormat.OpenXml.Office2010.Word.DrawingShape.WordprocessingShape? _wordprocessingShape =>
+            _graphicData?.GetFirstChild<DocumentFormat.OpenXml.Office2010.Word.DrawingShape.WordprocessingShape>();
+
+        private TextBoxInfo2? _textBoxInfo2 =>
+            _wordprocessingShape?.GetFirstChild<DocumentFormat.OpenXml.Office2010.Word.DrawingShape.TextBoxInfo2>();
+
+        private Paragraph? _paragraph =>
+            _textBoxInfo2?.GetFirstChild<DocumentFormat.OpenXml.Wordprocessing.TextBoxContent>()?.GetFirstChild<Paragraph>();
+
+        private SdtContentBlock? _sdtContentBlock => _paragraph?.GetFirstChild<SdtContentBlock>();
+
+        private List<WordElement> GetWordElements() {
+            var elements = new List<WordElement>();
+            var content = GetTextBoxContent();
+            if (content == null) {
+                return elements;
             }
+
+            foreach (var element in content.ChildElements) {
+                if (element is Paragraph paragraph) {
+                    elements.AddRange(WordSection.ConvertParagraphToWordParagraphs(_document, paragraph));
+                } else if (element is AltChunk altChunk) {
+                    elements.Add(new WordEmbeddedDocument(_document, altChunk));
+                } else if (element is SdtBlock sdtBlock) {
+                    elements.Add(WordSection.ConvertStdBlockToWordElements(_document, sdtBlock));
+                } else if (element is Table table) {
+                    elements.Add(new WordTable(_document, table));
+                }
+            }
+
+            return elements;
         }
 
-        private DocumentFormat.OpenXml.Office2010.Word.DrawingShape.WordprocessingShape _wordprocessingShape {
-            get {
-                var graphicData = _graphicData;
-                if (graphicData != null) {
-                    var wsp = graphicData.GetFirstChild<DocumentFormat.OpenXml.Office2010.Word.DrawingShape.WordprocessingShape>();
-                    if (wsp != null) {
-                        return wsp;
-                    }
-                }
-                return null;
+        private DocumentFormat.OpenXml.Wordprocessing.TextBoxContent? GetTextBoxContent() {
+            if (_textBoxInfo2 != null) {
+                return _textBoxInfo2.GetFirstChild<DocumentFormat.OpenXml.Wordprocessing.TextBoxContent>();
             }
-        }
 
-        private TextBoxInfo2 _textBoxInfo2 {
-            get {
-                var wordprocessingShape = _wordprocessingShape;
-                if (wordprocessingShape != null) {
-                    var textBoxInfo = wordprocessingShape.GetFirstChild<DocumentFormat.OpenXml.Office2010.Word.DrawingShape.TextBoxInfo2>();
-                    if (textBoxInfo != null) {
-                        return textBoxInfo;
-                    }
-                }
-                return null;
+            if (_vmlTextBox != null) {
+                return _vmlTextBox.Descendants<DocumentFormat.OpenXml.Wordprocessing.TextBoxContent>().FirstOrDefault();
             }
-        }
 
-        private Paragraph _paragraph {
-            get {
-                var wordprocessingShape = _wordprocessingShape;
-                if (wordprocessingShape != null) {
-                    var textBoxInfo = wordprocessingShape.GetFirstChild<DocumentFormat.OpenXml.Office2010.Word.DrawingShape.TextBoxInfo2>();
-                    if (textBoxInfo != null) {
-                        var textBoxContent = textBoxInfo.GetFirstChild<DocumentFormat.OpenXml.Wordprocessing.TextBoxContent>();
-                        if (textBoxContent != null) {
-                            var sdtBlock = textBoxContent.GetFirstChild<DocumentFormat.OpenXml.Wordprocessing.Paragraph>();
-                            if (sdtBlock != null) {
-                                return sdtBlock;
-                            }
-                        }
-                    }
-
-                }
-                return null;
-            }
-        }
-
-        private SdtContentBlock _sdtContentBlock {
-            get {
-                var sdtBlock = _paragraph;
-                if (sdtBlock != null) {
-                    var sdtContentBlock = sdtBlock.GetFirstChild<SdtContentBlock>();
-                    if (sdtContentBlock != null) {
-                        return sdtContentBlock;
-                    }
-                }
-                return null;
-            }
-        }
-
-        private VerticalPosition AddVerticalPosition(Anchor anchor, bool expectedPositionOffset = false) {
-            if (anchor != null) {
-                var verticalPosition = anchor.VerticalPosition;
-                if (verticalPosition == null) {
-                    anchor.VerticalPosition = new VerticalPosition() {
-                        RelativeFrom = VerticalRelativePositionValues.Page, VerticalAlignment = new VerticalAlignment() {
-                            Text = "top"
-                        }
-                    };
-                    verticalPosition = anchor.VerticalPosition;
-                }
-
-                if (expectedPositionOffset) {
-                    var positionOffset = verticalPosition.PositionOffset;
-                    if (positionOffset == null) {
-                        verticalPosition.PositionOffset = new PositionOffset() {
-                            Text = "0"
-                        };
-                    }
-                }
-                return verticalPosition;
-            }
             return null;
+        }
+
+        private static Extent EnsureAnchorExtent(Anchor anchor, long cx, long cy) {
+            var extent = anchor.ChildElements.OfType<Extent>().FirstOrDefault();
+            if (extent != null) {
+                return extent;
+            }
+
+            extent = new Extent() {
+                Cx = cx,
+                Cy = cy
+            };
+            anchor.Append(extent);
+            return extent;
+        }
+
+        private VerticalPosition? AddVerticalPosition(Anchor? anchor, bool expectedPositionOffset = false) {
+            if (anchor == null) {
+                return null;
+            }
+
+            var verticalPosition = anchor.VerticalPosition;
+            if (verticalPosition == null) {
+                anchor.VerticalPosition = new VerticalPosition() {
+                    RelativeFrom = VerticalRelativePositionValues.Page,
+                    VerticalAlignment = new DrawingVerticalAlignment() {
+                        Text = "top"
+                    }
+                };
+                verticalPosition = anchor.VerticalPosition;
+            }
+
+            if (expectedPositionOffset && verticalPosition.PositionOffset == null) {
+                verticalPosition.PositionOffset = new PositionOffset() {
+                    Text = "0"
+                };
+            }
+
+            return verticalPosition;
         }
 
         /// <summary>
@@ -713,72 +688,76 @@ namespace OfficeIMO.Word {
         /// <param name="anchor"></param>
         /// <param name="expectedPositionOffset"></param>
         /// <returns></returns>
-        private HorizontalPosition AddHorizontalPosition(Anchor anchor, bool expectedPositionOffset = false) {
-            if (anchor != null) {
-                var horizontalPosition = anchor.HorizontalPosition;
-                if (horizontalPosition == null && expectedPositionOffset) {
-                    // position offset and horizontal alignment don't play together
-                    anchor.HorizontalPosition = new HorizontalPosition() {
-                        RelativeFrom = HorizontalRelativePositionValues.Page,
-                    };
-                    horizontalPosition = anchor.HorizontalPosition;
-                } else if (horizontalPosition == null) {
-                    anchor.HorizontalPosition = new HorizontalPosition() {
-                        RelativeFrom = HorizontalRelativePositionValues.Page,
-                        HorizontalAlignment = new HorizontalAlignment() {
-                            Text = "center"
-                        }
-                    };
-                    horizontalPosition = anchor.HorizontalPosition;
-                }
-                if (expectedPositionOffset) {
-                    var positionOffset = horizontalPosition.PositionOffset;
-                    if (positionOffset == null) {
-                        positionOffset = new PositionOffset() {
-                            Text = "0"
-                        };
-                        horizontalPosition.Append(positionOffset);
-                    }
-                    // we need to remove horizontal alignment if we want to use position offset
-                    if (horizontalPosition.HorizontalAlignment != null) {
-                        horizontalPosition.HorizontalAlignment.Remove();
-                    }
-                }
-                return horizontalPosition;
+        private HorizontalPosition? AddHorizontalPosition(Anchor? anchor, bool expectedPositionOffset = false) {
+            if (anchor == null) {
+                return null;
             }
-            return null;
+
+            var horizontalPosition = anchor.HorizontalPosition;
+            if (horizontalPosition == null && expectedPositionOffset) {
+                // position offset and horizontal alignment don't play together
+                anchor.HorizontalPosition = new HorizontalPosition() {
+                    RelativeFrom = HorizontalRelativePositionValues.Page,
+                };
+                horizontalPosition = anchor.HorizontalPosition;
+            } else if (horizontalPosition == null) {
+                anchor.HorizontalPosition = new HorizontalPosition() {
+                    RelativeFrom = HorizontalRelativePositionValues.Page,
+                    HorizontalAlignment = new DrawingHorizontalAlignment() {
+                        Text = "center"
+                    }
+                };
+                horizontalPosition = anchor.HorizontalPosition;
+            }
+
+            if (expectedPositionOffset) {
+                var positionOffset = horizontalPosition.PositionOffset;
+                if (positionOffset == null) {
+                    positionOffset = new PositionOffset() {
+                        Text = "0"
+                    };
+                    horizontalPosition.Append(positionOffset);
+                }
+
+                // we need to remove horizontal alignment if we want to use position offset
+                horizontalPosition.HorizontalAlignment?.Remove();
+            }
+
+            return horizontalPosition;
         }
 
-        private void AddAlternateContent(WordDocument wordDocument, WordParagraph wordParagraph, string text, WrapTextImage wrapTextImage) {
+        private void AddAlternateContent(WordDocument wordDocument, WordParagraph wordParagraph, string text, WordImageTextWrapping wrapTextImage) {
 
             AlternateContent alternateContent1 = new AlternateContent();
             AlternateContentChoice alternateContentChoice1 = new AlternateContentChoice() { Requires = "wps" };
+            alternateContentChoice1.AddNamespaceDeclaration("wps", WordAlternateContentResolver.WordprocessingShapeNamespaceUri);
 
             DocumentFormat.OpenXml.Wordprocessing.Drawing drawing1;
-            if (wrapTextImage == WrapTextImage.InLineWithText) {
+            if (wrapTextImage == WordImageTextWrapping.InLineWithText) {
                 // inline
                 drawing1 = new DocumentFormat.OpenXml.Wordprocessing.Drawing {
-                    Inline = GenerateInline(text)
+                    Inline = GenerateInline(wordDocument, text)
                 };
             } else {
                 // anchor
                 drawing1 = new DocumentFormat.OpenXml.Wordprocessing.Drawing {
-                    Anchor = GenerateAnchor(text, wrapTextImage)
+                    Anchor = GenerateAnchor(wordDocument, text, wrapTextImage)
                 };
             }
             alternateContentChoice1.Append(drawing1);
 
             alternateContent1.Append(alternateContentChoice1);
             //alternateContent1.Append(alternateContentFallback1);
-            wordParagraph._run.Append(alternateContent1);
+            wordParagraph.VerifyRun();
+            wordParagraph._run?.Append(alternateContent1);
         }
 
-        private Inline GenerateInline(string text) {
+        private Inline GenerateInline(WordDocument wordDocument, string text) {
             Inline inline1 = new Inline() { DistanceFromTop = (UInt32Value)0U, DistanceFromBottom = (UInt32Value)0U, DistanceFromLeft = (UInt32Value)0U, DistanceFromRight = (UInt32Value)0U, AnchorId = "29D0141D", EditId = "5A52866D" };
 
             Extent extent1 = GenerateExtent();
             EffectExtent effectExtent1 = GenerateEffectExtent();
-            DocProperties docProperties1 = GenerateDocProperties();
+            DocProperties docProperties1 = GenerateDocProperties(wordDocument);
             NonVisualGraphicFrameDrawingProperties nonVisualGraphicFrameDrawingProperties1 = GenerateNonVisualGraphicFrameDrawingProperties();
             Graphic graphic1 = GenerateGraphic(text);
 
@@ -802,8 +781,8 @@ namespace OfficeIMO.Word {
             return effectExtent1;
         }
 
-        private DocProperties GenerateDocProperties() {
-            DocProperties docProperties1 = new DocProperties() { Id = (UInt32Value)307U, Name = "Text Box 2" };
+        private static DocProperties GenerateDocProperties(WordDocument wordDocument) {
+            DocProperties docProperties1 = new DocProperties() { Id = WordDrawingIdAllocator.Reserve(wordDocument), Name = "Text Box 2" };
             return docProperties1;
         }
 
@@ -856,14 +835,14 @@ namespace OfficeIMO.Word {
             return nonVisualGraphicFrameDrawingProperties1;
         }
 
-        private Anchor GenerateAnchor(string text, WrapTextImage wrapTextImage) {
+        private Anchor GenerateAnchor(WordDocument wordDocument, string text, WordImageTextWrapping wrapTextImage) {
             Anchor anchor1 = new Anchor() { DistanceFromTop = (UInt32Value)91440U, DistanceFromBottom = (UInt32Value)91440U, DistanceFromLeft = (UInt32Value)114300U, DistanceFromRight = (UInt32Value)114300U, SimplePos = false, RelativeHeight = (UInt32Value)251659264U, BehindDoc = false, Locked = false, LayoutInCell = true, AllowOverlap = true, EditId = "39C62DE8", AnchorId = "3E379294" };
             anchor1.AddNamespaceDeclaration("wp14", "http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing");
             anchor1.AddNamespaceDeclaration("wp", "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing");
             SimplePosition simplePosition1 = new SimplePosition() { X = 0L, Y = 0L };
 
             HorizontalPosition horizontalPosition1 = new HorizontalPosition() { RelativeFrom = HorizontalRelativePositionValues.Page };
-            HorizontalAlignment horizontalAlignment1 = new HorizontalAlignment();
+            DrawingHorizontalAlignment horizontalAlignment1 = new DrawingHorizontalAlignment();
             horizontalAlignment1.Text = "center";
 
             horizontalPosition1.Append(horizontalAlignment1);
@@ -877,7 +856,7 @@ namespace OfficeIMO.Word {
             // same content as per inline
             Extent extent1 = GenerateExtent();
             EffectExtent effectExtent1 = GenerateEffectExtent();
-            DocProperties docProperties1 = GenerateDocProperties();
+            DocProperties docProperties1 = GenerateDocProperties(wordDocument);
             NonVisualGraphicFrameDrawingProperties nonVisualGraphicFrameDrawingProperties1 = GenerateNonVisualGraphicFrameDrawingProperties();
             Graphic graphic1 = GenerateGraphic(text);
 
@@ -915,7 +894,7 @@ namespace OfficeIMO.Word {
         /// </summary>
         /// <param name="text"></param>
         /// <returns></returns>
-        public TextBoxContent GenerateTextBoxContent(string text) {
+        internal TextBoxContent GenerateTextBoxContent(string text) {
             TextBoxContent textBoxContent1 = new TextBoxContent();
 
             Paragraph paragraph1 = new Paragraph() { RsidParagraphAddition = "00000000", RsidRunAdditionDefault = "006713BC", ParagraphId = "100FFE99", TextId = "27C5287F" };

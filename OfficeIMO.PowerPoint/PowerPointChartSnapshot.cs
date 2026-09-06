@@ -1,0 +1,118 @@
+using System;
+
+namespace OfficeIMO.PowerPoint {
+    /// <summary>
+    /// PowerPoint chart families available as first-party render snapshots.
+    /// </summary>
+    internal enum PowerPointChartSnapshotKind {
+        /// <summary>Clustered column chart.</summary>
+        ClusteredColumn,
+
+        /// <summary>Stacked vertical column chart.</summary>
+        StackedColumn,
+
+        /// <summary>One-hundred percent stacked vertical column chart.</summary>
+        StackedColumn100,
+
+        /// <summary>Clustered horizontal bar chart.</summary>
+        ClusteredBar,
+
+        /// <summary>Stacked horizontal bar chart.</summary>
+        StackedBar,
+
+        /// <summary>One-hundred percent stacked horizontal bar chart.</summary>
+        StackedBar100,
+
+        /// <summary>Line chart.</summary>
+        Line,
+
+        /// <summary>Stacked line chart.</summary>
+        StackedLine,
+
+        /// <summary>One-hundred percent stacked line chart.</summary>
+        StackedLine100,
+
+        /// <summary>Scatter chart.</summary>
+        Scatter,
+
+        /// <summary>Pie chart.</summary>
+        Pie,
+
+        /// <summary>Doughnut chart.</summary>
+        Doughnut,
+
+        /// <summary>Area chart.</summary>
+        Area,
+
+        /// <summary>Stacked area chart.</summary>
+        StackedArea,
+
+        /// <summary>One-hundred percent stacked area chart.</summary>
+        StackedArea100,
+
+        /// <summary>Radar chart.</summary>
+        Radar,
+
+        /// <summary>Bubble chart.</summary>
+        Bubble
+    }
+
+    /// <summary>
+    /// Lightweight chart snapshot that consumers can render without depending on PowerPoint or Open XML chart internals.
+    /// </summary>
+    internal sealed class PowerPointChartSnapshot {
+        internal PowerPointChartSnapshot(string name, string? title,
+            PowerPointChartSnapshotKind chartKind, PowerPointChartData data,
+            double widthPoints, double heightPoints,
+            OfficeIMO.Drawing.OfficeChartBubbleSizeMode bubbleSizeMode =
+                OfficeIMO.Drawing.OfficeChartBubbleSizeMode.Area,
+            double bubbleScalePercent = 100D,
+            OfficeIMO.Drawing.OfficeChartLayout? layout = null,
+            OfficeIMO.Drawing.OfficeChartStyle? style = null) {
+            if (data == null) {
+                throw new ArgumentNullException(nameof(data));
+            }
+
+            Name = name ?? string.Empty;
+            Title = title;
+            ChartKind = chartKind;
+            Data = data;
+            WidthPoints = widthPoints;
+            HeightPoints = heightPoints;
+            BubbleSizeMode = bubbleSizeMode;
+            BubbleScalePercent = bubbleScalePercent;
+            Layout = layout ?? OfficeIMO.Drawing.OfficeChartLayout.Default;
+            Style = style ?? OfficeIMO.Drawing.OfficeChartStyle.Default;
+        }
+
+        /// <summary>Chart drawing name.</summary>
+        public string Name { get; }
+
+        /// <summary>Chart title text when present.</summary>
+        public string? Title { get; }
+
+        /// <summary>Detected chart family.</summary>
+        public PowerPointChartSnapshotKind ChartKind { get; }
+
+        /// <summary>Cached chart data.</summary>
+        public PowerPointChartData Data { get; }
+
+        /// <summary>Chart width in points.</summary>
+        public double WidthPoints { get; }
+
+        /// <summary>Chart height in points.</summary>
+        public double HeightPoints { get; }
+
+        /// <summary>Whether bubble values represent area or width.</summary>
+        public OfficeIMO.Drawing.OfficeChartBubbleSizeMode BubbleSizeMode { get; }
+
+        /// <summary>Bubble diameter scale as a percentage.</summary>
+        public double BubbleScalePercent { get; }
+
+        /// <summary>Shared chart layout projected from native chart settings.</summary>
+        public OfficeIMO.Drawing.OfficeChartLayout Layout { get; }
+
+        /// <summary>Shared chart text and color style projected from native chart settings.</summary>
+        public OfficeIMO.Drawing.OfficeChartStyle Style { get; }
+    }
+}

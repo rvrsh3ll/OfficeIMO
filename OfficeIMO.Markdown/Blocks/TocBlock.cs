@@ -1,0 +1,104 @@
+namespace OfficeIMO.Markdown;
+
+/// <summary>
+/// Table of contents block generated from document headings.
+/// </summary>
+public sealed class TocBlock : MarkdownBlock, IMarkdownBlock, ISyntaxMarkdownBlock {
+    /// <summary>Single Table of Contents entry.</summary>
+    public sealed class Entry {
+        /// <summary>Heading level (1..6).</summary>
+        public int Level { get; set; }
+        /// <summary>Heading text.</summary>
+        public string Text { get; set; } = string.Empty;
+        /// <summary>Anchor id (slug) without leading '#'.</summary>
+        public string Anchor { get; set; } = string.Empty;
+    }
+
+    /// <summary>When true, renders an ordered list; otherwise unordered.</summary>
+    public bool Ordered { get; set; }
+    /// <summary>Normalize indentation to the minimum included heading level (default true).</summary>
+    public bool NormalizeLevels { get; set; } = true;
+    /// <summary>Include a title above the generated table of contents when an output format supports it.</summary>
+    public bool IncludeTitle { get; set; }
+    /// <summary>Title text for output formats that render TOC chrome.</summary>
+    public string Title { get; set; } = "Table of Contents";
+    /// <summary>Heading level for the title when an output format renders it as a heading.</summary>
+    public int TitleLevel { get; set; } = 2;
+    /// <summary>Minimum heading level included by the table of contents.</summary>
+    public int MinLevel { get; set; } = TocOptions.DefaultMinLevel;
+    /// <summary>Maximum heading level included by the table of contents.</summary>
+    public int MaxLevel { get; set; } = TocOptions.DefaultMaxLevel;
+    /// <summary>Preferred visual layout for output formats that support TOC chrome.</summary>
+    public TocLayout Layout { get; set; } = TocLayout.List;
+    /// <summary>Preferred visual chrome for output formats that support TOC containers.</summary>
+    public TocChrome Chrome { get; set; } = TocChrome.Default;
+    /// <summary>Scope used when the TOC entries were realized from a placeholder.</summary>
+    public TocScope Scope { get; set; } = TocScope.Document;
+    /// <summary>Heading title used when <see cref="Scope"/> is <see cref="TocScope.HeadingTitle"/>.</summary>
+    public string? ScopeHeadingTitle { get; set; }
+    /// <summary>When true, top-level headings are included even when <see cref="MinLevel"/> starts deeper.</summary>
+    public bool RequireTopLevel { get; set; } = true;
+    /// <summary>True when a TOC builder already emitted the title as the preceding heading.</summary>
+    public bool TitleHeadingAlreadyRendered { get; set; }
+    /// <summary>Entries included in the TOC.</summary>
+    public List<Entry> Entries { get; } = new List<Entry>();
+
+    /// <inheritdoc />
+    string IMarkdownBlock.RenderMarkdown() {
+        if (Entries.Count == 0) return string.Empty;
+        int baseLevel = NormalizeLevels ? Entries.Min(e => e.Level) : 1;
+        var sb = new StringBuilder();
+        foreach (var e in Entries) {
+            int indent = e.Level - baseLevel;
+            string pad = new string(' ', indent * 2);
+            string marker = Ordered ? "1." : "-";
+            sb.AppendLine($"{pad}{marker} [{e.Text}](#{e.Anchor})");
+        }
+        return sb.ToString().TrimEnd();
+    }
+
+    /// <inheritdoc />
+    string IMarkdownBlock.RenderHtml() {
+        if (Entries.Count == 0) return string.Empty;
+        int baseLevel = NormalizeLevels ? Entries.Min(e => e.Level) : 1;
+        var options = HtmlRenderContext.Options;
+
+        // Build a tree of nodes based on heading levels
+        var root = new Node { Level = baseLevel - 1 };
+        var stack = new System.Collections.Generic.Stack<Node>();
+        stack.Push(root);
+        foreach (var e in Entries) {
+            // Pop until parent level is less than current entry level
+            while (stack.Count > 0 && stack.Peek().Level >= e.Level) stack.Pop();
+            var parent = stack.Peek();
+            var node = new Node { Level = e.Level, Entry = e };
+            parent.Children.Add(node);
+            stack.Push(node);
+        }
+
+        var sb = new StringBuilder();
+        RenderList(sb, root.Children, Ordered, options);
+        return sb.ToString();
+
+        static void RenderList(StringBuilder sb, System.Collections.Generic.IEnumerable<Node> nodes, bool ordered, HtmlOptions? options) {
+            sb.Append(ordered ? "<ol>" : "<ul>");
+            foreach (var n in nodes) {
+                var e = n.Entry!;
+                sb.Append("<li>");
+                sb.Append($"<a href=\"#{HtmlTextEncoder.Encode(e.Anchor, options)}\">{HtmlTextEncoder.Encode(e.Text, options)}</a>");
+                if (n.Children.Count > 0) RenderList(sb, n.Children, ordered, options);
+                sb.Append("</li>");
+            }
+            sb.Append(ordered ? "</ol>" : "</ul>");
+        }
+    }
+
+    private sealed class Node {
+        public int Level { get; set; }
+        public Entry? Entry { get; set; }
+        public System.Collections.Generic.List<Node> Children { get; } = new System.Collections.Generic.List<Node>();
+    }
+
+    MarkdownSyntaxNode ISyntaxMarkdownBlock.BuildSyntaxNode(MarkdownSourceSpan? span) =>
+        new MarkdownSyntaxNode(MarkdownSyntaxKind.Toc, span, ((IMarkdownBlock)this).RenderMarkdown(), associatedObject: this);
+}

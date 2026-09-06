@@ -17,7 +17,7 @@ namespace OfficeIMO.Examples.Word {
 
                 document.AddParagraph("This is my test");
 
-                document.Save(false);
+                document.Save();
             }
         }
 
@@ -34,21 +34,18 @@ namespace OfficeIMO.Examples.Word {
             document.AddParagraph("This is my test in document");
 
             // We're checking if the file is locked (it should be)
-            Console.WriteLine("File: " + filePath + " is locked: " + filePath.IsFileLocked());
 
             // We're checking if the file is locked (it shouldn't be - yet)
-            Console.WriteLine("File: " + filePathOutput + " is locked: " + filePathOutput.IsFileLocked());
 
-            document.Save(filePathOutput, false);
+            document.SaveCopy(filePathOutput);
 
             // both files should not be locked
-            Console.WriteLine("File: " + filePath + " is locked: " + filePath.IsFileLocked());
-            Console.WriteLine("File: " + filePathOutput + " is locked: " + filePathOutput.IsFileLocked());
 
             WordDocument document1 = WordDocument.Load(filePathOutput);
 
             document1.AddParagraph("This is my test in document 2");
-            document1.Save(filePathOutput2, openWord);
+            document1.SaveCopy(filePathOutput2);
+            if (openWord) document1.OpenInApplication(filePathOutput2);
         }
 
 
@@ -63,7 +60,8 @@ namespace OfficeIMO.Examples.Word {
 
             document.AddParagraph("This is my test in document");
 
-            document.Save(filePath, openWord);
+            document.SaveCopy(filePath);
+            if (openWord) document.OpenInApplication(filePath);
         }
 
         public static void Example_BasicDocumentSaveAs3(string folderPath, bool openWord) {
@@ -79,15 +77,16 @@ namespace OfficeIMO.Examples.Word {
 
             document.AddParagraph("This is my test in document 1");
 
-            document.Save(filePath1);
+            document.SaveCopy(filePath1);
 
             document.AddParagraph("This is my test in document 2");
 
-            document.Save(filePath2);
+            document.SaveCopy(filePath2);
 
             document.AddParagraph("This is my test in document 3");
 
-            document.Save(filePath3, openWord);
+            document.SaveCopy(filePath3);
+            if (openWord) document.OpenInApplication(filePath3);
         }
     }
 }

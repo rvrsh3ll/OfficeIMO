@@ -1,0 +1,205 @@
+using OfficeIMO.Drawing;
+using PdfCore = OfficeIMO.Pdf;
+
+namespace OfficeIMO.Markdown.Pdf;
+
+/// <summary>
+/// First-party Markdown to PDF conversion helpers.
+/// </summary>
+public static partial class MarkdownPdfConverterExtensions {
+    private static void ApplyMarkdownTextFallbackOptions(PdfCore.PdfOptions pdfOptions, MarkdownToPdfOptions options, MarkdownDoc document) {
+        bool hasCallerPdfOptions = options.PdfOptions != null;
+        bool hasExplicitFontFamily = !string.IsNullOrWhiteSpace(options.FontFamily);
+        if (hasExplicitFontFamily) {
+            pdfOptions.TryUseOfficeFontFamily(options.FontFamily, options.ResourcePolicy.AllowSystemFontEmbedding);
+        }
+
+        if (options.TextFallbacks == PdfCore.PdfTextFallbackFeatures.None) {
+            return;
+        }
+
+        PdfCore.PdfTextFallbackFeatures fallbackFeatures = options.TextFallbacks;
+        fallbackFeatures = PdfCore.PdfTextDiagnostics.ResolveRequiredFallbackFeatures(
+            fallbackFeatures,
+            EnumerateMarkdownFallbackText(document, options));
+        if (fallbackFeatures == PdfCore.PdfTextFallbackFeatures.None) {
+            return;
+        }
+
+        bool preserveDocumentFontSlots = hasCallerPdfOptions || hasExplicitFontFamily;
+        bool usesCodeFont = MarkdownDocumentUsesCodeFont(document);
+        if (!usesCodeFont) {
+            fallbackFeatures &= ~PdfCore.PdfTextFallbackFeatures.MonospaceFont;
+        }
+
+        if (preserveDocumentFontSlots) {
+            fallbackFeatures &= ~PdfCore.PdfTextFallbackFeatures.DocumentFont;
+        }
+
+        PdfCore.PdfTextFallbackFeatures documentAndMonospaceFallbacks =
+            fallbackFeatures & (PdfCore.PdfTextFallbackFeatures.DocumentFont | PdfCore.PdfTextFallbackFeatures.MonospaceFont);
+        if (documentAndMonospaceFallbacks != PdfCore.PdfTextFallbackFeatures.None) {
+            pdfOptions.UseTextFallbacks(
+                documentAndMonospaceFallbacks,
+                CreateMarkdownReservedFontSlots(pdfOptions, preserveDocumentFontSlots, reserveCourier: false),
+                options.ResourcePolicy.AllowSystemFontEmbedding,
+                preserveDocumentFontSlots);
+        }
+
+        PdfCore.PdfTextFallbackFeatures runFallbacks = fallbackFeatures &
+            (PdfCore.PdfTextFallbackFeatures.MultilingualFonts | PdfCore.PdfTextFallbackFeatures.SymbolAndEmojiFonts);
+        if (runFallbacks != PdfCore.PdfTextFallbackFeatures.None) {
+            pdfOptions.UseTextFallbacks(
+                runFallbacks,
+                CreateMarkdownReservedFontSlots(pdfOptions, preserveDocumentFontSlots, reserveCourier: usesCodeFont),
+                options.ResourcePolicy.AllowSystemFontEmbedding,
+                preserveDocumentFontSlots);
+        }
+    }
+
+    private static IEnumerable<string?> EnumerateMarkdownFallbackText(MarkdownDoc document, MarkdownToPdfOptions options) {
+        yield return document.ToMarkdown();
+
+        foreach (SemanticFencedBlock semantic in document.DescendantsOfType<SemanticFencedBlock>()) {
+            if (!IsChartSemanticFence(semantic) ||
+                semantic.Content.IndexOf("\\u", StringComparison.Ordinal) < 0 ||
+                !TryCreateChartSnapshot(semantic, options, out OfficeChartSnapshot? snapshot, out _)) {
+                continue;
+            }
+
+            yield return snapshot!.Title;
+            foreach (string category in snapshot.Data.Categories) {
+                yield return category;
+            }
+
+            foreach (OfficeChartSeries series in snapshot.Data.Series) {
+                yield return series.Name;
+            }
+
+            OfficeChartLayout layout = snapshot.Layout;
+            yield return layout.CategoryAxisTitle;
+            yield return layout.ValueAxisTitle;
+            yield return layout.HorizontalAxisDisplayUnitLabel;
+            yield return layout.VerticalAxisDisplayUnitLabel;
+            yield return layout.DataLabelSeparator;
+            yield return layout.DataLabelNumberFormat;
+            yield return layout.AxisNumberFormat;
+            yield return layout.HorizontalAxisNumberFormat;
+            yield return layout.VerticalAxisNumberFormat;
+            yield return layout.CategoryAxisNumberFormat;
+        }
+    }
+
+    private static bool MarkdownDocumentUsesCodeFont(MarkdownDoc document) {
+        foreach (IMarkdownBlock block in document.DescendantsAndSelf()) {
+            if (MarkdownBlockUsesCodeFont(block)) {
+                return true;
+            }
+        }
+
+        foreach (ListItem item in document.DescendantListItems()) {
+            if (InlineSequenceUsesCodeFont(item.Content)) {
+                return true;
+            }
+
+            for (int paragraphIndex = 0; paragraphIndex < item.AdditionalParagraphs.Count; paragraphIndex++) {
+                if (InlineSequenceUsesCodeFont(item.AdditionalParagraphs[paragraphIndex])) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool MarkdownBlockUsesCodeFont(IMarkdownBlock block) {
+        switch (block) {
+            case CodeBlock:
+            case SemanticFencedBlock:
+                return true;
+            case ParagraphBlock paragraph:
+                return InlineSequenceUsesCodeFont(paragraph.Inlines);
+            case HeadingBlock heading:
+                return InlineSequenceUsesCodeFont(heading.Inlines);
+            case CalloutBlock callout:
+                return InlineSequenceUsesCodeFont(callout.TitleInlines);
+            case DetailsBlock details:
+                return details.Summary != null && InlineSequenceUsesCodeFont(details.Summary.Inlines);
+            case DefinitionListBlock definitionList:
+                return DefinitionListUsesCodeFont(definitionList);
+            case TableBlock table:
+                return TableUsesCodeFont(table);
+            default:
+                return false;
+        }
+    }
+
+    private static bool DefinitionListUsesCodeFont(DefinitionListBlock definitionList) {
+        IReadOnlyList<DefinitionListInlineItem> items = definitionList.InlineItems;
+        for (int i = 0; i < items.Count; i++) {
+            if (InlineSequenceUsesCodeFont(items[i].Term) ||
+                InlineSequenceUsesCodeFont(items[i].Definition)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TableUsesCodeFont(TableBlock table) {
+        IReadOnlyList<InlineSequence> headers = table.HeaderInlines;
+        for (int i = 0; i < headers.Count; i++) {
+            if (InlineSequenceUsesCodeFont(headers[i])) {
+                return true;
+            }
+        }
+
+        IReadOnlyList<IReadOnlyList<InlineSequence>> rows = table.RowInlines;
+        for (int rowIndex = 0; rowIndex < rows.Count; rowIndex++) {
+            IReadOnlyList<InlineSequence> row = rows[rowIndex];
+            for (int columnIndex = 0; columnIndex < row.Count; columnIndex++) {
+                if (InlineSequenceUsesCodeFont(row[columnIndex])) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool InlineSequenceUsesCodeFont(InlineSequence sequence) {
+        for (int i = 0; i < sequence.Nodes.Count; i++) {
+            if (InlineUsesCodeFont(sequence.Nodes[i])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool InlineUsesCodeFont(IMarkdownInline inline) {
+        switch (inline) {
+            case CodeSpanInline:
+                return true;
+            case IInlineContainerMarkdownInline container when container.NestedInlines != null:
+                return InlineSequenceUsesCodeFont(container.NestedInlines);
+            default:
+                return false;
+        }
+    }
+
+    private static IReadOnlyList<PdfCore.PdfStandardFont> CreateMarkdownReservedFontSlots(PdfCore.PdfOptions pdfOptions, bool includeDocumentFontSlots, bool reserveCourier) {
+        var slots = new List<PdfCore.PdfStandardFont>();
+        if (reserveCourier) {
+            slots.Add(PdfCore.PdfStandardFont.Courier);
+        }
+
+        if (includeDocumentFontSlots) {
+            slots.Add(pdfOptions.DefaultFont);
+            slots.Add(pdfOptions.HeaderFont);
+            slots.Add(pdfOptions.FooterFont);
+        }
+
+        return slots;
+    }
+}

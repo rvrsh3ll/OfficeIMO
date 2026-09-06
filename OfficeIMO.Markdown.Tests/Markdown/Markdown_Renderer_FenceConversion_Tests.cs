@@ -1,0 +1,79 @@
+using OfficeIMO.MarkdownRenderer;
+using Xunit;
+
+namespace OfficeIMO.Tests {
+    public class Markdown_Renderer_FenceConversion_Tests {
+        [Fact]
+        public void MermaidEnabled_NoMermaidFence_DoesNotInjectMermaidNodes() {
+            var options = new MarkdownRendererOptions();
+            options.Mermaid.Enabled = true;
+            var html = OfficeIMO.MarkdownRenderer.MarkdownRenderer.RenderBodyHtml("# Title\n\nJust text.", options);
+
+            Assert.DoesNotContain("class=\"mermaid\"", html);
+        }
+
+        [Fact]
+        public void ChartEnabled_NoChartFence_DoesNotInjectCanvasNodes() {
+            var options = new MarkdownRendererOptions();
+            options.Chart.Enabled = true;
+            var html = OfficeIMO.MarkdownRenderer.MarkdownRenderer.RenderBodyHtml("# Title\n\nJust text.", options);
+
+            Assert.DoesNotContain("class=\"omd-chart\"", html);
+        }
+
+        [Fact]
+        public void NetworkEnabled_NoNetworkFence_DoesNotInjectNetworkNodes() {
+            var options = new MarkdownRendererOptions();
+            options.Network.Enabled = true;
+            var html = OfficeIMO.MarkdownRenderer.MarkdownRenderer.RenderBodyHtml("# Title\n\nJust text.", options);
+
+            Assert.DoesNotContain("class=\"omd-network\"", html);
+        }
+
+        [Fact]
+        public void MathEnabled_NoMathFence_DoesNotInjectMathWrapperNodes() {
+            var options = new MarkdownRendererOptions();
+            options.Math.Enabled = true;
+            options.Math.EnableFencedMathBlocks = true;
+            var html = OfficeIMO.MarkdownRenderer.MarkdownRenderer.RenderBodyHtml("# Title\n\nJust text.", options);
+
+            Assert.DoesNotContain("class=\"omd-math\"", html);
+        }
+
+        [Fact]
+        public void CustomRenderer_NoMatchingFence_DoesNotInjectCustomNodes() {
+            var options = new MarkdownRendererOptions();
+            options.FencedCodeBlockRenderers.Add(new MarkdownFencedCodeBlockRenderer(
+                "Callout",
+                new[] { "ix-callout" },
+                (_, _) => "<div class=\"ix-callout\"></div>"));
+            var html = OfficeIMO.MarkdownRenderer.MarkdownRenderer.RenderBodyHtml("# Title\n\nJust text.", options);
+
+            Assert.DoesNotContain("class=\"ix-callout\"", html);
+        }
+
+        [Fact]
+        public void CustomRenderer_MatchingFence_UsesSemanticAstRendererWithoutCodeBlockFallback() {
+            var codeBlockRendererCalled = false;
+            var options = new MarkdownRendererOptions();
+            options.HtmlOptions.CodeBlockHtmlRenderer = (_, _) => {
+                codeBlockRendererCalled = true;
+                return null;
+            };
+            options.FencedCodeBlockRenderers.Add(new MarkdownFencedCodeBlockRenderer(
+                "Callout",
+                new[] { "ix-callout" },
+                (match, _) => "<aside class=\"ix-callout\" data-language=\"" + match.Language + "\">"
+                    + System.Net.WebUtility.HtmlEncode(match.RawContent)
+                    + "</aside>"));
+
+            var html = OfficeIMO.MarkdownRenderer.MarkdownRenderer.RenderBodyHtml("```ix-callout\nhello <world>\n```", options);
+
+            Assert.Contains("class=\"ix-callout\"", html);
+            Assert.Contains("data-language=\"ix-callout\"", html);
+            Assert.Contains("hello &lt;world&gt;", html);
+            Assert.DoesNotContain("<pre><code", html);
+            Assert.False(codeBlockRendererCalled);
+        }
+    }
+}

@@ -13,7 +13,7 @@ namespace OfficeIMO.Examples.Word {
             string filePath = System.IO.Path.Combine(folderPath, "Document with Tables1.docx");
             using (WordDocument document = WordDocument.Create(filePath)) {
                 var paragraph = document.AddParagraph("Basic paragraph - Page 4");
-                paragraph.ParagraphAlignment = JustificationValues.Center;
+                paragraph.ParagraphAlignment = WordParagraphAlignment.Center;
 
                 document.AddParagraph();
 
@@ -44,7 +44,8 @@ namespace OfficeIMO.Examples.Word {
                 // lets overwrite style
                 wordTable.Style = WordTableStyle.GridTable6ColorfulAccent1;
 
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
     }

@@ -1,0 +1,736 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Drawing;
+using A = DocumentFormat.OpenXml.Drawing;
+
+namespace OfficeIMO.PowerPoint {
+    /// <summary>
+    ///     Represents a cell within a PowerPoint table.
+    /// </summary>
+    public partial class PowerPointTableCell {
+        private const int EmusPerPoint = 12700;
+        private readonly SlidePart? _slidePart;
+
+        internal PowerPointTableCell(TableCell cell, SlidePart? slidePart = null) {
+            Cell = cell;
+            _slidePart = slidePart;
+        }
+
+        internal TableCell Cell { get; }
+        internal SlidePart? SlidePart => _slidePart;
+
+        /// <summary>
+        ///     Gets or sets the text contained in the cell.
+        /// </summary>
+        public string Text {
+            get => Cell.TextBody?.InnerText ?? string.Empty;
+
+
+            set {
+                Cell.TextBody ??= PowerPointTableTextDefaults.CreateTextBody();
+                string[] discardedSoundIds = PowerPointEmbeddedSound
+                    .GetRelationshipIds(Cell.TextBody);
+                A.Paragraph? sourceParagraph = Cell.TextBody.GetFirstChild<A.Paragraph>();
+                A.RunProperties? existingRunProperties = sourceParagraph?
+                    .Elements<A.Run>()
+                    .FirstOrDefault()?
+                    .RunProperties?
+                    .CloneNode(true) as A.RunProperties;
+                A.ParagraphProperties? existingParagraphProperties = sourceParagraph?.ParagraphProperties?.CloneNode(true) as A.ParagraphProperties;
+                A.EndParagraphRunProperties? existingEndProperties = sourceParagraph?
+                    .GetFirstChild<A.EndParagraphRunProperties>()?
+                    .CloneNode(true) as A.EndParagraphRunProperties;
+
+                A.EndParagraphRunProperties endProperties = existingEndProperties
+                    ?? new A.EndParagraphRunProperties { Language = PowerPointTableTextDefaults.Language };
+                endProperties.RemoveAllChildren<A.HyperlinkOnClick>();
+                endProperties.RemoveAllChildren<A.HyperlinkOnMouseOver>();
+                endProperties.Language ??= PowerPointTableTextDefaults.Language;
+                A.RunProperties runProperties = existingRunProperties ?? new A.RunProperties();
+                runProperties.RemoveAllChildren<A.HyperlinkOnClick>();
+                runProperties.RemoveAllChildren<A.HyperlinkOnMouseOver>();
+                runProperties.Language ??= endProperties.Language?.Value ?? PowerPointTableTextDefaults.Language;
+
+                A.Paragraph paragraph = new();
+                if (existingParagraphProperties != null) {
+                    paragraph.Append(existingParagraphProperties);
+                }
+
+                paragraph.Append(
+                    new A.Run(runProperties, new A.Text(value ?? string.Empty)),
+                    endProperties);
+
+                Cell.TextBody.RemoveAllChildren<A.Paragraph>();
+                Cell.TextBody.Append(paragraph);
+                PowerPointEmbeddedSound.RemoveIfUnused(_slidePart,
+                    discardedSoundIds);
+            }
+        }
+
+
+        /// <summary>
+        ///     Gets or sets the merge information for this cell.
+        ///     Tuple is in format (rows, columns).
+        /// </summary>
+        public (int rows, int columns) Merge {
+            get {
+                int rows = Cell.RowSpan?.Value ?? 1;
+                int cols = Cell.GridSpan?.Value ?? 1;
+                return (rows, cols);
+            }
+            set {
+                if (value.rows <= 1) {
+                    Cell.RowSpan = null;
+                } else {
+                    Cell.RowSpan = value.rows;
+                }
+
+                if (value.columns <= 1) {
+                    Cell.GridSpan = null;
+                } else {
+                    Cell.GridSpan = value.columns;
+                }
+            }
+        }
+
+        /// <summary>
+        ///     Gets or sets the horizontal alignment of the cell text.
+        /// </summary>
+        public PowerPointTextAlignment? HorizontalAlignment {
+            get {
+                var pPr = Cell.TextBody?.Elements<Paragraph>().FirstOrDefault()?.ParagraphProperties;
+                return pPr?.Alignment?.Value.ToOfficeEnum();
+            }
+            set {
+                Cell.TextBody ??= new A.TextBody(new A.BodyProperties(), new A.ListStyle(), new A.Paragraph());
+                var paragraph = Cell.TextBody.Elements<A.Paragraph>().First();
+                paragraph.ParagraphProperties ??= new A.ParagraphProperties();
+                paragraph.ParagraphProperties.Alignment = value?.ToOpenXml();
+            }
+        }
+
+
+        /// <summary>
+        ///     Gets or sets the fill color of the cell in hex format (e.g. "FF0000").
+        /// </summary>
+        public string? FillColor {
+            get {
+                SolidFill? solid = Cell.TableCellProperties?.GetFirstChild<SolidFill>();
+                return solid?.RgbColorModelHex?.Val;
+            }
+
+
+            set {
+                Cell.TableCellProperties ??= new TableCellProperties();
+                Cell.TableCellProperties.RemoveAllChildren<SolidFill>();
+                if (value != null) {
+                    Cell.TableCellProperties.Append(new SolidFill(new RgbColorModelHex { Val = value }));
+                }
+            }
+        }
+
+        /// <summary>
+        ///     Gets or sets the border color (all sides) in hex format.        
+        /// </summary>
+        public string? BorderColor {
+            get {
+                var line = Cell.TableCellProperties?.LeftBorderLineProperties;
+                return GetLineColor(line);
+            }
+            set {
+                if (value == null) {
+                    ClearBorders(PowerPointTableCellBorders.All);
+                    return;
+                }
+
+                SetBorders(PowerPointTableCellBorders.All, value);
+            }
+        }
+
+        /// <summary>
+        ///     Gets a value indicating whether this cell is a merged continuation cell.
+        /// </summary>
+        public bool IsMergedCell =>
+            Cell.HorizontalMerge?.Value == true || Cell.VerticalMerge?.Value == true;
+
+        /// <summary>
+        ///     Gets a value indicating whether this cell is the anchor for a merged range.
+        /// </summary>
+        public bool IsMergeAnchor =>
+            (Cell.RowSpan?.Value ?? 1) > 1 || (Cell.GridSpan?.Value ?? 1) > 1;
+
+        /// <summary>
+        ///     Replaces text within the cell while preserving run formatting.
+        /// </summary>
+        public int ReplaceText(string oldValue, string newValue) {
+            if (oldValue == null) {
+                throw new ArgumentNullException(nameof(oldValue));
+            }
+            if (oldValue.Length == 0) {
+                throw new ArgumentException("Old value cannot be empty.", nameof(oldValue));
+            }
+
+            string replacement = newValue ?? string.Empty;
+            int count = 0;
+
+            if (Cell.TextBody == null) {
+                return 0;
+            }
+
+            foreach (A.Paragraph paragraph in Cell.TextBody.Elements<A.Paragraph>()) {
+                foreach (A.Run run in paragraph.Elements<A.Run>()) {
+                    foreach (A.Text text in run.Elements<A.Text>()) {
+                        string current = text.Text ?? string.Empty;
+                        int occurrences = CountOccurrences(current, oldValue);
+                        if (occurrences == 0) {
+                            continue;
+                        }
+
+                        text.Text = current.Replace(oldValue, replacement);
+                        count += occurrences;
+                    }
+                }
+            }
+
+            return count;
+        }
+
+        /// <summary>
+        ///     Gets formatted runs from the first cell paragraph.
+        /// </summary>
+        public IReadOnlyList<PowerPointTextRun> Runs =>
+            Cell.TextBody?
+                .Elements<A.Paragraph>()
+                .FirstOrDefault()?
+                .Elements<A.Run>()
+                .Select(run => new PowerPointTextRun(run, _slidePart))
+                .ToList() ?? new List<PowerPointTextRun>();
+
+        /// <summary>
+        ///     Adds a formatted run to the first cell paragraph.
+        /// </summary>
+        public PowerPointTextRun AddRun(string text, Action<PowerPointTextRun>? configure = null) {
+            A.Run run = InsertRun(text);
+            var wrapper = new PowerPointTextRun(run, _slidePart);
+            configure?.Invoke(wrapper);
+            return wrapper;
+        }
+
+        /// <summary>
+        ///     Gets or sets whether the cell text is bold.
+        /// </summary>
+        public bool Bold {
+            get => GetRun()?.RunProperties?.Bold?.Value == true;
+            set {
+                var props = EnsureRunProperties();
+                props.Bold = value ? true : null;
+            }
+        }
+
+        /// <summary>
+        ///     Gets or sets whether the cell text is italic.
+        /// </summary>
+        public bool Italic {
+            get => GetRun()?.RunProperties?.Italic?.Value == true;
+            set {
+                var props = EnsureRunProperties();
+                props.Italic = value ? true : null;
+            }
+        }
+
+        /// <summary>
+        ///     Gets or sets the font size in points.
+        /// </summary>
+        public int? FontSize {
+            get {
+                int? size = GetRun()?.RunProperties?.FontSize?.Value;
+                return size != null ? size / 100 : null;
+            }
+            set {
+                var props = EnsureRunProperties();
+                props.FontSize = PowerPointTextDefaults.ToDrawingFontSize(value, nameof(value));
+            }
+        }
+
+        /// <summary>
+        ///     Gets or sets the font name.
+        /// </summary>
+        public string? FontName {
+            get => GetRun()?.RunProperties?.GetFirstChild<A.LatinFont>()?.Typeface;
+            set {
+                var props = EnsureRunProperties();
+                props.RemoveAllChildren<A.LatinFont>();
+                if (value != null) {
+                    props.Append(new A.LatinFont { Typeface = value });
+                }
+            }
+        }
+
+        /// <summary>
+        ///     Gets or sets the text color in hex format (e.g. "FF0000").
+        /// </summary>
+        public string? Color {
+            get => GetRun()?.RunProperties?.GetFirstChild<A.SolidFill>()?.RgbColorModelHex?.Val;
+            set {
+                var props = EnsureRunProperties();
+                var latin = props.GetFirstChild<A.LatinFont>();
+                var ea = props.GetFirstChild<A.EastAsianFont>();
+                var cs = props.GetFirstChild<A.ComplexScriptFont>();
+
+                props.RemoveAllChildren<A.SolidFill>();
+                props.RemoveAllChildren<A.LatinFont>();
+                props.RemoveAllChildren<A.EastAsianFont>();
+                props.RemoveAllChildren<A.ComplexScriptFont>();
+
+                if (value != null) {
+                    props.Append(new A.SolidFill(new A.RgbColorModelHex { Val = value }));
+                }
+
+                if (latin != null) props.Append((A.LatinFont)latin.CloneNode(true));
+                if (ea != null) props.Append((A.EastAsianFont)ea.CloneNode(true));
+                if (cs != null) props.Append((A.ComplexScriptFont)cs.CloneNode(true));
+            }
+        }
+
+        /// <summary>
+        ///     Gets or sets the left padding in points.
+        /// </summary>
+        public double? PaddingLeftPoints {
+            get => FromEmus(Cell.TableCellProperties?.LeftMargin?.Value, EmusPerPoint);
+            set {
+                TableCellProperties props = EnsureProperties();
+                props.LeftMargin = ToEmus(value, EmusPerPoint);
+            }
+        }
+
+        /// <summary>
+        ///     Gets or sets the right padding in points.
+        /// </summary>
+        public double? PaddingRightPoints {
+            get => FromEmus(Cell.TableCellProperties?.RightMargin?.Value, EmusPerPoint);
+            set {
+                TableCellProperties props = EnsureProperties();
+                props.RightMargin = ToEmus(value, EmusPerPoint);
+            }
+        }
+
+        /// <summary>
+        ///     Gets or sets the top padding in points.
+        /// </summary>
+        public double? PaddingTopPoints {
+            get => FromEmus(Cell.TableCellProperties?.TopMargin?.Value, EmusPerPoint);
+            set {
+                TableCellProperties props = EnsureProperties();
+                props.TopMargin = ToEmus(value, EmusPerPoint);
+            }
+        }
+
+        /// <summary>
+        ///     Gets or sets the bottom padding in points.
+        /// </summary>
+        public double? PaddingBottomPoints {
+            get => FromEmus(Cell.TableCellProperties?.BottomMargin?.Value, EmusPerPoint);
+            set {
+                TableCellProperties props = EnsureProperties();
+                props.BottomMargin = ToEmus(value, EmusPerPoint);
+            }
+        }
+
+        /// <summary>
+        ///     Gets or sets the left padding in centimeters.
+        /// </summary>
+        public double? PaddingLeftCm {
+            get => FromEmus(Cell.TableCellProperties?.LeftMargin?.Value, PowerPointUnits.EmusPerCentimeter);
+            set {
+                TableCellProperties props = EnsureProperties();
+                props.LeftMargin = ToEmus(value, PowerPointUnits.EmusPerCentimeter);
+            }
+        }
+
+        /// <summary>
+        ///     Gets or sets the right padding in centimeters.
+        /// </summary>
+        public double? PaddingRightCm {
+            get => FromEmus(Cell.TableCellProperties?.RightMargin?.Value, PowerPointUnits.EmusPerCentimeter);
+            set {
+                TableCellProperties props = EnsureProperties();
+                props.RightMargin = ToEmus(value, PowerPointUnits.EmusPerCentimeter);
+            }
+        }
+
+        /// <summary>
+        ///     Gets or sets the top padding in centimeters.
+        /// </summary>
+        public double? PaddingTopCm {
+            get => FromEmus(Cell.TableCellProperties?.TopMargin?.Value, PowerPointUnits.EmusPerCentimeter);
+            set {
+                TableCellProperties props = EnsureProperties();
+                props.TopMargin = ToEmus(value, PowerPointUnits.EmusPerCentimeter);
+            }
+        }
+
+        /// <summary>
+        ///     Gets or sets the bottom padding in centimeters.
+        /// </summary>
+        public double? PaddingBottomCm {
+            get => FromEmus(Cell.TableCellProperties?.BottomMargin?.Value, PowerPointUnits.EmusPerCentimeter);
+            set {
+                TableCellProperties props = EnsureProperties();
+                props.BottomMargin = ToEmus(value, PowerPointUnits.EmusPerCentimeter);
+            }
+        }
+
+        /// <summary>
+        ///     Gets or sets the left padding in inches.
+        /// </summary>
+        public double? PaddingLeftInches {
+            get => FromEmus(Cell.TableCellProperties?.LeftMargin?.Value, PowerPointUnits.EmusPerInch);
+            set {
+                TableCellProperties props = EnsureProperties();
+                props.LeftMargin = ToEmus(value, PowerPointUnits.EmusPerInch);
+            }
+        }
+
+        /// <summary>
+        ///     Gets or sets the right padding in inches.
+        /// </summary>
+        public double? PaddingRightInches {
+            get => FromEmus(Cell.TableCellProperties?.RightMargin?.Value, PowerPointUnits.EmusPerInch);
+            set {
+                TableCellProperties props = EnsureProperties();
+                props.RightMargin = ToEmus(value, PowerPointUnits.EmusPerInch);
+            }
+        }
+
+        /// <summary>
+        ///     Gets or sets the top padding in inches.
+        /// </summary>
+        public double? PaddingTopInches {
+            get => FromEmus(Cell.TableCellProperties?.TopMargin?.Value, PowerPointUnits.EmusPerInch);
+            set {
+                TableCellProperties props = EnsureProperties();
+                props.TopMargin = ToEmus(value, PowerPointUnits.EmusPerInch);
+            }
+        }
+
+        /// <summary>
+        ///     Gets or sets the bottom padding in inches.
+        /// </summary>
+        public double? PaddingBottomInches {
+            get => FromEmus(Cell.TableCellProperties?.BottomMargin?.Value, PowerPointUnits.EmusPerInch);
+            set {
+                TableCellProperties props = EnsureProperties();
+                props.BottomMargin = ToEmus(value, PowerPointUnits.EmusPerInch);
+            }
+        }
+
+        // VerticalAlignment is supported through TableCellProperties.Anchor.   
+
+        /// <summary>
+        ///     Gets or sets the vertical alignment of the cell text (top/center/bottom).
+        /// </summary>
+        public PowerPointTextVerticalAlignment? VerticalAlignment {
+            get => Cell.TableCellProperties?.Anchor?.Value.ToOfficeEnum();
+            set {
+                Cell.TableCellProperties ??= new TableCellProperties();
+                Cell.TableCellProperties.Anchor = value?.ToOpenXml();
+            }
+        }
+
+        /// <summary>
+        ///     Gets or sets the text auto-fit behavior for the cell.
+        /// </summary>
+        public PowerPointTextAutoFit? TextAutoFit {
+            get {
+                A.BodyProperties? body = GetBodyProperties();
+                if (body == null) {
+                    return null;
+                }
+                if (body.GetFirstChild<A.NoAutoFit>() != null) {
+                    return PowerPointTextAutoFit.None;
+                }
+                if (body.GetFirstChild<A.NormalAutoFit>() != null) {
+                    return PowerPointTextAutoFit.Normal;
+                }
+                if (body.GetFirstChild<A.ShapeAutoFit>() != null) {
+                    return PowerPointTextAutoFit.Shape;
+                }
+                return null;
+            }
+            set {
+                A.BodyProperties body = EnsureBodyProperties();
+                body.RemoveAllChildren<A.NoAutoFit>();
+                body.RemoveAllChildren<A.NormalAutoFit>();
+                body.RemoveAllChildren<A.ShapeAutoFit>();
+
+                if (value == null) {
+                    return;
+                }
+
+                switch (value.Value) {
+                    case PowerPointTextAutoFit.None:
+                        body.Append(new A.NoAutoFit());
+                        break;
+                    case PowerPointTextAutoFit.Normal:
+                        body.Append(new A.NormalAutoFit());
+                        break;
+                    case PowerPointTextAutoFit.Shape:
+                        body.Append(new A.ShapeAutoFit());
+                        break;
+                }
+            }
+        }
+
+        /// <summary>
+        ///     Gets or sets detailed auto-fit options (only applies to Normal auto-fit).
+        /// </summary>
+        public PowerPointTextAutoFitOptions? TextAutoFitOptions {
+            get {
+                A.BodyProperties? body = GetBodyProperties();
+                A.NormalAutoFit? normal = body?.GetFirstChild<A.NormalAutoFit>();
+                if (normal == null) {
+                    return null;
+                }
+                return PowerPointTextAutoFitOptions.FromOpenXmlValues(
+                    normal.FontScale?.Value, normal.LineSpaceReduction?.Value);
+            }
+            set {
+                if (value == null) {
+                    A.BodyProperties? body = GetBodyProperties();
+                    body?.RemoveAllChildren<A.NormalAutoFit>();
+                    return;
+                }
+
+                A.BodyProperties bodyProperties = EnsureBodyProperties();
+                bodyProperties.RemoveAllChildren<A.NoAutoFit>();
+                bodyProperties.RemoveAllChildren<A.ShapeAutoFit>();
+                A.NormalAutoFit normal = bodyProperties.GetFirstChild<A.NormalAutoFit>()
+                    ?? bodyProperties.AppendChild(new A.NormalAutoFit());
+                ApplyNormalAutoFitOptions(normal, value.Value);
+            }
+        }
+
+        /// <summary>
+        ///     Sets the auto-fit mode and optional Normal auto-fit options.
+        /// </summary>
+        public PowerPointTableCell SetTextAutoFit(PowerPointTextAutoFit fit, PowerPointTextAutoFitOptions? options = null) {
+            TextAutoFit = fit;
+            if (fit == PowerPointTextAutoFit.Normal && options != null) {
+                A.BodyProperties body = EnsureBodyProperties();
+                A.NormalAutoFit normal = body.GetFirstChild<A.NormalAutoFit>()
+                    ?? body.AppendChild(new A.NormalAutoFit());
+                ApplyNormalAutoFitOptions(normal, options.Value);
+            }
+            return this;
+        }
+
+        /// <summary>
+        ///     Applies border styling to the specified sides.
+        /// </summary>
+        public void SetBorders(PowerPointTableCellBorders borders, string color, double? widthPoints = null) {
+            if (string.IsNullOrWhiteSpace(color)) {
+                throw new ArgumentException("Border color cannot be null or empty.", nameof(color));
+            }
+
+            TableCellProperties props = EnsureProperties();
+
+            if (borders.HasFlag(PowerPointTableCellBorders.Left)) {
+                props.LeftBorderLineProperties ??= new LeftBorderLineProperties();
+                ApplyLine(props.LeftBorderLineProperties, color, widthPoints);
+            }
+            if (borders.HasFlag(PowerPointTableCellBorders.Top)) {
+                props.TopBorderLineProperties ??= new TopBorderLineProperties();
+                ApplyLine(props.TopBorderLineProperties, color, widthPoints);
+            }
+            if (borders.HasFlag(PowerPointTableCellBorders.Right)) {
+                props.RightBorderLineProperties ??= new RightBorderLineProperties();
+                ApplyLine(props.RightBorderLineProperties, color, widthPoints);
+            }
+            if (borders.HasFlag(PowerPointTableCellBorders.Bottom)) {
+                props.BottomBorderLineProperties ??= new BottomBorderLineProperties();
+                ApplyLine(props.BottomBorderLineProperties, color, widthPoints);
+            }
+            if (borders.HasFlag(PowerPointTableCellBorders.DiagonalDown)) {
+                props.TopLeftToBottomRightBorderLineProperties ??= new TopLeftToBottomRightBorderLineProperties();
+                ApplyLine(props.TopLeftToBottomRightBorderLineProperties, color, widthPoints);
+            }
+            if (borders.HasFlag(PowerPointTableCellBorders.DiagonalUp)) {
+                props.BottomLeftToTopRightBorderLineProperties ??= new BottomLeftToTopRightBorderLineProperties();
+                ApplyLine(props.BottomLeftToTopRightBorderLineProperties, color, widthPoints);
+            }
+        }
+
+        /// <summary>
+        ///     Applies border styling with a dash pattern to the specified sides.
+        /// </summary>
+        public void SetBorders(PowerPointTableCellBorders borders, string color, double? widthPoints, PowerPointLineDashStyle dash) {
+            if (string.IsNullOrWhiteSpace(color)) {
+                throw new ArgumentException("Border color cannot be null or empty.", nameof(color));
+            }
+
+            TableCellProperties props = EnsureProperties();
+
+            if (borders.HasFlag(PowerPointTableCellBorders.Left)) {
+                props.LeftBorderLineProperties ??= new LeftBorderLineProperties();
+                ApplyLine(props.LeftBorderLineProperties, color, widthPoints, dash);
+            }
+            if (borders.HasFlag(PowerPointTableCellBorders.Top)) {
+                props.TopBorderLineProperties ??= new TopBorderLineProperties();
+                ApplyLine(props.TopBorderLineProperties, color, widthPoints, dash);
+            }
+            if (borders.HasFlag(PowerPointTableCellBorders.Right)) {
+                props.RightBorderLineProperties ??= new RightBorderLineProperties();
+                ApplyLine(props.RightBorderLineProperties, color, widthPoints, dash);
+            }
+            if (borders.HasFlag(PowerPointTableCellBorders.Bottom)) {
+                props.BottomBorderLineProperties ??= new BottomBorderLineProperties();
+                ApplyLine(props.BottomBorderLineProperties, color, widthPoints, dash);
+            }
+            if (borders.HasFlag(PowerPointTableCellBorders.DiagonalDown)) {
+                props.TopLeftToBottomRightBorderLineProperties ??= new TopLeftToBottomRightBorderLineProperties();
+                ApplyLine(props.TopLeftToBottomRightBorderLineProperties, color, widthPoints, dash);
+            }
+            if (borders.HasFlag(PowerPointTableCellBorders.DiagonalUp)) {
+                props.BottomLeftToTopRightBorderLineProperties ??= new BottomLeftToTopRightBorderLineProperties();
+                ApplyLine(props.BottomLeftToTopRightBorderLineProperties, color, widthPoints, dash);
+            }
+        }
+
+        /// <summary>
+        ///     Clears borders on the specified sides.
+        /// </summary>
+        public void ClearBorders(PowerPointTableCellBorders borders) {
+            TableCellProperties props = EnsureProperties();
+
+            if (borders.HasFlag(PowerPointTableCellBorders.Left)) {
+                props.LeftBorderLineProperties = null;
+            }
+            if (borders.HasFlag(PowerPointTableCellBorders.Top)) {
+                props.TopBorderLineProperties = null;
+            }
+            if (borders.HasFlag(PowerPointTableCellBorders.Right)) {
+                props.RightBorderLineProperties = null;
+            }
+            if (borders.HasFlag(PowerPointTableCellBorders.Bottom)) {
+                props.BottomBorderLineProperties = null;
+            }
+            if (borders.HasFlag(PowerPointTableCellBorders.DiagonalDown)) {
+                props.TopLeftToBottomRightBorderLineProperties = null;
+            }
+            if (borders.HasFlag(PowerPointTableCellBorders.DiagonalUp)) {
+                props.BottomLeftToTopRightBorderLineProperties = null;
+            }
+        }
+
+        private static void ApplyLine(LinePropertiesType line, string color, double? widthPoints) {
+            line.RemoveAllChildren<SolidFill>();
+            line.Append(new SolidFill(new RgbColorModelHex { Val = color }));
+            if (widthPoints != null) {
+                line.Width = (int)Math.Round(widthPoints.Value * EmusPerPoint);
+            }
+        }
+
+        private static void ApplyLine(LinePropertiesType line, string color, double? widthPoints, PowerPointLineDashStyle dash) {
+            ApplyLine(line, color, widthPoints);
+            line.RemoveAllChildren<A.PresetDash>();
+            line.Append(new A.PresetDash { Val = dash.ToOpenXml() });
+        }
+
+        private static string? GetLineColor(LinePropertiesType? line) {
+            return line?.GetFirstChild<SolidFill>()?.RgbColorModelHex?.Val;
+        }
+
+        private static int? ToEmus(double? value, double emusPerUnit) {
+            return value != null ? (int)Math.Round(value.Value * emusPerUnit) : null;
+        }
+
+        private static double? FromEmus(int? emus, double emusPerUnit) {
+            return emus != null ? emus.Value / emusPerUnit : null;
+        }
+
+        private static int CountOccurrences(string value, string oldValue) {
+            int count = 0;
+            int index = 0;
+            while (true) {
+                index = value.IndexOf(oldValue, index, StringComparison.Ordinal);
+                if (index < 0) {
+                    break;
+                }
+                count++;
+                index += oldValue.Length;
+            }
+            return count;
+        }
+
+        private static void ApplyNormalAutoFitOptions(A.NormalAutoFit normal, PowerPointTextAutoFitOptions options) {
+            normal.FontScale = options.FontScaleValue;
+            normal.LineSpaceReduction = options.LineSpaceReductionValue;
+        }
+
+        private TableCellProperties EnsureProperties() {
+            return Cell.TableCellProperties ??= new TableCellProperties();
+        }
+
+        private A.BodyProperties? GetBodyProperties() {
+            return Cell.TextBody?.GetFirstChild<A.BodyProperties>();
+        }
+
+        private A.BodyProperties EnsureBodyProperties() {
+            Cell.TextBody ??= new A.TextBody(new A.BodyProperties(), new A.ListStyle());
+            A.BodyProperties? body = Cell.TextBody.GetFirstChild<A.BodyProperties>();
+            if (body == null) {
+                body = new A.BodyProperties();
+                Cell.TextBody.PrependChild(body);
+            }
+            return body;
+        }
+
+        private A.Run? GetRun() {
+            return Cell.TextBody?
+                .Elements<A.Paragraph>()
+                .FirstOrDefault()?
+                .Elements<A.Run>()
+                .FirstOrDefault();
+        }
+
+        private A.Paragraph EnsureParagraph() {
+            Cell.TextBody ??= new A.TextBody(new A.BodyProperties(), new A.ListStyle());
+            A.Paragraph paragraph = Cell.TextBody.Elements<A.Paragraph>().FirstOrDefault() ?? new A.Paragraph();
+            if (paragraph.Parent == null) {
+                Cell.TextBody.Append(paragraph);
+            }
+
+            return paragraph;
+        }
+
+        private A.Run InsertRun(string text) {
+            A.Paragraph paragraph = EnsureParagraph();
+            A.Run run = new(new A.Text(text ?? string.Empty));
+            A.EndParagraphRunProperties? endProps = paragraph.GetFirstChild<A.EndParagraphRunProperties>();
+            if (endProps != null) {
+                paragraph.InsertBefore(run, endProps);
+            } else {
+                paragraph.Append(run);
+            }
+
+            return run;
+        }
+
+        private A.Run EnsureRun() {
+            A.Paragraph paragraph = EnsureParagraph();
+            A.Run run = paragraph.Elements<A.Run>().FirstOrDefault() ?? new A.Run(new A.Text(string.Empty));
+            if (run.Parent == null) {
+                paragraph.Append(run);
+            }
+
+            return run;
+        }
+
+        private A.RunProperties EnsureRunProperties() {
+            A.Run run = EnsureRun();
+            return run.RunProperties ??= new A.RunProperties();
+        }
+    }
+}

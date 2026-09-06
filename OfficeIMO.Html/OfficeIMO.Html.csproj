@@ -1,0 +1,84 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>HTML parsing, resource policy, CSS layout, diagnostics, and direct rendering for OfficeIMO converters.</Description>
+    <AssemblyName>OfficeIMO.Html</AssemblyName>
+    <AssemblyTitle>OfficeIMO.Html</AssemblyTitle>
+    <VersionPrefix>3.4.0</VersionPrefix>
+    <TargetFrameworks>netstandard2.0;net8.0;net10.0</TargetFrameworks>
+    <TargetFrameworks Condition=" '$([MSBuild]::IsOsPlatform(`Windows`))' ">$(TargetFrameworks);net472</TargetFrameworks>
+    <GeneratePackageOnBuild>False</GeneratePackageOnBuild>
+    <Company>Evotec</Company>
+    <Authors>Przemyslaw Klys</Authors>
+    <PackageId>OfficeIMO.Html</PackageId>
+    <PackageTags>html;css;policy;converter;image-export;png;jpeg;tiff;svg;webp;officeimo;net472;netstandard2.0;net8.0;net10.0</PackageTags>
+    <PackageProjectUrl>https://github.com/EvotecIT/OfficeIMO</PackageProjectUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <IsPublishable>True</IsPublishable>
+    <PackageIcon>OfficeIMO.png</PackageIcon>
+    <RepositoryUrl>https://github.com/EvotecIT/OfficeIMO</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <DebugType>portable</DebugType>
+    <ProduceReferenceAssembly>False</ProduceReferenceAssembly>
+    <GenerateDocumentationFile>True</GenerateDocumentationFile>
+    <LangVersion>Latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <NoWarn>$(NoWarn);NU5104</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\OfficeHtmlDocumentShell.css" LogicalName="OfficeIMO.Html.Assets.OfficeHtmlDocumentShell.css" />
+    <None Include="..\Assets\OfficeIMO.png">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+    <None Include="README.md">
+      <Pack>True</Pack>
+      <PackagePath>README.md</PackagePath>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AngleSharp" Version="1.7.1" />
+    <PackageReference Include="AngleSharp.Css" Version="1.0.1" />
+    <PackageReference Include="System.Text.Encoding.CodePages" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OfficeIMO.Core\OfficeIMO.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="OfficeIMO.Html.Benchmarks" />
+    <InternalsVisibleTo Include="OfficeIMO.Html.Tests" />
+    <InternalsVisibleTo Include="OfficeIMO.Epub.Image" />
+    <InternalsVisibleTo Include="OfficeIMO.Excel.Html" />
+    <InternalsVisibleTo Include="OfficeIMO.Html.Pdf" />
+    <InternalsVisibleTo Include="OfficeIMO.Html.Rtf" />
+    <InternalsVisibleTo Include="OfficeIMO.Mhtml" />
+    <InternalsVisibleTo Include="OfficeIMO.Email.Image" />
+    <InternalsVisibleTo Include="OfficeIMO.Email.Html" />
+    <InternalsVisibleTo Include="OfficeIMO.Mhtml.Pdf" />
+    <InternalsVisibleTo Include="OfficeIMO.Markdown.Html" />
+    <InternalsVisibleTo Include="OfficeIMO.OneNote.Html" />
+    <InternalsVisibleTo Include="OfficeIMO.PowerPoint.Html" />
+    <InternalsVisibleTo Include="OfficeIMO.Reader.Html" />
+    <InternalsVisibleTo Include="OfficeIMO.Workflows" />
+    <InternalsVisibleTo Include="OfficeIMO.Word.Html" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="System" />
+    <Using Include="System.Collections.Generic" />
+    <Using Include="System.IO" />
+    <Using Include="System.Linq" />
+    <Using Include="System.Net" />
+    <Using Include="System.Text" />
+    <Using Include="System.Threading" />
+    <Using Include="System.Threading.Tasks" />
+    <Using Include="AngleSharp.Dom" />
+    <Using Include="OfficeIMO.Drawing" />
+  </ItemGroup>
+
+</Project>

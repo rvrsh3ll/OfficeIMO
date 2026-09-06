@@ -1,0 +1,2148 @@
+{
+  "version": 3,
+  "description": "OfficeIMO PDF conversion proof scenarios. The manifest is consumed by tests and the PDF visual review gallery so converter coverage stays observable.",
+  "converterCatalog": [
+    {
+      "id": "word",
+      "sourceFormats": [ "doc", "docx", "docm", "dotx", "dotm" ],
+      "adapter": "OfficeIMO.Word.Pdf",
+      "projectPath": "OfficeIMO.Word.Pdf/OfficeIMO.Word.Pdf.csproj",
+      "ownerPaths": [ "OfficeIMO.Word/**", "OfficeIMO.Word.Pdf/**" ],
+      "optionsType": "OfficeIMO.Word.Pdf.WordToPdfOptions",
+      "renderingProfileType": "OfficeIMO.Drawing.OfficeRenderingProfile",
+      "extensionTypes": [ "OfficeIMO.Word.Pdf.WordPdfConverterExtensions" ],
+      "scenarioIds": [ "word-native-report" ],
+      "conversionMode": "native-paged",
+      "fidelityStatus": "candidate",
+      "referencePolicy": "microsoft-office-plus-officeimo-regression",
+      "referenceEvidenceIds": [ "microsoft-word-16.109-native-report" ],
+      "capabilityClaims": [
+        {
+          "capability": "semantic-text-headings-lists-and-tables",
+          "level": "exact",
+          "evidenceScenarioIds": [ "word-native-report" ]
+        },
+        {
+          "capability": "advanced-word-layout-and-drawing-objects",
+          "level": "supported-with-approximation",
+          "evidenceScenarioIds": [ "word-native-report" ]
+        }
+      ]
+    },
+    {
+      "id": "excel",
+      "sourceFormats": [ "xlsx", "xlsm", "xltx", "xltm", "xls", "xlsb" ],
+      "adapter": "OfficeIMO.Excel.Pdf",
+      "projectPath": "OfficeIMO.Excel.Pdf/OfficeIMO.Excel.Pdf.csproj",
+      "ownerPaths": [ "OfficeIMO.Excel/**", "OfficeIMO.Excel.Pdf/**" ],
+      "optionsType": "OfficeIMO.Excel.Pdf.ExcelToPdfOptions",
+      "renderingProfileType": "OfficeIMO.Drawing.OfficeRenderingProfile",
+      "extensionTypes": [ "OfficeIMO.Excel.Pdf.ExcelPdfConverterExtensions" ],
+      "scenarioIds": [ "excel-native-daily-workbook", "excel-dashboard-report" ],
+      "conversionMode": "native-paged",
+      "fidelityStatus": "candidate",
+      "referencePolicy": "microsoft-excel-plus-officeimo-regression",
+      "referenceEvidenceIds": [ "microsoft-excel-16.109-native-workbook" ],
+      "capabilityClaims": [
+        {
+          "capability": "worksheet-values-formats-links-and-basic-pagination",
+          "level": "exact",
+          "evidenceScenarioIds": [ "excel-native-daily-workbook" ]
+        },
+        {
+          "capability": "worksheet-canvas-drawings-charts-and-dashboard-layout",
+          "level": "supported-with-approximation",
+          "evidenceScenarioIds": [ "excel-native-daily-workbook", "excel-dashboard-report" ]
+        }
+      ]
+    },
+    {
+      "id": "powerpoint",
+      "sourceFormats": [ "pptx", "pptm" ],
+      "adapter": "OfficeIMO.PowerPoint.Pdf",
+      "projectPath": "OfficeIMO.PowerPoint.Pdf/OfficeIMO.PowerPoint.Pdf.csproj",
+      "ownerPaths": [ "OfficeIMO.PowerPoint/**", "OfficeIMO.PowerPoint.Pdf/**", "OfficeIMO.PowerPoint.Html/**" ],
+      "optionsType": "OfficeIMO.PowerPoint.Pdf.PowerPointToPdfOptions",
+      "renderingProfileType": "OfficeIMO.Drawing.OfficeRenderingProfile",
+      "extensionTypes": [ "OfficeIMO.PowerPoint.Pdf.PowerPointPdfConverterExtensions" ],
+      "scenarioIds": [ "powerpoint-native-dense-layout", "powerpoint-layout-theme-groups" ],
+      "conversionMode": "native-slide-canvas",
+      "fidelityStatus": "candidate",
+      "referencePolicy": "microsoft-powerpoint-plus-officeimo-regression",
+      "referenceEvidenceIds": [ "microsoft-powerpoint-16.109-native-dense-layout" ],
+      "capabilityClaims": [
+        {
+          "capability": "slide-geometry-basic-text-images-and-tables",
+          "level": "exact",
+          "evidenceScenarioIds": [ "powerpoint-native-dense-layout" ]
+        },
+        {
+          "capability": "advanced-theme-drawingml-smartart-and-chart-layout",
+          "level": "supported-with-approximation",
+          "evidenceScenarioIds": [ "powerpoint-layout-theme-groups" ]
+        }
+      ]
+    },
+    {
+      "id": "markdown",
+      "sourceFormats": [ "md", "markdown" ],
+      "adapter": "OfficeIMO.Markdown.Pdf",
+      "projectPath": "OfficeIMO.Markdown.Pdf/OfficeIMO.Markdown.Pdf.csproj",
+      "ownerPaths": [ "OfficeIMO.Markdown/**", "OfficeIMO.Markdown.Pdf/**" ],
+      "optionsType": "OfficeIMO.Markdown.Pdf.MarkdownToPdfOptions",
+      "extensionTypes": [ "OfficeIMO.Markdown.Pdf.MarkdownPdfConverterExtensions" ],
+      "scenarioIds": [ "markdown-technical-document", "markdown-invoice-statement" ],
+      "conversionMode": "semantic-document",
+      "fidelityStatus": "regression-proven",
+      "referencePolicy": "officeimo-regression"
+    },
+    {
+      "id": "html",
+      "sourceFormats": [ "html", "htm" ],
+      "adapter": "OfficeIMO.Html.Pdf",
+      "projectPath": "OfficeIMO.Html.Pdf/OfficeIMO.Html.Pdf.csproj",
+      "ownerPaths": [ "OfficeIMO.Html/**", "OfficeIMO.Html.Pdf/**" ],
+      "optionsType": "OfficeIMO.Html.Pdf.HtmlToPdfOptions",
+      "extensionTypes": [ "OfficeIMO.Html.Pdf.HtmlPdfConverterExtensions" ],
+      "scenarioIds": [ "html-document-profile", "html-static-market-corpus", "html-css-resource-policy", "html-pdf-roundtrip-profile-contract" ],
+      "conversionMode": "native-static-paged",
+      "fidelityStatus": "candidate",
+      "referencePolicy": "standards-corpus-plus-officeimo-regression",
+      "referenceEvidenceIds": [ "html-static-market-standards-corpus" ],
+      "capabilityClaims": [
+        {
+          "capability": "static-business-html-shared-png-svg-and-searchable-pdf-scene",
+          "level": "exact",
+          "evidenceScenarioIds": [ "html-static-market-corpus" ]
+        },
+        {
+          "capability": "advanced-css-fragmentation-typography-and-svg-effects",
+          "level": "supported-with-approximation",
+          "evidenceScenarioIds": [ "html-static-market-corpus", "html-css-resource-policy" ]
+        },
+        {
+          "capability": "javascript-and-interactive-browser-state",
+          "level": "unsupported",
+          "evidenceScenarioIds": [ "html-css-resource-policy" ]
+        }
+      ]
+    },
+    {
+      "id": "mhtml",
+      "sourceFormats": [ "mhtml", "mht" ],
+      "adapter": "OfficeIMO.Mhtml.Pdf",
+      "projectPath": "OfficeIMO.Mhtml.Pdf/OfficeIMO.Mhtml.Pdf.csproj",
+      "ownerPaths": [ "OfficeIMO.Mhtml/**", "OfficeIMO.Mhtml.Pdf/**", "OfficeIMO.Html/**", "OfficeIMO.Html.Pdf/**" ],
+      "optionsType": "OfficeIMO.Html.Pdf.HtmlToPdfOptions",
+      "extensionTypes": [ "OfficeIMO.Mhtml.MhtmlPdfConverterExtensions" ],
+      "scenarioIds": [ "html-css-resource-policy" ],
+      "conversionMode": "native-static-paged",
+      "fidelityStatus": "candidate",
+      "referencePolicy": "officeimo-regression"
+    },
+    {
+      "id": "rtf",
+      "sourceFormats": [ "rtf" ],
+      "adapter": "OfficeIMO.Rtf.Pdf",
+      "projectPath": "OfficeIMO.Rtf.Pdf/OfficeIMO.Rtf.Pdf.csproj",
+      "ownerPaths": [ "OfficeIMO.Rtf/**", "OfficeIMO.Rtf.Pdf/**" ],
+      "optionsType": "OfficeIMO.Rtf.Pdf.RtfToPdfOptions",
+      "extensionTypes": [ "OfficeIMO.Rtf.Pdf.RtfPdfConverterExtensions" ],
+      "scenarioIds": [ "rtf-pdf-roundtrip" ],
+      "conversionMode": "semantic-document",
+      "fidelityStatus": "regression-proven",
+      "referencePolicy": "officeimo-regression"
+    },
+    {
+      "id": "onenote",
+      "sourceFormats": [ "one", "onetoc2", "onepkg" ],
+      "adapter": "OfficeIMO.OneNote.Pdf",
+      "projectPath": "OfficeIMO.OneNote.Pdf/OfficeIMO.OneNote.Pdf.csproj",
+      "ownerPaths": [ "OfficeIMO.OneNote/**", "OfficeIMO.OneNote.Markdown/**", "OfficeIMO.OneNote.Pdf/**" ],
+      "optionsType": "OfficeIMO.OneNote.Pdf.OneNoteToPdfOptions",
+      "extensionTypes": [ "OfficeIMO.OneNote.Pdf.OneNoteSectionPdfConverterExtensions", "OfficeIMO.OneNote.Pdf.OneNoteNotebookPdfConverterExtensions" ],
+      "scenarioIds": [ "onenote-semantic-document" ],
+      "conversionMode": "explicit-semantic-document",
+      "fidelityStatus": "accepted-degradation",
+      "referencePolicy": "semantic-contract"
+    },
+    {
+      "id": "asciidoc",
+      "sourceFormats": [ "adoc", "asciidoc", "asc" ],
+      "adapter": "OfficeIMO.AsciiDoc.Pdf",
+      "projectPath": "OfficeIMO.AsciiDoc.Pdf/OfficeIMO.AsciiDoc.Pdf.csproj",
+      "ownerPaths": [ "OfficeIMO.AsciiDoc/**", "OfficeIMO.AsciiDoc.Markdown/**", "OfficeIMO.AsciiDoc.Pdf/**" ],
+      "optionsType": "OfficeIMO.AsciiDoc.Pdf.AsciiDocToPdfOptions",
+      "extensionTypes": [ "OfficeIMO.AsciiDoc.Pdf.AsciiDocPdfConverterExtensions" ],
+      "scenarioIds": [ "asciidoc-direct-semantic-document" ],
+      "conversionMode": "loss-aware-semantic-document",
+      "fidelityStatus": "accepted-degradation",
+      "referencePolicy": "semantic-contract"
+    },
+    {
+      "id": "latex",
+      "sourceFormats": [ "tex", "latex" ],
+      "adapter": "OfficeIMO.Latex.Pdf",
+      "projectPath": "OfficeIMO.Latex.Pdf/OfficeIMO.Latex.Pdf.csproj",
+      "ownerPaths": [ "OfficeIMO.Latex/**", "OfficeIMO.Latex.Markdown/**", "OfficeIMO.Latex.Pdf/**" ],
+      "optionsType": "OfficeIMO.Latex.Pdf.LatexToPdfOptions",
+      "extensionTypes": [ "OfficeIMO.Latex.Pdf.LatexPdfConverterExtensions" ],
+      "scenarioIds": [ "latex-direct-semantic-document" ],
+      "conversionMode": "loss-aware-semantic-document",
+      "fidelityStatus": "accepted-degradation",
+      "referencePolicy": "semantic-contract"
+    }
+  ],
+  "referenceEvidence": [
+    {
+      "id": "microsoft-word-16.109-native-report",
+      "kind": "external-office-reference",
+      "scenarioId": "word-native-report",
+      "producer": "Microsoft Word 16.109",
+      "metadataPath": "OfficeIMO.Pdf.Tests/Pdf/ReferenceBaselines/reference-corpus.json"
+    },
+    {
+      "id": "microsoft-excel-16.109-native-workbook",
+      "kind": "external-office-reference",
+      "scenarioId": "excel-native-daily-workbook",
+      "producer": "Microsoft Excel 16.109",
+      "metadataPath": "OfficeIMO.Pdf.Tests/Pdf/ReferenceBaselines/reference-corpus.json"
+    },
+    {
+      "id": "microsoft-powerpoint-16.109-native-dense-layout",
+      "kind": "external-office-reference",
+      "scenarioId": "powerpoint-native-dense-layout",
+      "producer": "Microsoft PowerPoint 16.109",
+      "metadataPath": "OfficeIMO.Pdf.Tests/Pdf/ReferenceBaselines/reference-corpus.json"
+    },
+    {
+      "id": "html-static-market-standards-corpus",
+      "kind": "standards-corpus",
+      "scenarioId": "html-static-market-corpus",
+      "producer": "OfficeIMO static HTML market corpus",
+      "sourcePath": "OfficeIMO.TestAssets/HtmlRenderingCorpus.cs",
+      "baselineDirectory": "OfficeIMO.Pdf.Tests/Pdf/VisualBaselines"
+    }
+  ],
+  "compositionRoutes": [
+    {
+      "id": "opendocument-text-via-word",
+      "sourceFormats": [ "odt", "ott" ],
+      "status": "direct-loss-aware-adapter",
+      "stages": [ "OfficeIMO.OpenDocument.Odt.Pdf", "OfficeIMO.Word.OpenDocument", "OfficeIMO.Word.Pdf" ],
+      "implementationProject": "OfficeIMO.OpenDocument.Odt.Pdf/OfficeIMO.OpenDocument.Odt.Pdf.csproj",
+      "evidenceTest": "OfficeIMO.OpenDocument.Converters.Tests/OpenDocumentPdfConversionContracts.cs#OdtFacadePreservesProjectionLossAndProducesReadablePdf",
+      "diagnosticContract": "The direct adapter merges ODT-to-Word feature mappings with Word-to-PDF diagnostics in PdfDocumentConversionResult."
+    },
+    {
+      "id": "opendocument-spreadsheet-via-excel",
+      "sourceFormats": [ "ods", "ots" ],
+      "status": "direct-loss-aware-adapter",
+      "stages": [ "OfficeIMO.OpenDocument.Ods.Pdf", "OfficeIMO.Excel.OpenDocument", "OfficeIMO.Excel.Pdf" ],
+      "implementationProject": "OfficeIMO.OpenDocument.Ods.Pdf/OfficeIMO.OpenDocument.Ods.Pdf.csproj",
+      "evidenceTest": "OfficeIMO.OpenDocument.Converters.Tests/OpenDocumentPdfConversionContracts.cs#OdsFacadeUsesExcelPdfEngineAndExposesInformationEvidence",
+      "diagnosticContract": "The direct adapter merges ODS-to-Excel feature mappings with Excel-to-PDF diagnostics in PdfDocumentConversionResult."
+    },
+    {
+      "id": "opendocument-presentation-via-powerpoint",
+      "sourceFormats": [ "odp", "otp" ],
+      "status": "direct-loss-aware-adapter",
+      "stages": [ "OfficeIMO.OpenDocument.Odp.Pdf", "OfficeIMO.PowerPoint.OpenDocument", "OfficeIMO.PowerPoint.Pdf" ],
+      "implementationProject": "OfficeIMO.OpenDocument.Odp.Pdf/OfficeIMO.OpenDocument.Odp.Pdf.csproj",
+      "evidenceTest": "OfficeIMO.OpenDocument.Converters.Tests/OpenDocumentPdfConversionContracts.cs#OdpFacadeUsesPowerPointPdfEngineAndKeepsAnimationLoss",
+      "diagnosticContract": "The direct adapter merges ODP-to-PowerPoint feature mappings with PowerPoint-to-PDF diagnostics in PdfDocumentConversionResult."
+    },
+    {
+      "id": "email-document",
+      "sourceFormats": [ "eml", "msg", "oft", "tnef" ],
+      "status": "direct-loss-aware-adapter",
+      "stages": [ "OfficeIMO.Reader.Email", "OfficeIMO.Reader.Core", "OfficeIMO.Reader.Pdf" ],
+      "implementationProject": "OfficeIMO.Reader.All/OfficeIMO.Reader.All.csproj",
+      "evidenceTest": "OfficeIMO.Reader.Tests/Reader.DirectPdfAdapters.cs#EmailFacade_ProducesSearchablePdfWithEmailPolicyEvidence",
+      "diagnosticContract": "The direct façade applies the Reader email body, inline-resource, and attachment policies, then preserves their evidence through the shared searchable PDF projection."
+    },
+    {
+      "id": "epub-book",
+      "sourceFormats": [ "epub" ],
+      "status": "direct-loss-aware-adapter",
+      "stages": [ "OfficeIMO.Reader.Epub", "OfficeIMO.Reader.Core", "OfficeIMO.Reader.Pdf" ],
+      "implementationProject": "OfficeIMO.Reader.All/OfficeIMO.Reader.All.csproj",
+      "evidenceTest": "OfficeIMO.Reader.Tests/Reader.DirectPdfAdapters.cs#EpubFacade_PreservesChapterOrderAndReportsEpubPolicy",
+      "diagnosticContract": "The direct façade preserves spine chapter order and applies explicit resource, navigation, and pagination policies through the shared searchable PDF projection."
+    },
+    {
+      "id": "visio-diagram",
+      "sourceFormats": [ "vsdx" ],
+      "status": "direct-loss-aware-adapter",
+      "stages": [ "OfficeIMO.Visio.Pdf", "OfficeIMO.Reader.Visio", "OfficeIMO.Reader.Core", "OfficeIMO.Reader.Pdf" ],
+      "implementationProject": "OfficeIMO.Visio.Pdf/OfficeIMO.Visio.Pdf.csproj",
+      "evidenceTest": "OfficeIMO.Visio.Tests/Visio.Pdf.ApiConsistency.cs#LoadedDocumentProjectsDirectlyWithoutReopeningOrChangingItsDestination",
+      "diagnosticContract": "The document-shaped adapter reuses the shared Visio reader and PDF projection owners, emits searchable diagram semantics, and retains explicit preview-versus-semantic fallback evidence. It does not claim native vector-page equivalence when the Reader projection cannot preserve it."
+    }
+  ],
+  "qualityContract": {
+    "goal": "Premium PDF support means generic, reusable OfficeIMO.Pdf capabilities with thin source adapters, visible diagnostics for every accepted degradation, and repeatable artifact proof for creation, conversion, reading, manipulation, and review workflows.",
+    "runtimeOwnership": "OfficeIMO.Pdf and OfficeIMO.Drawing own shared PDF layout, typography, reading, manipulation, diagnostics, compliance groundwork, and proof primitives. Word, Excel, PowerPoint, Markdown, HTML, RTF, OneNote, AsciiDoc, LaTeX, and Reader packages remain thin adapters over those primitives; OneNote.Markdown, AsciiDoc.Markdown, and Latex.Markdown own their explicit semantic projections and loss diagnostics.",
+    "nonGoals": [
+      "No TestimoX-specific rendering logic.",
+      "No silent visual-only redaction or silent content loss.",
+      "No formal PDF/A, PDF/UA, Factur-X, or ZUGFeRD conformance claim without external validator proof.",
+      "No browser-grade HTML/CSS renderer claim for OfficeIMO.Html.Pdf.",
+      "No TeX execution or TeX-layout parity claim for OfficeIMO.Latex.Pdf.",
+      "No full editable PDF-to-Office reconstruction claim beyond declared logical-table reconstruction scenarios."
+    ],
+    "requiredProof": [
+      "artifact-hash",
+      "text-marker",
+      "logical-signal",
+      "visual-artifact",
+      "warning-contract",
+      "accepted-degradation-policy",
+      "engine-owner",
+      "thin-adapter-boundary"
+    ],
+    "fidelityLevels": [
+      "exact",
+      "supported-with-approximation",
+      "rasterized",
+      "omitted",
+      "unsupported"
+    ],
+    "fidelityStatuses": [
+      "candidate",
+      "regression-proven",
+      "externally-verified",
+      "accepted-degradation"
+    ],
+    "premiumClaimRule": "A converter can be marked externally-verified only when its declared reference policy has stable source artifacts, producer/version metadata, page geometry, visual comparison results, text/link/structure proof, and no unexpected conversion warnings.",
+    "exactScopeRule": "The exact fidelity level applies only to the named capability semantics and invariants. It never means whole-document pixel equivalence; visual distance and known approximations remain governed by the declared reference evidence.",
+    "fidelityTiers": [
+      "premium-core",
+      "premium-adapter",
+      "review-surface",
+      "accepted-degradation",
+      "table-only-reconstruction"
+    ],
+    "scenarioQuality": [
+      {
+        "id": "word-native-report",
+        "tier": "premium-adapter",
+        "owner": "OfficeIMO.Word.Pdf over OfficeIMO.Pdf",
+        "closureFocus": [ "word-layout-fidelity", "style-cascade", "tables", "headers-footers", "field-and-smartart-diagnostics" ]
+      },
+      {
+        "id": "excel-native-daily-workbook",
+        "tier": "premium-adapter",
+        "owner": "OfficeIMO.Excel.Pdf over OfficeIMO.Pdf",
+        "closureFocus": [ "print-layout", "pagination", "formats", "images", "charts" ]
+      },
+      {
+        "id": "excel-dashboard-report",
+        "tier": "premium-adapter",
+        "owner": "OfficeIMO.Excel.Pdf over OfficeIMO.Pdf and OfficeIMO.Drawing",
+        "closureFocus": [ "dashboard-layout", "conditional-formatting", "chart-snapshots", "fit-to-page" ]
+      },
+      {
+        "id": "markdown-technical-document",
+        "tier": "premium-adapter",
+        "owner": "OfficeIMO.Markdown.Pdf over OfficeIMO.Pdf",
+        "closureFocus": [ "long-document-flow", "theme-consistency", "front-matter", "tables", "code-panels" ]
+      },
+      {
+        "id": "html-document-profile",
+        "tier": "premium-adapter",
+        "owner": "OfficeIMO.Html.Pdf over the OfficeIMO.Html shared render scene and OfficeIMO.Pdf",
+        "closureFocus": [ "native-static-html", "resource-policy", "page-breaks", "tables", "diagnostics" ]
+      },
+      {
+        "id": "html-static-market-corpus",
+        "tier": "premium-adapter",
+        "owner": "OfficeIMO.Html.Pdf over the shared OfficeIMO.Html and OfficeIMO.Drawing scene",
+        "closureFocus": [ "shared-png-svg-pdf-scene", "approved-poppler-baselines", "paged-and-continuous-layout", "multilingual-text", "warning-contract" ]
+      },
+      {
+        "id": "html-css-resource-policy",
+        "tier": "accepted-degradation",
+        "owner": "OfficeIMO.Html.Pdf over OfficeIMO.Word.Html and OfficeIMO.Pdf",
+        "closureFocus": [ "trusted-resource-policy", "blocked-resource-diagnostics", "shared-conversion-report" ]
+      },
+      {
+        "id": "html-pdf-roundtrip-profile-contract",
+        "tier": "review-surface",
+        "owner": "OfficeIMO.Html.Pdf over OfficeIMO.Pdf logical model",
+        "closureFocus": [ "profile-contracts", "semantic-html", "positioned-review-html", "export-summary" ]
+      },
+      {
+        "id": "markdown-invoice-statement",
+        "tier": "premium-adapter",
+        "owner": "OfficeIMO.Markdown.Pdf over OfficeIMO.Pdf",
+        "closureFocus": [ "invoice-statement-layout", "numeric-table-alignment", "business-report-polish" ]
+      },
+      {
+        "id": "asciidoc-direct-semantic-document",
+        "tier": "premium-adapter",
+        "owner": "OfficeIMO.AsciiDoc.Pdf over OfficeIMO.AsciiDoc.Markdown and OfficeIMO.Markdown.Pdf",
+        "closureFocus": [ "native-parser-diagnostics", "loss-aware-semantic-projection", "visible-source-fallback", "shared-pdf-resource-policy", "adapter-lifecycle" ]
+      },
+      {
+        "id": "latex-direct-semantic-document",
+        "tier": "accepted-degradation",
+        "owner": "OfficeIMO.Latex.Pdf over OfficeIMO.Latex.Markdown and OfficeIMO.Markdown.Pdf",
+        "closureFocus": [ "native-parser-diagnostics", "bounded-profile-projection", "math-and-citation-diagnostics", "shared-pdf-resource-policy", "adapter-lifecycle" ]
+      },
+      {
+        "id": "rtf-pdf-roundtrip",
+        "tier": "premium-adapter",
+        "owner": "OfficeIMO.Rtf.Pdf over OfficeIMO.Rtf and OfficeIMO.Pdf",
+        "closureFocus": [ "rtf-to-pdf", "pdf-to-rtf-semantic-import", "metadata", "text-markers", "page-boundaries", "accepted-fixed-layout-degradation" ]
+      },
+      {
+        "id": "onenote-semantic-document",
+        "tier": "accepted-degradation",
+        "owner": "OfficeIMO.OneNote.Pdf over OfficeIMO.OneNote.Markdown and OfficeIMO.Markdown.Pdf",
+        "closureFocus": [ "explicit-semantic-mode", "canvas-flattening-diagnostics", "asset-placeholder-diagnostics", "section-notebook-api-parity", "multilingual-text" ]
+      },
+      {
+        "id": "pdf-rewrite-preservation-matrix",
+        "tier": "premium-core",
+        "owner": "OfficeIMO.Pdf rewrite and manipulation preservation",
+        "closureFocus": [ "page-count", "page-geometry", "metadata-allow-list", "links", "attachments", "xmp", "output-intents", "diagnostic-issues" ]
+      },
+      {
+        "id": "pdf-redaction-removal-proof",
+        "tier": "premium-core",
+        "owner": "OfficeIMO.Pdf redaction planner, applier, and verification",
+        "closureFocus": [ "planned-redaction-areas", "text-object-removal", "whole-image-placement-removal", "nested-form-image-removal", "simple-partial-image-pixel-redaction", "simple-soft-mask-image-redaction", "decode-aware-image-redaction", "safe-repeated-resource-isolation", "shared-form-image-policy", "retained-surrounding-text", "post-redaction-verification", "diagnostic-issues" ]
+      },
+      {
+        "id": "pdf-form-appearance-semantics",
+        "tier": "premium-core",
+        "owner": "OfficeIMO.Pdf AcroForm filling, appearance generation, and flattening",
+        "closureFocus": [ "text-field-appearance", "multiline-text-appearance", "comb-text-appearance", "rich-text-widget-rv-appearance", "choice-export-value", "choice-display-text", "multi-select-choice-appearance", "checkbox-appearance-state", "radio-appearance-state", "need-appearances", "flattened-widget-appearance" ]
+      },
+      {
+        "id": "powerpoint-native-dense-layout",
+        "tier": "premium-adapter",
+        "owner": "OfficeIMO.PowerPoint.Pdf over OfficeIMO.Pdf and OfficeIMO.Drawing",
+        "closureFocus": [ "slide-geometry", "text-box-layout", "tables", "images", "warnings" ]
+      },
+      {
+        "id": "powerpoint-layout-theme-groups",
+        "tier": "premium-adapter",
+        "owner": "OfficeIMO.PowerPoint.Pdf over OfficeIMO.Pdf and OfficeIMO.Drawing",
+        "closureFocus": [ "theme-resolution", "group-transforms", "gradient-backgrounds", "shape-geometry" ]
+      },
+      {
+        "id": "converter-multilingual-typography",
+        "tier": "premium-core",
+        "owner": "OfficeIMO.Pdf typography primitives consumed by all PDF adapters",
+        "closureFocus": [ "embedded-fonts", "fallback", "extractable-unicode", "shaping-diagnostics", "pluggable-line-breaking", "multilingual-proof" ]
+      },
+      {
+        "id": "pdf-provider-shaped-text",
+        "tier": "premium-core",
+        "owner": "OfficeIMO.Pdf provider-backed embedded-font shaping",
+        "closureFocus": [ "external-shaping-provider-contract", "complex-script-glyph-order", "opentype-cff-ligature-mapping", "automatic-fallback-provider-diagnostics", "compact-cff-fontfile3-stream", "extractable-unicode", "warning-suppression-only-when-provider-shaped-run" ]
+      },
+      {
+        "id": "pdf-logical-diagnostics-readback",
+        "tier": "premium-core",
+        "owner": "OfficeIMO.Pdf logical model and OfficeIMO.Reader.Pdf",
+        "closureFocus": [ "logical-readback", "table-confidence", "image-geometry", "reader-diagnostics" ]
+      },
+      {
+        "id": "pdf-reader-degradation-corpus",
+        "tier": "accepted-degradation",
+        "owner": "OfficeIMO.Pdf reader/preflight and OfficeIMO.Reader.Pdf",
+        "closureFocus": [ "active-content-safety", "form-metadata", "diagnostic-counters", "safe-reader-chunks" ]
+      },
+      {
+        "id": "pdf-reader-hostile-action-corpus",
+        "tier": "accepted-degradation",
+        "owner": "OfficeIMO.Pdf reader/preflight, OfficeIMO.Reader.Pdf, and OfficeIMO.Html.Pdf",
+        "closureFocus": [ "catalog-actions", "page-actions", "annotation-actions", "chained-actions", "potentially-unsafe-action-classification", "inert-review-output" ]
+      },
+      {
+        "id": "pdf-reader-hostile-layout-corpus",
+        "tier": "accepted-degradation",
+        "owner": "OfficeIMO.Pdf reader/preflight and OfficeIMO.Reader.Pdf",
+        "closureFocus": [ "hostile-layout-readback", "rotated-text", "non-axis-aligned-geometry", "accepted-degradation-summary" ]
+      },
+      {
+        "id": "pdf-reader-hostile-table-corpus",
+        "tier": "accepted-degradation",
+        "owner": "OfficeIMO.Pdf logical table analysis and OfficeIMO.Reader.Pdf",
+        "closureFocus": [ "jittered-table-detection", "numeric-column-profiles", "confidence-diagnostics" ]
+      },
+      {
+        "id": "pdf-reader-ocr-handoff-corpus",
+        "tier": "accepted-degradation",
+        "owner": "OfficeIMO.Pdf logical image model and OfficeIMO.Reader.Pdf",
+        "closureFocus": [ "image-only-pages", "ocr-candidate-contract", "asset-geometry", "diagnostic-metadata", "downstream-ocr-enrichment" ]
+      },
+      {
+        "id": "pdf-reader-xfa-form-corpus",
+        "tier": "accepted-degradation",
+        "owner": "OfficeIMO.Pdf AcroForm readback and OfficeIMO.Reader.Pdf",
+        "closureFocus": [ "xfa-detection", "form-heavy-readback", "accepted-degradation-summary", "diagnostic-metadata" ]
+      },
+      {
+        "id": "pdf-logical-readback",
+        "tier": "premium-core",
+        "owner": "OfficeIMO.Pdf logical model",
+        "closureFocus": [ "headings", "paragraphs", "lists", "tables", "links", "images" ]
+      },
+      {
+        "id": "pdf-standard-security-roundtrip",
+        "tier": "premium-core",
+        "owner": "OfficeIMO.Pdf Standard security writer, reader, preflight, and page extraction",
+        "closureFocus": [ "standard-security-encryption", "password-required-read-blockers", "credential-aware-decryption", "security-metadata", "fail-closed-encrypted-rewrite", "unencrypted-page-extraction" ]
+      },
+      {
+        "id": "pdf-to-html-positioned-review",
+        "tier": "review-surface",
+        "owner": "OfficeIMO.Html.Pdf over OfficeIMO.Pdf logical model",
+        "closureFocus": [ "positioned-text", "safe-links", "image-placeholders", "outline-navigation", "active-content-diagnostics", "xfa-review-notice", "review-html-contract" ]
+      },
+      {
+        "id": "pdf-table-import-editable-office",
+        "tier": "table-only-reconstruction",
+        "owner": "OfficeIMO.Pdf logical tables consumed by Word/Excel/PowerPoint PDF adapters",
+        "closureFocus": [ "logical-table-reconstruction", "numeric-column-preservation", "editable-office-table-output" ]
+      }
+    ],
+    "knownLimits": [
+      "complex-script shaping beyond the bounded managed fallback requires an IOfficeTextShapingProvider; OfficeIMO.Drawing.HarfBuzz supplies the optional full GSUB/GPOS implementation used by the browser premium profile",
+      "Office source fonts that are unavailable or cannot be embedded fall back to a mapped PDF font and retain an explicit conversion warning; available embeddable families are not limited to three compatibility slots",
+      "OneNote PDF is an explicit semantic-document projection and reports free-form canvas flattening and unresolved binary assets",
+      "formal PDF/A, PDF/UA, Factur-X, and ZUGFeRD claims require the external validator workflow for the exact artifact"
+    ]
+  },
+  "scenarios": [
+    {
+      "id": "word-native-report",
+      "path": "word-to-pdf",
+      "converter": "OfficeIMO.Word.Pdf",
+      "sourceFormat": "word",
+      "targetFormat": "pdf",
+      "status": "supported",
+      "sourceFeatures": [
+        "headings",
+        "table-of-contents",
+        "rich-runs",
+        "lists",
+        "tables",
+        "images",
+        "checkbox-form-fields",
+        "header-content"
+      ],
+      "expectedSimplifications": [
+        "complex unsupported Word content records converter warnings rather than blocking export"
+      ],
+      "expectedWarnings": [],
+      "visualReviewFiles": [
+        "native-word-report.pdf",
+        "native-word-daily-layout.pdf",
+        "native-word-table-cell-picture-control.pdf"
+      ],
+      "sourceReviewFiles": [
+        "native-word-report.docx",
+        "native-word-daily-layout.docx",
+        "native-word-table-cell-picture-control.docx"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "Native Word PDF Visual Gate",
+          "Native evidence table"
+        ],
+        "logicalSignals": [
+          "headings",
+          "outlines",
+          "links",
+          "form-fields"
+        ],
+        "visualPages": 3,
+        "validatorEvidence": [
+          "PdfInspector",
+          "PdfDocumentReadResult",
+          "optional Poppler raster baseline"
+        ]
+      }
+    },
+    {
+      "id": "excel-native-daily-workbook",
+      "path": "excel-to-pdf",
+      "converter": "OfficeIMO.Excel.Pdf",
+      "sourceFormat": "excel",
+      "targetFormat": "pdf",
+      "status": "supported",
+      "sourceFeatures": [
+        "multiple-sheets",
+        "cell-formatting",
+        "hyperlinks",
+        "images",
+        "charts",
+        "print-area",
+        "header-footer",
+        "hidden-rows-columns"
+      ],
+      "expectedSimplifications": [
+        "unsupported workbook constructs are represented through warnings or skipped from the visible export"
+      ],
+      "expectedWarnings": [],
+      "visualReviewFiles": [
+        "native-excel-daily-workbook.pdf"
+      ],
+      "sourceReviewFiles": [
+        "native-excel-daily-workbook.xlsx"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "Daily Excel PDF Gate",
+          "Revenue Chart",
+          "Details Target"
+        ],
+        "logicalSignals": [
+          "page-count",
+          "outlines",
+          "links",
+          "images"
+        ],
+        "visualPages": 2,
+        "validatorEvidence": [
+          "PdfInspector",
+          "PdfDocumentReadResult",
+          "PdfImageExtractor",
+          "optional Poppler raster baseline"
+        ]
+      }
+    },
+    {
+      "id": "excel-dashboard-report",
+      "path": "excel-dashboard-to-pdf",
+      "converter": "OfficeIMO.Excel.Pdf",
+      "sourceFormat": "excel",
+      "targetFormat": "pdf",
+      "status": "supported",
+      "sourceFeatures": [
+        "single-sheet-dashboard",
+        "cell-formatting",
+        "conditional-formatting",
+        "worksheet-image",
+        "chart-snapshot",
+        "combo-chart-secondary-axis",
+        "print-area",
+        "header-footer",
+        "fit-to-page"
+      ],
+      "expectedSimplifications": [
+        "dashboard proof validates first-party worksheet rendering rather than pixel-perfect Excel application output",
+        "mixed column and line series preserve their chart roles and primary or secondary axis assignment through the shared drawing renderer"
+      ],
+      "expectedWarnings": [],
+      "visualReviewFiles": [
+        "excel-dashboard-report.pdf"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "Excel Dashboard PDF Gate",
+          "KPI Trend",
+          "Renewals",
+          "Pipeline risk"
+        ],
+        "logicalSignals": [
+          "worksheet-text",
+          "chart-title",
+          "image-extraction",
+          "print-area"
+        ],
+        "visualPages": 1,
+        "validatorEvidence": [
+          "ExcelDocument.SaveAsPdf",
+          "PdfReadDocument",
+          "PdfDocumentReadResult",
+          "PdfImageExtractor"
+        ]
+      }
+    },
+    {
+      "id": "markdown-technical-document",
+      "path": "markdown-to-pdf",
+      "converter": "OfficeIMO.Markdown.Pdf",
+      "sourceFormat": "markdown",
+      "targetFormat": "pdf",
+      "status": "supported",
+      "sourceFeatures": [
+        "front-matter",
+        "headings",
+        "links",
+        "local-images",
+        "lists",
+        "tables",
+        "quotes",
+        "code-blocks"
+      ],
+      "expectedSimplifications": [
+        "remote images require caller-supplied resolver and produce warnings when unresolved"
+      ],
+      "expectedWarnings": [],
+      "visualReviewFiles": [
+        "markdown-technical-document.pdf"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "Markdown PDF Visual Gate",
+          "Export coverage"
+        ],
+        "logicalSignals": [
+          "headings",
+          "links",
+          "images",
+          "tables"
+        ],
+        "visualPages": 1,
+        "validatorEvidence": [
+          "PdfReadDocument",
+          "PdfDocumentReadResult",
+          "optional Poppler raster baseline"
+        ]
+      }
+    },
+    {
+      "id": "html-document-profile",
+      "path": "html-to-pdf",
+      "converter": "OfficeIMO.Html.Pdf",
+      "sourceFormat": "html",
+      "targetFormat": "pdf",
+      "status": "supported",
+      "sourceFeatures": [
+        "headings",
+        "links",
+        "embedded-images",
+        "tables",
+        "page-breaks",
+        "document-profile"
+      ],
+      "expectedSimplifications": [
+        "the direct renderer implements a deterministic static HTML and paged-CSS contract rather than browser scripting or interactive state"
+      ],
+      "expectedWarnings": [],
+      "visualReviewFiles": [
+        "practical-html.pdf"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "Practical HTML",
+          "Second page marker"
+        ],
+        "logicalSignals": [
+          "page-count",
+          "links",
+          "images",
+          "tables"
+        ],
+        "visualPages": 2,
+        "validatorEvidence": [
+          "PdfInspector",
+          "PdfDocumentReadResult",
+          "PdfImageExtractor"
+        ]
+      }
+    },
+    {
+      "id": "html-static-market-corpus",
+      "path": "html-static-market-corpus-to-pdf",
+      "converter": "OfficeIMO.Html.Pdf",
+      "sourceFormat": "html",
+      "targetFormat": "pdf",
+      "status": "supported",
+      "sourceFeatures": [
+        "invoices-and-statements",
+        "business-reports-and-letters",
+        "certificates-and-catalogs",
+        "contracts-and-email-like-html",
+        "dashboard-grid-layout",
+        "multilingual-bidi",
+        "shared-png-svg-pdf-scene"
+      ],
+      "expectedSimplifications": [
+        "static rendering does not execute JavaScript or reproduce interactive browser state",
+        "unsupported local resources remain visible through alternative text and stable diagnostics"
+      ],
+      "expectedWarnings": [
+        "ImageResourceRejectedByPolicy",
+        "HyperlinkRejectedByPolicy"
+      ],
+      "visualReviewFiles": [
+        "native-html-invoice.pdf",
+        "native-html-account-statement.pdf",
+        "native-html-quarterly-report.pdf",
+        "native-html-business-letter.pdf",
+        "native-html-certificate.pdf",
+        "native-html-product-catalog.pdf",
+        "native-html-legal-contract.pdf",
+        "native-html-email-render.pdf",
+        "native-html-dashboard-print.pdf",
+        "native-html-multilingual-bidi.pdf"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "Invoice INV-1042",
+          "Account Statement",
+          "Operations Dashboard",
+          "Multilingual Summary"
+        ],
+        "logicalSignals": [
+          "shared-render-scene",
+          "page-count",
+          "headings",
+          "links",
+          "tables",
+          "resource-policy-diagnostics"
+        ],
+        "visualPages": 11,
+        "validatorEvidence": [
+          "HtmlRenderDocument",
+          "OfficeDrawingRasterRenderer",
+          "OfficeDrawingSvgExporter",
+          "PdfInspector",
+          "PdfReadDocument",
+          "Poppler raster baselines"
+        ]
+      }
+    },
+    {
+      "id": "html-css-resource-policy",
+      "path": "html-css-resource-policy-to-pdf",
+      "converter": "OfficeIMO.Html.Pdf",
+      "sourceFormat": "html",
+      "targetFormat": "pdf",
+      "status": "supported",
+      "sourceFeatures": [
+        "trusted-document-profile",
+        "document-stylesheet-link",
+        "file-stylesheet-policy",
+        "blocked-remote-stylesheet-diagnostic",
+        "data-uri-image",
+        "table"
+      ],
+      "expectedSimplifications": [
+        "HTML conversion uses the native static render scene and reports blocked resources instead of executing browser scripting"
+      ],
+      "expectedWarnings": [
+        "StylesheetResourceRejectedByPolicy"
+      ],
+      "visualReviewFiles": [
+        "html-css-resource-policy.pdf",
+        "html-css-resource-policy-summary.json"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "HTML CSS Resource Policy Gate",
+          "Local stylesheet marker",
+          "Blocked remote stylesheet marker"
+        ],
+        "logicalSignals": [
+          "trusted-document-profile",
+          "stylesheet-policy-diagnostic",
+          "resource-policy-summary",
+          "shared-conversion-report-warning",
+          "data-uri-image",
+          "table"
+        ],
+        "visualPages": 1,
+        "validatorEvidence": [
+          "HtmlToPdfOptions.CreateTrustedDocumentProfile",
+          "HtmlPdfResourcePolicySummary",
+          "PdfConversionReport",
+          "HtmlToWordOptions.Diagnostics",
+          "PdfReadDocument",
+          "PdfImageExtractor"
+        ]
+      }
+    },
+    {
+      "id": "html-pdf-roundtrip-profile-contract",
+      "path": "html-pdf-roundtrip",
+      "converter": "OfficeIMO.Html.Pdf",
+      "sourceFormat": "html/pdf",
+      "targetFormat": "pdf/html/json",
+      "status": "supported",
+      "sourceFeatures": [
+        "document-profile",
+        "semantic-pdf-html-profile",
+        "positioned-review-profile",
+        "profile-contracts",
+        "export-summary",
+        "links",
+        "images",
+        "page-breaks"
+      ],
+      "expectedSimplifications": [
+        "round-trip proof validates OfficeIMO logical/review contracts rather than browser-grade or pixel-perfect HTML rendering"
+      ],
+      "expectedWarnings": [],
+      "visualReviewFiles": [
+        "html-pdf-roundtrip-source.pdf",
+        "html-pdf-roundtrip-semantic.html",
+        "html-pdf-roundtrip-positioned.html",
+        "html-pdf-roundtrip-summary.json"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "Practical HTML",
+          "Report link",
+          "Second page marker"
+        ],
+        "logicalSignals": [
+          "html-pdf-profile-contract",
+          "pdf-html-profile-contract",
+          "semantic-html",
+          "positioned-review-html",
+          "export-summary",
+          "image-placement-count",
+          "link-count"
+        ],
+        "visualPages": 2,
+        "validatorEvidence": [
+          "HtmlPdfProfileContracts",
+          "PdfHtmlProfileContracts",
+          "PdfHtmlConverter.ToHtmlResult",
+          "PdfHtmlExportSummary",
+          "PdfDocumentReadResult",
+          "PdfImageExtractor"
+        ]
+      }
+    },
+    {
+      "id": "markdown-invoice-statement",
+      "path": "markdown-invoice-to-pdf",
+      "converter": "OfficeIMO.Markdown.Pdf",
+      "sourceFormat": "markdown",
+      "targetFormat": "pdf",
+      "status": "supported",
+      "sourceFeatures": [
+        "front-matter",
+        "invoice-heading",
+        "line-item-table",
+        "summary-table",
+        "right-aligned-numeric-columns",
+        "payment-terms-list"
+      ],
+      "expectedSimplifications": [
+        "invoice semantics remain represented as document text and tables rather than a formal e-invoice compliance profile"
+      ],
+      "expectedWarnings": [],
+      "visualReviewFiles": [
+        "markdown-invoice-statement.pdf"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "Invoice Statement INV-2026-0042",
+          "Managed PDF conversion review",
+          "Subtotal",
+          "Amount due"
+        ],
+        "logicalSignals": [
+          "front-matter-metadata",
+          "heading",
+          "tables",
+          "right-aligned-numeric-cells",
+          "list-items"
+        ],
+        "visualPages": 1,
+        "validatorEvidence": [
+          "MarkdownPdfConverter",
+          "PdfReadDocument",
+          "PdfDocumentReadResult"
+        ]
+      }
+    },
+    {
+      "id": "asciidoc-direct-semantic-document",
+      "path": "asciidoc-to-pdf",
+      "converter": "OfficeIMO.AsciiDoc.Pdf",
+      "sourceFormat": "adoc/asciidoc/asc",
+      "targetFormat": "pdf",
+      "status": "supported",
+      "sourceFeatures": [
+        "document-title-and-attributes",
+        "section-hierarchy",
+        "paragraphs-and-lists",
+        "tables",
+        "stem-source-fallback",
+        "source-located-diagnostics"
+      ],
+      "expectedSimplifications": [
+        "AsciiDoc is projected through the typed Markdown model; constructs without an equivalent remain visible as configured source fallbacks with combined parser, projection, and PDF diagnostics"
+      ],
+      "expectedWarnings": [
+        "ADOCMD103"
+      ],
+      "visualReviewFiles": [
+        "asciidoc-direct-semantic-document.pdf"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "AsciiDoc direct PDF proof",
+          "Semantic route marker"
+        ],
+        "logicalSignals": [
+          "native-asciidoc-parser",
+          "loss-aware-markdown-projection",
+          "combined-diagnostics",
+          "shared-markdown-pdf-renderer"
+        ],
+        "visualPages": 1,
+        "validatorEvidence": [
+          "AsciiDocPdfConverterExtensions",
+          "PdfDocumentConversionResult",
+          "PdfReadDocument"
+        ]
+      }
+    },
+    {
+      "id": "latex-direct-semantic-document",
+      "path": "latex-to-pdf",
+      "converter": "OfficeIMO.Latex.Pdf",
+      "sourceFormat": "tex/latex",
+      "targetFormat": "pdf",
+      "status": "supported",
+      "sourceFeatures": [
+        "document-title-and-author",
+        "section-hierarchy",
+        "paragraphs",
+        "citations",
+        "inline-math",
+        "source-located-diagnostics"
+      ],
+      "expectedSimplifications": [
+        "LaTeX is not executed; the bounded semantic profile is projected through Markdown, while citations, math transport, package behavior, and unsupported constructs remain explicit warnings or visible source fallbacks"
+      ],
+      "expectedWarnings": [
+        "LATEXMD101",
+        "LATEXMD102"
+      ],
+      "visualReviewFiles": [
+        "latex-direct-semantic-document.pdf"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "LaTeX direct PDF proof",
+          "Semantic route marker"
+        ],
+        "logicalSignals": [
+          "native-latex-parser",
+          "bounded-profile-markdown-projection",
+          "combined-diagnostics",
+          "shared-markdown-pdf-renderer"
+        ],
+        "visualPages": 1,
+        "validatorEvidence": [
+          "LatexPdfConverterExtensions",
+          "PdfDocumentConversionResult",
+          "PdfReadDocument"
+        ]
+      }
+    },
+    {
+      "id": "rtf-pdf-roundtrip",
+      "path": "rtf-pdf-roundtrip",
+      "converter": "OfficeIMO.Rtf.Pdf",
+      "sourceFormat": "rtf/pdf",
+      "targetFormat": "pdf/rtf/json",
+      "status": "supported",
+      "sourceFeatures": [
+        "rtf-metadata",
+        "rich-runs",
+        "lists",
+        "tables",
+        "pdf-logical-import",
+        "semantic-rtf-output"
+      ],
+      "expectedSimplifications": [
+        "RTF to PDF is a visual fixed-layout export, while PDF to RTF is semantic text import from the OfficeIMO.Pdf logical model rather than lossless visual reconstruction"
+      ],
+      "expectedWarnings": [],
+      "visualReviewFiles": [
+        "rtf-roundtrip-source.pdf",
+        "rtf-roundtrip-imported.rtf",
+        "rtf-roundtrip-summary.json"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "RTF PDF Roundtrip Gate",
+          "Rich run marker",
+          "Table cell marker",
+          "Imported second page marker"
+        ],
+        "logicalSignals": [
+          "rtf-to-pdf",
+          "pdf-to-rtf",
+          "metadata",
+          "text-blocks",
+          "page-boundaries",
+          "semantic-import"
+        ],
+        "visualPages": 2,
+        "validatorEvidence": [
+          "RtfDocument.SaveAsPdf",
+          "PdfReadDocument",
+          "PdfDocumentReadResult",
+          "RtfPdfConverterExtensions.ToRtfDocumentFromPdf"
+        ]
+      }
+    },
+    {
+      "id": "onenote-semantic-document",
+      "path": "onenote-to-pdf",
+      "converter": "OfficeIMO.OneNote.Pdf",
+      "sourceFormat": "one/onetoc2/onepkg",
+      "targetFormat": "pdf",
+      "status": "supported",
+      "sourceFeatures": [
+        "notebook-and-section-hierarchy",
+        "headings",
+        "rich-text",
+        "lists",
+        "tables",
+        "links",
+        "binary-asset-placeholders",
+        "free-form-canvas-diagnostics"
+      ],
+      "expectedSimplifications": [
+        "OneNote PDF is an explicit semantic-document projection; free-form canvas placement is flattened into reading order and unresolved images, attachments, recordings, and ink become readable placeholders with conversion warnings"
+      ],
+      "expectedWarnings": [
+        "ONENOTE_MARKDOWN_CANVAS_FLATTENED",
+        "ONENOTE_MARKDOWN_ASSET_PLACEHOLDER"
+      ],
+      "visualReviewFiles": [
+        "onenote-semantic-document.pdf"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "OneNote semantic PDF proof",
+          "Positioned note body"
+        ],
+        "logicalSignals": [
+          "explicit-semantic-projection",
+          "heading",
+          "paragraph",
+          "canvas-flattening-warning",
+          "asset-placeholder-warning"
+        ],
+        "visualPages": 1,
+        "validatorEvidence": [
+          "OneNoteMarkdownConversionResult",
+          "PdfDocumentConversionResult",
+          "PdfReadDocument"
+        ]
+      }
+    },
+    {
+      "id": "pdf-rewrite-preservation-matrix",
+      "path": "pdf-rewrite-preservation-matrix",
+      "converter": "OfficeIMO.Pdf",
+      "sourceFormat": "pdf",
+      "targetFormat": "pdf/json",
+      "status": "supported",
+      "sourceFeatures": [
+        "metadata",
+        "page-geometry",
+        "text-markers",
+        "links",
+        "named-destinations",
+        "embedded-files",
+        "xmp-metadata",
+        "output-intents",
+        "catalog-view-settings",
+        "source-structure",
+        "optional-content-layers",
+        "targeted-form-fill",
+        "form-rewrite-blockers",
+        "tagged-content-rewrite-blockers",
+        "active-content-rewrite-blockers",
+        "signature-rewrite-blockers",
+        "blocked-rewrite-classification"
+      ],
+      "expectedSimplifications": [
+        "The preservation matrix executes reusable OfficeIMO.Pdf rewrite scenarios and exports row classifications for rewrite-safe targeted mutations, preservation-drift detection, and blocked full rewrites for forms, tagged content, active content, and signatures; deeper object-level equivalence remains part of future parser hardening."
+      ],
+      "expectedWarnings": [],
+      "visualReviewFiles": [
+        "pdf-rewrite-preservation-source.pdf",
+        "pdf-rewrite-preservation-updated.pdf",
+        "pdf-rewrite-preservation-summary.json"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "PreservationMarker",
+          "SecondPageMarker"
+        ],
+        "logicalSignals": [
+          "page-count",
+          "page-geometry",
+          "metadata-allow-list",
+          "link-annotations",
+          "named-destinations",
+          "embedded-files",
+          "xmp-metadata",
+          "output-intents",
+          "source-structure-markers",
+          "optional-content-drift",
+          "targeted-form-fill-preservation",
+          "form-rewrite-blockers",
+          "tagged-content-rewrite-blockers",
+          "active-content-rewrite-blockers",
+          "signature-rewrite-blockers",
+          "blocked-rewrite-diagnostics",
+          "diagnostic-issues"
+        ],
+        "visualPages": 2,
+        "validatorEvidence": [
+          "PdfRewritePreservation",
+          "PdfRewritePreservationMatrix",
+          "PdfMetadataEditor",
+          "PdfInspector",
+          "PdfReadDocument"
+        ]
+      }
+    },
+    {
+      "id": "pdf-redaction-removal-proof",
+      "path": "pdf-redaction-removal-proof",
+      "converter": "OfficeIMO.Pdf",
+      "sourceFormat": "pdf",
+      "targetFormat": "pdf/json",
+      "status": "supported",
+      "sourceFeatures": [
+        "logical-text-planning",
+        "image-placement-planning",
+        "rectangle-redaction",
+        "whole-image-placement-removal",
+        "nested-form-image-removal",
+        "simple-partial-image-pixel-redaction",
+        "simple-soft-mask-image-redaction",
+        "decode-aware-image-redaction",
+        "safe-repeated-resource-isolation",
+        "shared-form-image-policy",
+        "fail-closed-image-redaction",
+        "content-stream-removal",
+        "post-redaction-verification",
+        "retained-text-proof"
+      ],
+      "expectedSimplifications": [
+        "Redaction verification checks configured text markers and raw literal markers when available; complex encoded representations still rely on extractable-text proof unless a raw literal marker exists.",
+        "Fully covered page-level and safe nested form-XObject image placements are removed from the relevant content streams and XObject resources; shared form aliases are cloned before nested image removal. Simple partial intersections over 8-bit DeviceGray/DeviceRGB streams are rewritten at the pixel level, including Decode arrays and matching indirect 8-bit DeviceGray soft masks, and reused safe image/form invocations are isolated by cloning the target resource and renaming only the matched content-stream invocation. Transformed placements, color-key or explicit masks, JPEG payloads, and other complex image streams are reported by the planner and blocked by default during apply unless callers explicitly opt into a visual-only overlay."
+      ],
+      "expectedWarnings": [],
+      "visualReviewFiles": [
+        "pdf-redaction-removal-source.pdf",
+        "pdf-redaction-removal-redacted.pdf",
+        "pdf-redaction-removal-summary.json"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "Visible compliance marker",
+          "Public summary marker"
+        ],
+        "logicalSignals": [
+          "redaction-plan",
+          "matched-sensitive-text",
+          "matched-image-placement-risk",
+          "whole-image-placement-removal",
+          "nested-form-image-removal",
+          "simple-partial-image-pixel-redaction",
+          "simple-soft-mask-image-redaction",
+          "decode-aware-image-redaction",
+          "safe-repeated-resource-isolation",
+          "shared-form-image-policy",
+          "fail-closed-image-redaction",
+          "removed-text-marker",
+          "retained-text-marker",
+          "verification-report"
+        ],
+        "visualPages": 1,
+        "validatorEvidence": [
+          "PdfRedactionPlanner",
+          "PdfRedactionApplier",
+          "PdfRedactionVerification",
+          "PdfReadDocument"
+        ]
+      }
+    },
+    {
+      "id": "pdf-form-appearance-semantics",
+      "path": "pdf-form-appearance-semantics",
+      "converter": "OfficeIMO.Pdf",
+      "sourceFormat": "pdf",
+      "targetFormat": "pdf/json",
+      "status": "supported",
+      "sourceFeatures": [
+        "acroform-text-field",
+        "acroform-choice-field",
+        "acroform-checkbox-field",
+        "acroform-radio-field",
+        "acroform-multiline-text-field",
+        "acroform-comb-text-field",
+        "acroform-multiselect-choice-field",
+        "choice-export-value",
+        "choice-display-text",
+        "choice-array-value",
+        "widget-appearance-state",
+        "appearance-streams",
+        "field-flattening"
+      ],
+      "expectedSimplifications": [
+        "The proof covers text, multiline text, comb text, scalar choice, multi-select choice, checkbox, and radio widgets with generated or preserved appearances; signed, encrypted, active-content, and complex JavaScript-driven forms remain blocked by preflight."
+      ],
+      "expectedWarnings": [],
+      "visualReviewFiles": [
+        "pdf-form-appearance-source.pdf",
+        "pdf-form-appearance-filled.pdf",
+        "pdf-form-appearance-flattened.pdf",
+        "pdf-form-appearance-summary.json"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "Visible Value",
+          "Poland",
+          "Wire selected",
+          "Line one",
+          "Line two",
+          "ZX91",
+          "Germany",
+          "United States"
+        ],
+        "logicalSignals": [
+          "acroform-fill",
+          "need-appearances-false",
+          "multiline-text-appearance",
+          "comb-text-per-cell-appearance",
+          "choice-export-value",
+          "choice-display-text",
+          "multi-select-choice-array",
+          "multi-select-choice-row-appearance",
+          "checkbox-appearance-state",
+          "radio-appearance-state",
+          "widget-normal-appearance-states",
+          "appearance-stream",
+          "flattened-form"
+        ],
+        "visualPages": 1,
+        "validatorEvidence": [
+          "PdfFormFiller",
+          "PdfInspector",
+          "PdfReadDocument"
+        ]
+      }
+    },
+    {
+      "id": "pdf-provider-shaped-text",
+      "path": "pdf-provider-shaped-text",
+      "converter": "OfficeIMO.Pdf",
+      "sourceFormat": "text/font",
+      "targetFormat": "pdf/json",
+      "status": "supported",
+      "sourceFeatures": [
+        "embedded-truetype-font",
+        "embedded-opentype-cff-font",
+        "external-text-shaping-provider",
+        "complex-script-glyph-runs",
+        "ligature-to-unicode-extraction",
+        "compact-opentype-cff-embedding"
+      ],
+      "expectedSimplifications": [
+        "OfficeIMO.Pdf owns the provider contract and PDF glyph writing; callers supply the actual shaping engine when full script shaping is required.",
+        "Provider-backed warning suppression applies only to text/font runs actually shaped by the configured provider; declined runs keep the simplified-shaping diagnostics.",
+        "Automatically planned embedded-font fallback runs follow the same provider-owned warning contract as directly selected embedded fonts."
+      ],
+      "expectedWarnings": [],
+      "visualReviewFiles": [
+        "pdf-provider-shaped-text.pdf",
+        "pdf-provider-shaped-text-summary.json"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "سلام",
+          "office"
+        ],
+        "logicalSignals": [
+          "text-shaping-provider",
+          "complex-script-warning-covered",
+          "opentype-cff-ligature",
+          "compact-cff-fontfile3",
+          "to-unicode-source-text"
+        ],
+        "visualPages": 1,
+        "validatorEvidence": [
+          "IOfficeTextShapingProvider",
+          "PdfReadDocument",
+          "PdfConversionReport",
+          "ToUnicode CMap"
+        ]
+      }
+    },
+    {
+      "id": "powerpoint-native-dense-layout",
+      "path": "powerpoint-to-pdf",
+      "converter": "OfficeIMO.PowerPoint.Pdf",
+      "sourceFormat": "powerpoint",
+      "targetFormat": "pdf",
+      "status": "supported",
+      "sourceFeatures": [
+        "slide-size",
+        "text-boxes",
+        "bullets",
+        "tables",
+        "theme-table-styles",
+        "theme-typography",
+        "images",
+        "charts",
+        "backgrounds"
+      ],
+      "expectedSimplifications": [
+        "unsupported slide shapes and overflowing text boxes record converter warnings"
+      ],
+      "expectedWarnings": [
+        "table-cell-overflow"
+      ],
+      "visualReviewFiles": [
+        "native-powerpoint-dense-layout.pdf",
+        "native-powerpoint-slide.pdf"
+      ],
+      "sourceReviewFiles": [
+        "native-powerpoint-dense-layout.pptx",
+        "native-powerpoint-slide.pptx"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "Dense Layout Gate",
+          "Flow"
+        ],
+        "logicalSignals": [
+          "page-geometry",
+          "text",
+          "theme-style",
+          "images"
+        ],
+        "visualPages": 2,
+        "validatorEvidence": [
+          "PdfInspector",
+          "PdfReadDocument",
+          "optional Poppler raster baseline"
+        ]
+      }
+    },
+    {
+      "id": "powerpoint-layout-theme-groups",
+      "path": "powerpoint-layout-theme-groups-to-pdf",
+      "converter": "OfficeIMO.PowerPoint.Pdf",
+      "sourceFormat": "powerpoint",
+      "targetFormat": "pdf",
+      "status": "supported",
+      "sourceFeatures": [
+        "custom-slide-size",
+        "theme-colors",
+        "gradient-background",
+        "text-boxes",
+        "preset-auto-shapes",
+        "grouped-shapes",
+        "group-transform"
+      ],
+      "expectedSimplifications": [
+        "PowerPoint proof validates first-party slide geometry and transforms rather than full Office renderer parity"
+      ],
+      "expectedWarnings": [],
+      "visualReviewFiles": [
+        "powerpoint-layout-theme-groups.pdf"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "Layout Theme Group Gate",
+          "Grouped transform marker"
+        ],
+        "logicalSignals": [
+          "theme-color",
+          "gradient-background",
+          "preset-auto-shape",
+          "group-transform",
+          "page-geometry"
+        ],
+        "visualPages": 1,
+        "validatorEvidence": [
+          "PowerPointPresentation.SaveAsPdf",
+          "PdfReadDocument",
+          "raw PDF geometry checks"
+        ]
+      }
+    },
+    {
+      "id": "converter-multilingual-typography",
+      "path": "cross-converter-typography-to-pdf",
+      "converter": "OfficeIMO.Word.Pdf, OfficeIMO.Excel.Pdf, OfficeIMO.Markdown.Pdf, OfficeIMO.Html.Pdf, OfficeIMO.PowerPoint.Pdf",
+      "sourceFormat": "word/excel/markdown/html/powerpoint",
+      "targetFormat": "pdf",
+      "status": "supported",
+      "sourceFeatures": [
+        "embedded-truetype-font-options",
+        "unicode-polish-text",
+        "unicode-greek-text",
+        "unicode-cyrillic-text",
+        "tables",
+        "extractable-text"
+      ],
+      "expectedSimplifications": [
+        "visual layout remains adapter-specific while the shared typography contract requires Type0 Identity-H embedded font output and extractable Unicode text"
+      ],
+      "expectedWarnings": [],
+      "visualReviewFiles": [
+        "multilingual-word-to-pdf.pdf",
+        "multilingual-excel-to-pdf.pdf",
+        "multilingual-markdown-to-pdf.pdf",
+        "multilingual-html-to-pdf.pdf",
+        "multilingual-powerpoint-to-pdf.pdf"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "Converter typography report",
+          "Zażółć gęślą jaźń",
+          "Ελλάδα",
+          "Київ"
+        ],
+        "logicalSignals": [
+          "type0-font",
+          "identity-h-encoding",
+          "to-unicode-map",
+          "font-file2",
+          "extractable-unicode"
+        ],
+        "visualPages": 5,
+        "validatorEvidence": [
+          "PdfReadDocument",
+          "raw PDF font-resource checks",
+          "visual review gallery"
+        ]
+      }
+    },
+    {
+      "id": "pdf-logical-diagnostics-readback",
+      "path": "pdf-logical-diagnostics-readback",
+      "converter": "OfficeIMO.Pdf, OfficeIMO.Html.Pdf",
+      "sourceFormat": "pdf",
+      "targetFormat": "logical-read-model/html",
+      "status": "supported",
+      "sourceFeatures": [
+        "headings",
+        "links",
+        "table-structure",
+        "numeric-column-profile",
+        "column-confidence",
+        "image-geometry",
+        "image-placement",
+        "positioned-review-html"
+      ],
+      "expectedSimplifications": [
+        "logical readback remains parser-supported for born-digital PDFs and does not OCR scanned pages"
+      ],
+      "expectedWarnings": [],
+      "visualReviewFiles": [
+        "pdf-logical-diagnostics-source.pdf",
+        "pdf-logical-diagnostics-positioned-review.html",
+        "pdf-logical-diagnostics-summary.json"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "Revenue Readback Diagnostics",
+          "Image geometry and table confidence marker"
+        ],
+        "logicalSignals": [
+          "heading",
+          "image-placement",
+          "image-dimensions",
+          "reader-visual-geometry",
+          "numeric-column-kind",
+          "column-confidence",
+          "table-confidence",
+          "positioned-review-html"
+        ],
+        "visualPages": 1,
+        "validatorEvidence": [
+          "PdfDocumentReadResult",
+          "PdfLogicalTableAnalysis",
+          "OfficeIMO.Reader.Pdf",
+          "PdfHtmlConverter"
+        ]
+      }
+    },
+    {
+      "id": "pdf-reader-degradation-corpus",
+      "path": "pdf-reader-degradation-corpus",
+      "converter": "OfficeIMO.Pdf, OfficeIMO.Reader.Pdf",
+      "sourceFormat": "pdf",
+      "targetFormat": "reader-chunks/logical-read-model",
+      "status": "supported",
+      "sourceFeatures": [
+        "born-digital-text",
+        "uri-link-annotation",
+        "acroform-text-widget",
+        "page-open-javascript-action",
+        "potentially-unsafe-action-classification",
+        "accepted-degradation-summary"
+      ],
+      "expectedSimplifications": [
+        "active PDF actions are surfaced only as passive diagnostics and action summaries, and are not executed or exposed as script payload text",
+        "Reader chunks expose safe structural counters and typed form metadata rather than attempting editable PDF reconstruction"
+      ],
+      "expectedWarnings": [],
+      "visualReviewFiles": [
+        "pdf-reader-degradation-corpus.pdf",
+        "pdf-reader-degradation-summary.json"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "Reader Degradation Corpus",
+          "Accepted degradation marker",
+          "Form and active-content marker"
+        ],
+        "logicalSignals": [
+          "page-text",
+          "safe-link",
+          "typed-form-field",
+          "passive-action-summary",
+          "active-content-diagnostics",
+          "potentially-unsafe-action-count",
+          "accepted-degradation-summary"
+        ],
+        "visualPages": 1,
+        "validatorEvidence": [
+          "PdfDocumentReadResult",
+          "DocumentReaderPdfExtensions",
+          "ReaderChunk.Diagnostics",
+          "ReaderChunk.FormFields"
+        ]
+      }
+    },
+    {
+      "id": "pdf-reader-hostile-action-corpus",
+      "path": "pdf-reader-hostile-action-corpus",
+      "converter": "OfficeIMO.Pdf, OfficeIMO.Reader.Pdf, OfficeIMO.Html.Pdf",
+      "sourceFormat": "pdf",
+      "targetFormat": "reader-chunks/positioned-review-html",
+      "status": "supported",
+      "sourceFeatures": [
+        "document-open-action",
+        "nested-catalog-javascript-name-tree",
+        "catalog-additional-action",
+        "catalog-chained-actions",
+        "page-javascript-action",
+        "page-launch-action",
+        "annotation-submitform-action",
+        "annotation-launch-additional-action",
+        "annotation-importdata-chained-action",
+        "potentially-unsafe-action-classification",
+        "accepted-degradation-summary"
+      ],
+      "expectedSimplifications": [
+        "hostile PDF actions from nested name trees, catalog additional actions, page actions, and annotation actions are surfaced as passive diagnostics and action summaries, not executed or rendered as executable payload text",
+        "Reader JSON and positioned review HTML expose stable counters, scope/type metadata, and chained catalog action paths while keeping JavaScript, Launch, SubmitForm, ImportData, and Movie payloads inert"
+      ],
+      "expectedWarnings": [],
+      "visualReviewFiles": [
+        "pdf-reader-hostile-action-corpus.pdf",
+        "pdf-reader-hostile-action-positioned-review.html",
+        "pdf-reader-hostile-action-summary.json"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "Hostile Action Corpus",
+          "Passive diagnostics marker"
+        ],
+        "logicalSignals": [
+          "document-open-action-summary",
+          "nested-name-tree-action-summary",
+          "catalog-additional-action-summary",
+          "catalog-chained-action-path",
+          "page-action-summary",
+          "annotation-action-summary",
+          "chained-action-summary",
+          "potentially-unsafe-action-count",
+          "action-type-counters",
+          "reader-json-payload-policy",
+          "positioned-review-html-payload-policy",
+          "accepted-degradation-summary"
+        ],
+        "visualPages": 1,
+        "validatorEvidence": [
+          "PdfDocumentReadResult",
+          "DocumentReaderPdfExtensions",
+          "ReaderChunk.Diagnostics",
+          "OfficeDocumentReadResult.Metadata",
+          "PdfHtmlConverter"
+        ]
+      }
+    },
+    {
+      "id": "pdf-reader-hostile-layout-corpus",
+      "path": "pdf-reader-hostile-layout-corpus",
+      "converter": "OfficeIMO.Pdf, OfficeIMO.Reader.Pdf",
+      "sourceFormat": "pdf",
+      "targetFormat": "reader-chunks/logical-read-model",
+      "status": "supported",
+      "sourceFeatures": [
+        "born-digital-text",
+        "close-two-column-layout",
+        "rotated-text",
+        "skewed-image-placement",
+        "accepted-degradation-summary"
+      ],
+      "expectedSimplifications": [
+        "hostile layout readback exposes text and geometry signals without promising perfect human reading order",
+        "skewed image placement is reported as non-axis-aligned geometry rather than normalized into editable Office layout"
+      ],
+      "expectedWarnings": [],
+      "visualReviewFiles": [
+        "pdf-reader-hostile-layout-corpus.pdf",
+        "pdf-reader-hostile-layout-summary.json"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "Hostile Layout Corpus",
+          "Left column marker",
+          "Right column marker",
+          "Rotated note marker"
+        ],
+        "logicalSignals": [
+          "page-text",
+          "reader-chunk-diagnostics",
+          "skewed-image-geometry",
+          "non-axis-aligned-placement",
+          "accepted-degradation-summary"
+        ],
+        "visualPages": 1,
+        "validatorEvidence": [
+          "PdfDocumentReadResult",
+          "DocumentReaderPdfExtensions",
+          "ReaderChunk.Diagnostics",
+          "ReaderChunk.Visuals"
+        ]
+      }
+    },
+    {
+      "id": "pdf-reader-hostile-table-corpus",
+      "path": "pdf-reader-hostile-table-corpus",
+      "converter": "OfficeIMO.Pdf, OfficeIMO.Reader.Pdf",
+      "sourceFormat": "pdf",
+      "targetFormat": "reader-chunks/logical-read-model",
+      "status": "supported",
+      "sourceFeatures": [
+        "born-digital-text",
+        "headerless-table-like-band",
+        "jittered-column-positions",
+        "numeric-column-profile",
+        "table-confidence-diagnostics",
+        "accepted-degradation-summary"
+      ],
+      "expectedSimplifications": [
+        "headerless table-like bands preserve every source row with unnamed columns and confidence diagnostics",
+        "jittered column positions are preserved as best-effort logical table geometry rather than editable spreadsheet reconstruction"
+      ],
+      "expectedWarnings": [],
+      "visualReviewFiles": [
+        "pdf-reader-hostile-table-corpus.pdf",
+        "pdf-reader-hostile-table-summary.json"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "Hostile Table Corpus",
+          "Jittered table marker",
+          "Alpha team",
+          "Gamma team"
+        ],
+        "logicalSignals": [
+          "page-text",
+          "detected-table",
+          "unnamed-columns",
+          "numeric-column-kind",
+          "table-confidence-diagnostics",
+          "reader-chunk-diagnostics",
+          "accepted-degradation-summary"
+        ],
+        "visualPages": 1,
+        "validatorEvidence": [
+          "PdfDocumentReadResult",
+          "PdfLogicalTableAnalysis",
+          "DocumentReaderPdfExtensions",
+          "ReaderChunk.Diagnostics",
+          "ReaderTable.Diagnostics"
+        ]
+      }
+    },
+    {
+      "id": "pdf-reader-ocr-handoff-corpus",
+      "path": "pdf-reader-ocr-handoff-corpus",
+      "converter": "OfficeIMO.Pdf, OfficeIMO.Reader.Pdf",
+      "sourceFormat": "pdf",
+      "targetFormat": "reader-result/ocr-handoff",
+      "status": "supported",
+      "sourceFeatures": [
+        "image-only-page",
+        "asset-geometry",
+        "ocr-candidate",
+        "ocr-needed-diagnostic",
+        "downstream-ocr-enrichment",
+        "accepted-degradation-summary"
+      ],
+      "expectedSimplifications": [
+        "image-only pages are routed to an OCR candidate contract instead of being treated as extracted native text",
+        "OfficeIMO.Reader.Pdf exposes candidate geometry, linked image asset metadata, and stable diagnostics but does not run OCR inside the dependency-light core",
+        "OfficeIMO.Reader can merge external OCR text back into generic ocr-text blocks/chunks with reader.ocr trace metadata"
+      ],
+      "expectedWarnings": [
+        "ocr-needed"
+      ],
+      "visualReviewFiles": [
+        "pdf-reader-ocr-handoff-corpus.pdf",
+        "pdf-reader-ocr-handoff-summary.json"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "ocr-needed"
+        ],
+        "logicalSignals": [
+          "read-result-envelope",
+          "image-asset",
+          "ocr-candidate",
+          "ocr-needed-diagnostic",
+          "ocr-metadata-counts",
+          "ocr-enrichment-contract",
+          "accepted-degradation-summary"
+        ],
+        "visualPages": 1,
+        "validatorEvidence": [
+          "PdfDocument",
+          "DocumentReaderPdfExtensions",
+          "OfficeDocumentReadResult.OcrCandidates",
+          "OfficeDocumentReadResult.Diagnostics",
+          "OfficeDocumentReadResult.Metadata",
+          "OfficeDocumentOcrEnrichmentExtensions.ApplyOcrResults"
+        ]
+      }
+    },
+    {
+      "id": "pdf-reader-xfa-form-corpus",
+      "path": "pdf-reader-xfa-form-corpus",
+      "converter": "OfficeIMO.Pdf, OfficeIMO.Reader.Pdf",
+      "sourceFormat": "pdf",
+      "targetFormat": "reader-result/form-metadata",
+      "status": "supported",
+      "sourceFeatures": [
+        "acroform-xfa",
+        "xfa-template-packet",
+        "xfa-datasets-packet",
+        "accepted-degradation-summary"
+      ],
+      "expectedSimplifications": [
+        "XFA packets are detected and reported as metadata without claiming XFA rendering or filling",
+        "OfficeIMO.Pdf exposes XFA packet names, payload counts, and template/datasets flags through the logical model and inspector",
+        "OfficeIMO.Reader.Pdf carries XFA facts in stable reader metadata for downstream routing"
+      ],
+      "expectedWarnings": [],
+      "visualReviewFiles": [
+        "pdf-reader-xfa-form-corpus.pdf",
+        "pdf-reader-xfa-form-summary.json"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "pdf-acroform-xfa"
+        ],
+        "logicalSignals": [
+          "read-result-envelope",
+          "acroform-xfa",
+          "xfa-packet-names",
+          "xfa-payload-counts",
+          "accepted-degradation-summary"
+        ],
+        "visualPages": 1,
+        "validatorEvidence": [
+          "PdfDocumentReadResult.AcroFormXfa",
+          "PdfDocumentInfo.AcroFormXfa",
+          "DocumentReaderPdfExtensions",
+          "OfficeDocumentReadResult.Metadata"
+        ]
+      }
+    },
+    {
+      "id": "pdf-standard-security-roundtrip",
+      "path": "pdf-standard-security-roundtrip",
+      "converter": "OfficeIMO.Pdf",
+      "sourceFormat": "pdf",
+      "targetFormat": "secure-pdf/logical-read-model",
+      "status": "supported",
+      "sourceFeatures": [
+        "standard-security-encryption",
+        "user-password-read",
+        "owner-password-metadata",
+        "read-blocker-without-password",
+        "wrong-password-failure",
+        "password-backed-page-extraction"
+      ],
+      "expectedSimplifications": [
+        "Standard security password read/decrypt is supported for generated and simple compatible PDFs",
+        "encrypted rewrite and form mutation still fail closed until encrypted preservation is implemented"
+      ],
+      "expectedWarnings": [
+        "encrypted rewrite is blocked by preflight even when the read password is valid"
+      ],
+      "visualReviewFiles": [
+        "pdf-standard-security-roundtrip.pdf",
+        "pdf-standard-security-extracted-page.pdf",
+        "pdf-standard-security-summary.json"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "PDF Standard Security Gate",
+          "Credential protected marker",
+          "Extracted page marker"
+        ],
+        "logicalSignals": [
+          "encryption-detected",
+          "password-required-read-blocker",
+          "wrong-password-error",
+          "credential-aware-text-extraction",
+          "fail-closed-rewrite-blocker",
+          "unencrypted-page-extraction"
+        ],
+        "visualPages": 1,
+        "validatorEvidence": [
+          "PdfStandardSecurityWriter",
+          "PdfLoadOptions.Password",
+          "PdfInspector.Preflight",
+          "PdfTextExtractor",
+          "PdfDocument.Pages.Split"
+        ]
+      }
+    },
+    {
+      "id": "pdf-logical-readback",
+      "path": "pdf-to-logical",
+      "converter": "OfficeIMO.Pdf",
+      "sourceFormat": "pdf",
+      "targetFormat": "logical-read-model",
+      "status": "supported",
+      "sourceFeatures": [
+        "headings",
+        "paragraphs",
+        "lists",
+        "tables",
+        "links",
+        "images"
+      ],
+      "expectedSimplifications": [
+        "logical readback is parser-supported and does not OCR scanned pages"
+      ],
+      "expectedWarnings": [],
+      "visualReviewFiles": [
+        "pdf-to-html-logical-source.pdf"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "Logical PDF sample",
+          "Detected logical bullet"
+        ],
+        "logicalSignals": [
+          "headings",
+          "paragraphs",
+          "list-items",
+          "tables",
+          "links",
+          "images"
+        ],
+        "visualPages": 1,
+        "validatorEvidence": [
+          "PdfDocumentReadResult",
+          "PdfReadDocument"
+        ]
+      }
+    },
+    {
+      "id": "pdf-to-html-positioned-review",
+      "path": "pdf-to-html",
+      "converter": "OfficeIMO.Html.Pdf",
+      "sourceFormat": "pdf",
+      "targetFormat": "html",
+      "status": "supported",
+      "sourceFeatures": [
+        "logical-text",
+        "headings",
+        "outlines",
+        "tables",
+        "links",
+        "image-placeholders",
+        "form-widget-hints",
+        "active-content-diagnostics",
+        "acroform-xfa",
+        "xfa-review-notice",
+        "positioned-review-profile"
+      ],
+      "expectedSimplifications": [
+        "positioned review HTML is an inspection surface, not a full PDF renderer; active catalog, page, and annotation actions are summarized as inert diagnostics without exposing action payloads",
+        "AcroForm XFA packets are represented as inert notice metadata and summary counters; OfficeIMO.Html.Pdf does not render or fill XFA"
+      ],
+      "expectedWarnings": [
+        "AcroFormXfaDetected"
+      ],
+      "visualReviewFiles": [
+        "pdf-to-html-logical-source.pdf",
+        "pdf-to-html-positioned-review.html",
+        "pdf-to-html-active-content-source.pdf",
+        "pdf-to-html-active-content-positioned-review.html",
+        "pdf-to-html-xfa-form-source.pdf",
+        "pdf-to-html-xfa-form-positioned-review.html",
+        "pdf-to-html-positioned-review-summary.json"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "Logical PDF sample",
+          "Logical Heading"
+        ],
+        "logicalSignals": [
+          "html-page-containers",
+          "positioned-text",
+          "outline-navigation",
+          "safe-links",
+          "image-placeholders",
+          "form-widget-hints",
+          "active-content-counters",
+          "potentially-unsafe-action-count",
+          "xfa-review-notice",
+          "xfa-summary-counters"
+        ],
+        "visualPages": 1,
+        "validatorEvidence": [
+          "PdfHtmlConverter",
+          "PdfDocumentReadResult",
+          "PdfHtmlExportSummary",
+          "PdfHtmlExportSummary.OutlineCount",
+          "PdfHtmlExportSummary.RenderedOutlineCount",
+          "PdfHtmlExportSummary.HasAcroFormXfa",
+          "PdfHtmlExportSummary.AcroFormXfaPacketCount"
+        ]
+      }
+    },
+    {
+      "id": "pdf-table-import-editable-office",
+      "path": "pdf-to-editable-office",
+      "converter": "OfficeIMO.Word.Pdf, OfficeIMO.Excel.Pdf, OfficeIMO.PowerPoint.Pdf",
+      "sourceFormat": "pdf",
+      "targetFormat": "docx/xlsx/pptx",
+      "status": "supported",
+      "sourceFeatures": [
+        "semantic-word-import",
+        "headings",
+        "paragraphs",
+        "lists",
+        "uri-hyperlinks",
+        "internal-hyperlinks",
+        "named-destinations",
+        "embedded-word-images",
+        "born-digital-table",
+        "logical-table-analysis",
+        "shared-page-reading-order",
+        "multi-page-table-continuations",
+        "repeated-header-suppression",
+        "column-profiles",
+        "typed-value-profiles",
+        "image-fallback-placeholders",
+        "form-widget-placeholders",
+        "source-page-metadata"
+      ],
+      "expectedSimplifications": [
+        "Word import is semantic editable reconstruction over parser-supported logical PDF objects, not fixed-layout page recreation",
+        "Excel is intentionally table-shaped; this route uses PowerPoint's explicit editable-table profile rather than its broader editable-content default",
+        "complete image-file payloads with transparency-mask fidelity metadata plus supported ImageMask stencil streams, color-key masked simple and Indexed streams, Decode-aware soft-mask-capable simple DeviceGray/DeviceRGB/basic-converted DeviceCMYK streams, basic ICCBased N=1/3/4 streams, and Decode-aware soft-mask-capable Indexed palette PDF image streams are embedded as native Word images when their filters are supported; pass-through JPEG image payloads with unresolved PDF transparency masks are embedded with explicit diagnostics; complex unsupported image streams and form widgets are represented as editable placeholders and diagnostics",
+        "supported internal PDF destinations are reconstructed as Word bookmark hyperlinks; unresolved, remote, or cross-document navigation actions remain diagnostics"
+      ],
+      "expectedWarnings": [
+        "PdfImageEmbedded",
+        "PdfUriLinkReconstructed",
+        "PdfInternalLinkReconstructed"
+      ],
+      "visualReviewFiles": [
+        "pdf-table-import-source.pdf",
+        "pdf-semantic-import-word.docx",
+        "pdf-table-import-excel.xlsx",
+        "pdf-table-import-powerpoint.pptx",
+        "pdf-table-import-editable-office-summary.json"
+      ],
+      "proof": {
+        "hash": true,
+        "textMarkers": [
+          "Logical PDF sample",
+          "Code",
+          "A-100",
+          "B-200"
+        ],
+        "logicalSignals": [
+          "semantic-word-package",
+          "word-heading-paragraphs",
+          "word-list-items",
+          "word-uri-hyperlinks",
+          "word-internal-hyperlinks",
+          "word-bookmarks",
+          "word-embedded-images",
+          "detected-table",
+          "crop-rotation-column-reading-order",
+          "table-continuation-provenance",
+          "word-table-package",
+          "excel-table-package",
+          "powerpoint-table-package",
+          "typed-value-profile",
+          "placeholder-diagnostics"
+        ],
+        "visualPages": 1,
+        "validatorEvidence": [
+          "PdfLogicalTableAnalysis",
+          "PdfLogicalReadingOrderAnalysis",
+          "PdfLogicalTableValueAnalysis",
+          "PdfWordImportOptions",
+          "PdfWordConverterExtensions",
+          "WordprocessingDocument",
+          "SpreadsheetDocument",
+          "PresentationDocument"
+        ]
+      }
+    }
+  ]
+}

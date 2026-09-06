@@ -1,0 +1,141 @@
+using OfficeIMO.Excel;
+using OfficeIMO.Excel.Html;
+using OfficeIMO.Drawing;
+using OfficeIMO.Html;
+using OfficeIMO.Html.Pdf;
+using OfficeIMO.Markdown;
+using OfficeIMO.Markdown.Html;
+using OfficeIMO.OneNote;
+using OfficeIMO.OneNote.Html;
+using OfficeIMO.PowerPoint;
+using OfficeIMO.PowerPoint.Html;
+using OfficeIMO.Reader;
+using OfficeIMO.Reader.Html;
+using OfficeIMO.Rtf;
+using OfficeIMO.Word;
+using OfficeIMO.Word.Html;
+using System.Reflection;
+using Xunit;
+
+namespace OfficeIMO.Tests;
+
+public partial class Html {
+    [Fact]
+    public void MarkdownImport_UsesHtmlIntegerRulesForOrderedLists() {
+        string markdown = HtmlConversionDocument
+            .Parse("<ol start='9x'><li>First</li><li value='12junk'>Second</li><li>Third</li></ol>")
+            .ToMarkdown();
+
+        Assert.Contains("9. First", markdown, StringComparison.Ordinal);
+        Assert.Contains("12. Second", markdown, StringComparison.Ordinal);
+        Assert.Contains("13. Third", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HtmlPreparedDocumentApis_ProduceArtifactsAcrossConversionTargets() {
+        HtmlConversionDocument source = HtmlConversionDocument.Parse("<h1>Hello</h1><p>Body</p>");
+
+        string markdown = source.ToMarkdown();
+        MarkdownDoc markdownDocument = source.ToMarkdownDocument();
+        RtfDocument rtfDocument = source.ToRtfDocument();
+        using WordDocument wordDocument = source.ToWordDocumentResult().RequireValue();
+
+        Assert.Contains("Hello", markdown, StringComparison.Ordinal);
+        Assert.NotNull(markdownDocument);
+        Assert.Contains("Hello", rtfDocument.ToRtf(), StringComparison.Ordinal);
+        Assert.NotEmpty(wordDocument.Paragraphs);
+
+        using ExcelDocument workbook = ExcelDocument.Create(new MemoryStream());
+        workbook.AddWorksheet("Data").CellValue(1, 1, "value");
+        HtmlConversionDocument excelHtml = HtmlConversionDocument.Parse(workbook.ToHtml());
+        using ExcelDocument importedWorkbook = excelHtml.ToExcelDocumentResult().RequireValue();
+        Assert.Single(importedWorkbook.Sheets);
+
+        using PowerPointPresentation presentation = PowerPointPresentation.Create(new MemoryStream());
+        presentation.AddSlide().AddTextBoxPoints("Hello", 20, 20, 200, 40);
+        HtmlConversionDocument powerPointHtml = HtmlConversionDocument.Parse(presentation.ToHtml());
+        using PowerPointPresentation importedPresentation = powerPointHtml
+            .ToPowerPointPresentationResult()
+            .RequireValue();
+        Assert.Single(importedPresentation.Slides);
+
+        OneNoteSection oneNoteSection = source.ToOneNoteSectionResult().RequireValue();
+        HtmlTextConversionResult oneNoteHtml = oneNoteSection.ToHtmlDocumentResult();
+        Assert.Contains("Hello", oneNoteHtml.RequireValue(), StringComparison.Ordinal);
+
+        OfficeIMO.Pdf.PdfDocumentConversionResult pdf = source.ToPdfDocumentResult();
+        OfficeImageExportResult image = source.ExportImage(OfficeImageExportFormat.Png);
+        Assert.NotEmpty(pdf.ToBytes());
+        Assert.NotEmpty(image.Bytes);
+
+        var reader = new OfficeDocumentReaderBuilder().AddHtmlHandler().Build();
+        using var htmlStream = new MemoryStream(Encoding.UTF8.GetBytes("<h1>Hello</h1><p>Body</p>"));
+        OfficeDocumentReadResult readerDocument = reader.ReadDocument(htmlStream, "readme.html");
+        Assert.Contains("Hello", readerDocument.Markdown ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HtmlTargetCapabilityContracts_AdvertisePublicCompiledApis() {
+        var publicApis = new Dictionary<HtmlConversionTarget, ApiSurface> {
+            [HtmlConversionTarget.Word] = new(
+                typeof(WordHtmlConverterExtensions), "ToWordDocument", "ToWordDocumentResult",
+                typeof(WordHtmlConverterExtensions), "ToHtml", "ToHtmlResult"),
+            [HtmlConversionTarget.Excel] = new(
+                typeof(HtmlExcelConverterExtensions), "ToExcelDocument", "ToExcelDocumentResult",
+                typeof(ExcelHtmlConverterExtensions), "ToHtml", "ToHtmlResult"),
+            [HtmlConversionTarget.PowerPoint] = new(
+                typeof(HtmlPowerPointConverterExtensions), "ToPowerPointPresentation", "ToPowerPointPresentationResult",
+                typeof(PowerPointHtmlConverterExtensions), "ToHtml", "ToHtmlResult"),
+            [HtmlConversionTarget.OneNote] = new(
+                typeof(HtmlOneNoteConverterExtensions), "ToOneNoteSection", "ToOneNoteSectionResult",
+                typeof(OneNoteHtmlConverterExtensions), "ToHtmlDocument", "ToHtmlDocumentResult"),
+            [HtmlConversionTarget.Markdown] = new(
+                typeof(HtmlMarkdownConverterExtensions), "ToMarkdownDocument", "ToMarkdownDocumentResult",
+                typeof(MarkdownDoc), "ToHtmlDocument", null),
+            [HtmlConversionTarget.Rtf] = new(
+                typeof(HtmlRtfConverterExtensions), "ToRtfDocument", "ToRtfDocumentResult",
+                typeof(HtmlRtfConverterExtensions), "ToHtml", "ToHtmlResult"),
+            [HtmlConversionTarget.Pdf] = new(
+                typeof(HtmlPdfConverterExtensions), "ToPdfDocument", "ToPdfDocumentResult",
+                typeof(PdfHtmlConverterExtensions), "ToHtml", "ToHtmlResult"),
+            [HtmlConversionTarget.Image] = new(
+                typeof(HtmlImageExportExtensions), "ToPng", "ExportImage", null, null, null),
+            [HtmlConversionTarget.Reader] = new(
+                typeof(OfficeDocumentReader), "ReadDocument", "ReadDocument", null, null, null)
+        };
+
+        Assert.Equal(HtmlTargetCapabilityContracts.All.Count, publicApis.Count);
+        foreach (HtmlTargetCapabilityContract contract in HtmlTargetCapabilityContracts.All) {
+            ApiSurface surface = publicApis[contract.Target];
+            AssertPublicMethod(surface.ImportOwner, surface.ImportMethod);
+            AssertPublicMethod(surface.ResultOwner, surface.ResultMethod);
+            Assert.Equal(surface.ExportOwner != null, contract.SupportsReverseHtml);
+            if (surface.ExportOwner != null) {
+                AssertPublicMethod(surface.ExportOwner, surface.ExportMethod!);
+                if (surface.ExportResultMethod != null) {
+                    AssertPublicMethod(surface.ExportOwner, surface.ExportResultMethod);
+                }
+            }
+
+            Assert.Contains(surface.ImportMethod, contract.ImportEntryPoint, StringComparison.Ordinal);
+            if (surface.ExportMethod != null) {
+                Assert.Contains(surface.ExportMethod, contract.ExportEntryPoint!, StringComparison.Ordinal);
+            }
+        }
+    }
+
+    private static void AssertPublicMethod(Type owner, string methodName) {
+        Assert.Contains(owner.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance),
+            method => string.Equals(method.Name, methodName, StringComparison.Ordinal));
+    }
+
+    private sealed record ApiSurface(
+        Type ImportOwner,
+        string ImportMethod,
+        string ResultMethod,
+        Type? ExportOwner,
+        string? ExportMethod,
+        string? ExportResultMethod) {
+        public Type ResultOwner => ImportOwner;
+    }
+}

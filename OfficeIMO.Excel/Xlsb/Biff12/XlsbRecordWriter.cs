@@ -1,0 +1,81 @@
+namespace OfficeIMO.Excel.Xlsb.Biff12 {
+    /// <summary>Writes canonically framed BIFF12 records.</summary>
+    internal static class XlsbRecordWriter {
+        internal static void Write(Stream stream, int recordType, byte[]? payload = null) {
+            if (stream == null) throw new ArgumentNullException(nameof(stream));
+            if (!stream.CanWrite) throw new ArgumentException("The BIFF12 destination must be writable.", nameof(stream));
+            if (recordType < 0 || recordType > 0x3FFF) throw new ArgumentOutOfRangeException(nameof(recordType));
+            byte[] data = payload ?? Array.Empty<byte>();
+
+            WriteHeader(stream, recordType, data.Length);
+            stream.Write(data, 0, data.Length);
+        }
+
+        internal static void WriteHeader(Stream stream, int recordType, int payloadLength) {
+            if (stream == null) throw new ArgumentNullException(nameof(stream));
+            if (!stream.CanWrite) throw new ArgumentException("The BIFF12 destination must be writable.", nameof(stream));
+            if (recordType < 0 || recordType > 0x3FFF) throw new ArgumentOutOfRangeException(nameof(recordType));
+            if (payloadLength < 0 || payloadLength > 0x0FFFFFFF) throw new ArgumentOutOfRangeException(nameof(payloadLength));
+
+            if (recordType < 0x80) {
+                stream.WriteByte((byte)recordType);
+            } else {
+                stream.WriteByte((byte)((recordType & 0x7F) | 0x80));
+                stream.WriteByte((byte)(recordType >> 7));
+            }
+
+            WriteVariableLengthValue(stream, payloadLength);
+        }
+
+        internal static int EncodeHeader(int recordType, int payloadLength, byte[] destination) {
+            return EncodeHeader(recordType, payloadLength, destination, 0);
+        }
+
+        internal static int EncodeHeader(
+            int recordType,
+            int payloadLength,
+            byte[] destination,
+            int offset) {
+            if (recordType < 0 || recordType > 0x3FFF) throw new ArgumentOutOfRangeException(nameof(recordType));
+            if (payloadLength < 0 || payloadLength > 0x0FFFFFFF) throw new ArgumentOutOfRangeException(nameof(payloadLength));
+            if (destination == null) throw new ArgumentNullException(nameof(destination));
+            if (offset < 0 || offset > destination.Length - 6) {
+                throw new ArgumentOutOfRangeException(nameof(offset));
+            }
+
+            int index = offset;
+            if (recordType < 0x80) {
+                destination[index++] = (byte)recordType;
+            } else {
+                destination[index++] = (byte)((recordType & 0x7F) | 0x80);
+                destination[index++] = (byte)(recordType >> 7);
+            }
+
+            int value = payloadLength;
+            do {
+                byte current = (byte)(value & 0x7F);
+                value >>= 7;
+                if (value != 0) current |= 0x80;
+                destination[index++] = current;
+            } while (value != 0);
+
+            return index - offset;
+        }
+
+        internal static byte[] Encode(int recordType, byte[]? payload = null) {
+            using var stream = new MemoryStream();
+            Write(stream, recordType, payload);
+            return stream.ToArray();
+        }
+
+        private static void WriteVariableLengthValue(Stream stream, int value) {
+            if (value < 0 || value > 0x0FFFFFFF) throw new ArgumentOutOfRangeException(nameof(value));
+            do {
+                byte current = (byte)(value & 0x7F);
+                value >>= 7;
+                if (value != 0) current |= 0x80;
+                stream.WriteByte(current);
+            } while (value != 0);
+        }
+    }
+}

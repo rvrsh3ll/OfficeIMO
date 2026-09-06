@@ -1,0 +1,147 @@
+{
+  "version": 1,
+  "purpose": "Pinned external-reference distance gates for first-party OfficeIMO Office-to-PDF converters. These budgets measure improvement against Microsoft Office output; they do not claim pixel equivalence.",
+  "rasterizer": {
+    "name": "Poppler pdftoppm",
+    "dpi": 72
+  },
+  "producerEnvironment": {
+    "suite": "Microsoft 365 for Mac",
+    "shortVersion": "16.109",
+    "bundleVersion": "16.109.26051019",
+    "operatingSystem": "macOS 26.5",
+    "operatingSystemBuild": "25F71"
+  },
+  "scenarios": [
+    {
+      "id": "word-native-report",
+      "converterId": "word",
+      "producer": "Microsoft Word",
+      "exportPreset": "best-for-printing",
+      "sourcePath": "native-word-report.docx",
+      "sourceSha256": "578a8a82bbfb877bad9cf0aacf7febc61d1d9c118c6af67f3a21dadc9e9b4547",
+      "referencePdfPath": "microsoft-word-16.109-native-word-report.pdf",
+      "referencePdfSha256": "721efc4f1a37826bbe920a8c886a2a52f9169cb4d125523af379008624e0fc0d",
+      "pages": [
+        {
+          "number": 1,
+          "widthPoints": 612.0,
+          "heightPoints": 792.0,
+          "rasterWidth": 612,
+          "rasterHeight": 792,
+          "measuredDifferentPixelRatio": 0.1091,
+          "measuredMeanAbsoluteError": 6.783,
+          "measuredRootMeanSquareError": 32.066,
+          "measuredMeanLuminanceError": 9.013
+        }
+      ],
+      "maximumDifferentPixelRatio": 0.12,
+      "maximumMeanAbsoluteError": 7.5,
+      "maximumRootMeanSquareError": 35.0,
+      "maximumMeanLuminanceError": 10.0
+    },
+    {
+      "id": "word-business-delivery-summary",
+      "converterId": "word",
+      "producer": "Microsoft Word",
+      "producerVersion": "16.0.20131.20154",
+      "exportPreset": "standard-print-export",
+      "fontProfile": "officeimo-browser-compact",
+      "fontProfileFingerprint": "99fe9605fae25324712287bc2212236771b67515ec77dab263a35fc48079e72f",
+      "sourcePath": "word-business-delivery-summary.docx",
+      "sourceSha256": "cac35c025abb249028181a9b54bfae02a4fcc1d1138cf34071eb01341a97438a",
+      "referencePdfPath": "microsoft-word-windows-word-business-delivery-summary.pdf",
+      "referencePdfSha256": "cad719da2c81ac64d342bbed2b24039c2f7d3ca40c807322f764fb621a98a673",
+      "producerEnvironment": {
+        "suite": "Microsoft Word for Microsoft 365",
+        "productVersion": "16.0.20131.20154",
+        "operatingSystem": "Windows 11",
+        "operatingSystemBuild": "10.0.26200.0"
+      },
+      "sanitization": {
+        "source": "Synthetic delivery-summary report",
+        "replacements": "Machine, customer, analyst, and domain identifiers were replaced with example values before export."
+      },
+      "pages": [
+        { "number": 1, "widthPoints": 612.0, "heightPoints": 792.0, "rasterWidth": 612, "rasterHeight": 792, "measuredDifferentPixelRatio": 0.1479, "measuredMeanAbsoluteError": 13.942, "measuredRootMeanSquareError": 51.244, "measuredMeanLuminanceError": 18.639 },
+        { "number": 2, "widthPoints": 612.0, "heightPoints": 792.0, "rasterWidth": 612, "rasterHeight": 792, "measuredDifferentPixelRatio": 0.1520, "measuredMeanAbsoluteError": 13.581, "measuredRootMeanSquareError": 49.671, "measuredMeanLuminanceError": 18.166 },
+        { "number": 3, "widthPoints": 612.0, "heightPoints": 792.0, "rasterWidth": 612, "rasterHeight": 792, "measuredDifferentPixelRatio": 0.1728, "measuredMeanAbsoluteError": 14.671, "measuredRootMeanSquareError": 49.937, "measuredMeanLuminanceError": 19.587 },
+        { "number": 4, "widthPoints": 612.0, "heightPoints": 792.0, "rasterWidth": 612, "rasterHeight": 792, "measuredDifferentPixelRatio": 0.1624, "measuredMeanAbsoluteError": 14.509, "measuredRootMeanSquareError": 51.911, "measuredMeanLuminanceError": 19.391 },
+        { "number": 5, "widthPoints": 612.0, "heightPoints": 792.0, "rasterWidth": 612, "rasterHeight": 792, "measuredDifferentPixelRatio": 0.1447, "measuredMeanAbsoluteError": 12.691, "measuredRootMeanSquareError": 47.225, "measuredMeanLuminanceError": 16.959 },
+        { "number": 6, "widthPoints": 612.0, "heightPoints": 792.0, "rasterWidth": 612, "rasterHeight": 792, "measuredDifferentPixelRatio": 0.1799, "measuredMeanAbsoluteError": 16.413, "measuredRootMeanSquareError": 54.862, "measuredMeanLuminanceError": 21.921 },
+        { "number": 7, "widthPoints": 612.0, "heightPoints": 792.0, "rasterWidth": 612, "rasterHeight": 792, "measuredDifferentPixelRatio": 0.1429, "measuredMeanAbsoluteError": 12.254, "measuredRootMeanSquareError": 46.270, "measuredMeanLuminanceError": 16.378 },
+        { "number": 8, "widthPoints": 612.0, "heightPoints": 792.0, "rasterWidth": 612, "rasterHeight": 792, "measuredDifferentPixelRatio": 0.1724, "measuredMeanAbsoluteError": 15.612, "measuredRootMeanSquareError": 53.092, "measuredMeanLuminanceError": 20.853 },
+        { "number": 9, "widthPoints": 612.0, "heightPoints": 792.0, "rasterWidth": 612, "rasterHeight": 792, "measuredDifferentPixelRatio": 0.1590, "measuredMeanAbsoluteError": 15.777, "measuredRootMeanSquareError": 54.965, "measuredMeanLuminanceError": 21.054 }
+      ],
+      "maximumDifferentPixelRatio": 0.19,
+      "maximumMeanAbsoluteError": 17.0,
+      "maximumRootMeanSquareError": 57.0,
+      "maximumMeanLuminanceError": 23.0
+    },
+    {
+      "id": "excel-native-daily-workbook",
+      "converterId": "excel",
+      "producer": "Microsoft Excel",
+      "exportPreset": "entire-workbook-best-for-electronic-distribution",
+      "sourcePath": "native-excel-daily-workbook.xlsx",
+      "sourceSha256": "aac56f6202d075c099c4c0e38df363566ad413d9c1c15b54fd283f9beea0b922",
+      "referencePdfPath": "microsoft-excel-16.109-native-excel-daily-workbook.pdf",
+      "referencePdfSha256": "fa7e5e0a11c557c3d954af8b9a9addf6336e7483f096b0711c5e74afcfd66d2d",
+      "pages": [
+        {
+          "number": 1,
+          "widthPoints": 792.0,
+          "heightPoints": 612.0,
+          "rasterWidth": 792,
+          "rasterHeight": 612,
+          "measuredDifferentPixelRatio": 0.0763,
+          "measuredMeanAbsoluteError": 3.068,
+          "measuredRootMeanSquareError": 21.745,
+          "measuredMeanLuminanceError": 4.101
+        },
+        {
+          "number": 2,
+          "widthPoints": 595.32,
+          "heightPoints": 841.92,
+          "rasterWidth": 596,
+          "rasterHeight": 842,
+          "measuredDifferentPixelRatio": 0.0047,
+          "measuredMeanAbsoluteError": 0.347,
+          "measuredRootMeanSquareError": 7.294,
+          "measuredMeanLuminanceError": 0.465
+        }
+      ],
+      "maximumDifferentPixelRatio": 0.085,
+      "maximumMeanAbsoluteError": 3.5,
+      "maximumRootMeanSquareError": 24.0,
+      "maximumMeanLuminanceError": 4.6
+    },
+    {
+      "id": "powerpoint-native-dense-layout",
+      "converterId": "powerpoint",
+      "producer": "Microsoft PowerPoint",
+      "exportPreset": "best-for-electronic-distribution",
+      "sourcePath": "native-powerpoint-dense-layout.pptx",
+      "sourceSha256": "cec3af6f7c452ec3d84b354dd7fb4eefcc9d7390daa2aad7ff97a3416842994c",
+      "referencePdfPath": "microsoft-powerpoint-16.109-native-powerpoint-dense-layout.pdf",
+      "referencePdfSha256": "800150437c6df0df2081c4f08e5e3beca80e7b7d629ec1a2558c4ac4aa25e19f",
+      "pages": [
+        {
+          "number": 1,
+          "widthPoints": 319.68,
+          "heightPoints": 180.0,
+          "rasterWidth": 320,
+          "rasterHeight": 180,
+          "measuredDifferentPixelRatio": 0.305,
+          "measuredMeanAbsoluteError": 12.855,
+          "measuredRootMeanSquareError": 42.627,
+          "measuredMeanLuminanceError": 16.815
+        }
+      ],
+      "maximumDifferentPixelRatio": 0.335,
+      "maximumMeanAbsoluteError": 14.2,
+      "maximumRootMeanSquareError": 47.0,
+      "maximumMeanLuminanceError": 18.5
+    }
+  ]
+}

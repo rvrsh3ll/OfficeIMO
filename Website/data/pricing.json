@@ -1,0 +1,44 @@
+{
+  "hero": {
+    "label": "Support",
+    "title": "Open source by default. Help when you need it.",
+    "description": "Use every OfficeIMO package under the MIT license. Get help from the community, sponsor ongoing work, or discuss a scoped commercial engagement."
+  },
+  "cards": [
+    {
+      "class": "pricing-card",
+      "icon_svg": "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.5'><path d='M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z'/></svg>",
+      "title": "Community",
+      "tag": "MIT licensed",
+      "amount": "Included",
+      "description": "Use the complete package family in commercial, internal, and open-source projects.",
+      "features": ["All public packages", "No feature gating", "No usage limits", "Source and issue tracker", "Community help through GitHub and Discord", "Public documentation and API reference"],
+      "cta": { "label": "Browse packages", "href": "/downloads/", "class": "pricing-btn pricing-btn-secondary" }
+    },
+    {
+      "class": "pricing-card pricing-card-featured",
+      "badge": "Support the project",
+      "icon_svg": "<svg viewBox='0 0 24 24' fill='currentColor'><path d='M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z'/></svg>",
+      "title": "Sponsor",
+      "tag": "GitHub Sponsors",
+      "amount": "Choose a tier",
+      "description": "Fund maintenance, testing, documentation, and continued development of the open-source ecosystem.",
+      "features": ["Everything in Community", "Directly supports maintenance", "Sponsor recognition where the selected tier includes it", "Closer visibility into project direction", "Helps fund test infrastructure", "Cancel through GitHub Sponsors"],
+      "cta": { "label": "View sponsor options", "href": "https://github.com/sponsors/PrzemyslawKlys", "class": "pricing-btn pricing-btn-primary", "target": "_blank", "rel": "noopener" }
+    },
+    {
+      "class": "pricing-card",
+      "icon_svg": "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.5'><path d='M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4'/></svg>",
+      "title": "Commercial",
+      "tag": "Scoped engagement",
+      "amount": "Let's talk",
+      "description": "Discuss architecture guidance, priority engineering, integration help, or a support arrangement around your document workflow.",
+      "features": ["Private technical discussion", "Architecture and package selection", "Reproducible defect investigation", "Custom feature scoping", "Integration and migration guidance", "Business invoicing available"],
+      "cta": { "label": "Contact Evotec", "href": "mailto:contact@evotec.pl", "class": "pricing-btn pricing-btn-secondary" }
+    }
+  ],
+  "note": {
+    "title": "Before you contact us",
+    "paragraphs": ["<p>For a public defect or feature request, start with <a href='https://github.com/EvotecIT/OfficeIMO/issues'>GitHub Issues</a> and include the package version, runtime, smallest reproducible input, and expected result.</p>", "<p>For private or commercial work, email <a href='mailto:contact@evotec.pl'>contact@evotec.pl</a> with the formats, deployment environment, timeline, and the outcome your team needs.</p>"]
+  }
+}

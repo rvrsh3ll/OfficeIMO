@@ -1,0 +1,382 @@
+using System;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Spreadsheet;
+using DocumentFormat.OpenXml.Validation;
+using OfficeIMO.Excel;
+using Xunit;
+
+namespace OfficeIMO.Tests {
+    public partial class Excel {
+        private enum DummyEnum { Alpha, Beta }
+
+        [Fact]
+        public async Task Test_CellValuesParallelStrings() {
+            string filePath = Path.Combine(_directoryWithFiles, "CellValuesParallelStrings.xlsx");
+
+            using (var document = ExcelDocument.Create(filePath)) {
+                var sheet = document.AddWorksheet("Data");
+
+                var col1 = Enumerable.Range(1, 500).Select(i => (i, 1, (object)$"R{i}C1"));
+                var col2 = Enumerable.Range(1, 500).Select(i => (i, 2, (object)$"R{i}C2"));
+                var col3 = Enumerable.Range(1, 500).Select(i => (i, 3, (object)$"R{i}C3"));
+                var col4 = Enumerable.Range(1, 500).Select(i => (i, 4, (object)$"R{i}C4"));
+
+                await Task.WhenAll(
+                    Task.Run(() => sheet.CellValues(col1, ExcelExecutionMode.Parallel)),
+                    Task.Run(() => sheet.CellValues(col2, ExcelExecutionMode.Parallel)),
+                    Task.Run(() => sheet.CellValues(col3, ExcelExecutionMode.Parallel)),
+                    Task.Run(() => sheet.CellValues(col4, ExcelExecutionMode.Parallel))
+                );
+
+                document.Save();
+            }
+
+            SpreadsheetDocument spreadsheet = null!;
+            Exception? ex = Record.Exception(() => spreadsheet = SpreadsheetDocument.Open(filePath, false));
+            Assert.Null(ex);
+            using (spreadsheet) {
+                ValidateSpreadsheetDocument(filePath, spreadsheet);
+
+                WorksheetPart wsPart = spreadsheet.WorkbookPart!.WorksheetParts.First();
+                SharedStringTablePart shared = spreadsheet.WorkbookPart!.SharedStringTablePart!;
+
+                for (int row = 1; row <= 500; row++) {
+                    for (int col = 1; col <= 4; col++) {
+                        string expected = $"R{row}C{col}";
+                        string cellRef = $"{(char)('A' + col - 1)}{row}";
+                        Cell cell = wsPart.Worksheet.Descendants<Cell>().First(c => c.CellReference == cellRef);
+                        Assert.Equal(CellValues.SharedString, cell.DataType!.Value);
+                        int index = int.Parse(cell.CellValue!.Text);
+                        Assert.Equal(expected, shared.SharedStringTable!.ElementAt(index).InnerText);
+                    }
+                }
+
+                OpenXmlValidator validator = new OpenXmlValidator();
+                Assert.Empty(validator.Validate(spreadsheet));
+
+                Assert.Equal(2000, shared.SharedStringTable!.Count());
+            }
+        }
+
+        [Fact]
+        public void Test_CellValuesParallelMixedTypes() {
+            string filePath = Path.Combine(_directoryWithFiles, "CellValuesParallelMixedTypes.xlsx");
+            Guid guid = Guid.NewGuid();
+            using (var document = ExcelDocument.Create(filePath)) {
+                var sheet = document.AddWorksheet("Data");
+                var uri = new Uri("https://example.com");
+                var cells = new (int, int, object)[] {
+                    (1, 1, (object)guid),
+                    (1, 2, (object)DummyEnum.Beta),
+                    (1, 3, (object)'Z'),
+                    (1, 4, (object)DBNull.Value),
+                    (1, 5, (object)uri)
+                };
+                sheet.CellValues(cells, ExcelExecutionMode.Parallel);
+                document.Save();
+            }
+
+            using (var spreadsheet = SpreadsheetDocument.Open(filePath, false)) {
+                ValidateSpreadsheetDocument(filePath, spreadsheet);
+
+                WorksheetPart wsPart = spreadsheet.WorkbookPart!.WorksheetParts.First();
+                SharedStringTablePart shared = spreadsheet.WorkbookPart!.SharedStringTablePart!;
+
+                string cellRefA1 = "A1";
+                Cell a1 = wsPart.Worksheet.Descendants<Cell>().First(c => c.CellReference == cellRefA1);
+                Assert.Equal(CellValues.SharedString, a1.DataType!.Value);
+                int idx = int.Parse(a1.CellValue!.Text);
+                Assert.Equal(guid.ToString(), shared.SharedStringTable!.ElementAt(idx).InnerText);
+
+                Cell b1 = wsPart.Worksheet.Descendants<Cell>().First(c => c.CellReference == "B1");
+                Assert.Equal(CellValues.SharedString, b1.DataType!.Value);
+                idx = int.Parse(b1.CellValue!.Text);
+                Assert.Equal("Beta", shared.SharedStringTable!.ElementAt(idx).InnerText);
+
+                Cell c1 = wsPart.Worksheet.Descendants<Cell>().First(c => c.CellReference == "C1");
+                Assert.Equal(CellValues.SharedString, c1.DataType!.Value);
+                idx = int.Parse(c1.CellValue!.Text);
+                Assert.Equal("Z", shared.SharedStringTable!.ElementAt(idx).InnerText);
+
+                Cell d1 = wsPart.Worksheet.Descendants<Cell>().First(c => c.CellReference == "D1");
+                Assert.Equal(CellValues.String, d1.DataType!.Value);
+                Assert.True(string.IsNullOrEmpty(d1.CellValue?.Text));
+
+                Cell e1 = wsPart.Worksheet.Descendants<Cell>().First(c => c.CellReference == "E1");
+                Assert.Equal(CellValues.SharedString, e1.DataType!.Value);
+                idx = int.Parse(e1.CellValue!.Text);
+                Assert.Equal("https://example.com/", shared.SharedStringTable!.ElementAt(idx).InnerText);
+            }
+        }
+
+        [Fact]
+        public void Test_CellValuesThrowsOnNullCells() {
+            string filePath = Path.Combine(_directoryWithFiles, "CellValuesNull.xlsx");
+
+            using (var document = ExcelDocument.Create(filePath)) {
+                var sheet = document.AddWorksheet("Data");
+
+                Assert.Throws<ArgumentNullException>(() => sheet.CellValues(null!));
+            }
+        }
+
+        [Fact]
+        public void Test_CellValuesParallelAppendedAutoFormatsPreserveDefaultStyle() {
+            string filePath = Path.Combine(_directoryWithFiles, "CellValuesParallelPreserveDefaultStyle.xlsx");
+
+            using (var document = ExcelDocument.Create(filePath)) {
+                var sheet = document.AddWorksheet("Data");
+                var workbookPart = document._spreadSheetDocument.WorkbookPart!;
+                var stylesPart = workbookPart.WorkbookStylesPart ?? workbookPart.AddNewPart<WorkbookStylesPart>();
+                stylesPart.Stylesheet = new Stylesheet(
+                    new Fonts(
+                        new DocumentFormat.OpenXml.Spreadsheet.Font(),
+                        new DocumentFormat.OpenXml.Spreadsheet.Font(new FontName { Val = "OfficeIMO Default Test" })) { Count = 2 },
+                    new Fills(new Fill()) { Count = 1 },
+                    new Borders(new Border()) { Count = 1 },
+                    new CellFormats(new CellFormat { FontId = 1U, ApplyFont = true }) { Count = 1 });
+                stylesPart.Stylesheet.Save();
+
+                sheet.CellValues(new[] {
+                    (1, 1, (object)new DateTime(2026, 5, 12)),
+                    (1, 2, (object)TimeSpan.FromHours(27)),
+                    (1, 3, (object)"Line 1\nLine 2")
+                }, ExcelExecutionMode.Parallel);
+                document.Save();
+            }
+
+            using (var spreadsheet = SpreadsheetDocument.Open(filePath, false)) {
+                var styles = spreadsheet.WorkbookPart!.WorkbookStylesPart!.Stylesheet!;
+                var formats = styles.CellFormats!.Elements<CellFormat>().ToList();
+                var cells = spreadsheet.WorkbookPart!.WorksheetParts.First().Worksheet.Descendants<Cell>().ToDictionary(c => c.CellReference!.Value!);
+
+                var dateFormat = formats[(int)cells["A1"].StyleIndex!.Value];
+                var durationFormat = formats[(int)cells["B1"].StyleIndex!.Value];
+                var wrapFormat = formats[(int)cells["C1"].StyleIndex!.Value];
+
+                Assert.Equal(1U, dateFormat.FontId!.Value);
+                Assert.Equal(14U, dateFormat.NumberFormatId!.Value);
+                Assert.True(dateFormat.ApplyNumberFormat!.Value);
+
+                Assert.Equal(1U, durationFormat.FontId!.Value);
+                Assert.Equal(46U, durationFormat.NumberFormatId!.Value);
+                Assert.True(durationFormat.ApplyNumberFormat!.Value);
+
+                Assert.Equal(1U, wrapFormat.FontId!.Value);
+                Assert.True(wrapFormat.Alignment!.WrapText!.Value);
+                Assert.True(wrapFormat.ApplyAlignment!.Value);
+            }
+        }
+
+        [Fact]
+        public void Test_CellValuesParallelAppendedAutoFormatsPreserveTemplateColumnStyle() {
+            string filePath = Path.Combine(_directoryWithFiles, "CellValuesParallelPreserveTemplateColumnStyle.xlsx");
+
+            using (var document = ExcelDocument.Create(filePath)) {
+                var sheet = document.AddWorksheet("Data");
+                var workbookPart = document._spreadSheetDocument.WorkbookPart!;
+                var stylesPart = workbookPart.WorkbookStylesPart ?? workbookPart.AddNewPart<WorkbookStylesPart>();
+                stylesPart.Stylesheet = new Stylesheet(
+                    new Fonts(
+                        new DocumentFormat.OpenXml.Spreadsheet.Font(),
+                        new DocumentFormat.OpenXml.Spreadsheet.Font(new FontName { Val = "OfficeIMO Template Test" })) { Count = 2 },
+                    new Fills(new Fill()) { Count = 1 },
+                    new Borders(new Border()) { Count = 1 },
+                    new CellFormats(
+                        new CellFormat(),
+                        new CellFormat {
+                            FontId = 1U,
+                            ApplyFont = true,
+                            Alignment = new Alignment { Horizontal = HorizontalAlignmentValues.Center },
+                            ApplyAlignment = true
+                        }) { Count = 2 });
+                stylesPart.Stylesheet.Save();
+
+                var sheetData = sheet.WorksheetPart.Worksheet.GetFirstChild<SheetData>()!;
+                var templateRow = new Row { RowIndex = 1U };
+                templateRow.Append(
+                    new Cell { CellReference = "A1", StyleIndex = 1U },
+                    new Cell { CellReference = "B1", StyleIndex = 1U },
+                    new Cell { CellReference = "C1", StyleIndex = 1U });
+                sheetData.Append(templateRow);
+
+                sheet.CellValues(new[] {
+                    (2, 1, (object)new DateTime(2026, 5, 12)),
+                    (2, 2, (object)TimeSpan.FromHours(27)),
+                    (2, 3, (object)"Line 1\nLine 2")
+                }, ExcelExecutionMode.Parallel);
+                document.Save();
+            }
+
+            using (var spreadsheet = SpreadsheetDocument.Open(filePath, false)) {
+                var styles = spreadsheet.WorkbookPart!.WorkbookStylesPart!.Stylesheet!;
+                var formats = styles.CellFormats!.Elements<CellFormat>().ToList();
+                var cells = spreadsheet.WorkbookPart!.WorksheetParts.First().Worksheet.Descendants<Cell>().ToDictionary(c => c.CellReference!.Value!);
+
+                var dateFormat = formats[(int)cells["A2"].StyleIndex!.Value];
+                var durationFormat = formats[(int)cells["B2"].StyleIndex!.Value];
+                var wrapFormat = formats[(int)cells["C2"].StyleIndex!.Value];
+
+                Assert.Equal(1U, dateFormat.FontId!.Value);
+                Assert.Equal(14U, dateFormat.NumberFormatId!.Value);
+                Assert.Equal(HorizontalAlignmentValues.Center, dateFormat.Alignment!.Horizontal!.Value);
+
+                Assert.Equal(1U, durationFormat.FontId!.Value);
+                Assert.Equal(46U, durationFormat.NumberFormatId!.Value);
+                Assert.Equal(HorizontalAlignmentValues.Center, durationFormat.Alignment!.Horizontal!.Value);
+
+                Assert.Equal(1U, wrapFormat.FontId!.Value);
+                Assert.Equal(HorizontalAlignmentValues.Center, wrapFormat.Alignment!.Horizontal!.Value);
+                Assert.True(wrapFormat.Alignment!.WrapText!.Value);
+            }
+        }
+
+        [Fact]
+        public void Test_CellValuesParallelAppendedPlainCellsDoNotInheritLastRowStyle() {
+            string filePath = Path.Combine(_directoryWithFiles, "CellValuesParallelPlainCellsNoLastRowStyle.xlsx");
+
+            using (var document = ExcelDocument.Create(filePath)) {
+                var sheet = document.AddWorksheet("Data");
+                var workbookPart = document._spreadSheetDocument.WorkbookPart!;
+                var stylesPart = workbookPart.WorkbookStylesPart ?? workbookPart.AddNewPart<WorkbookStylesPart>();
+                stylesPart.Stylesheet = new Stylesheet(
+                    new Fonts(
+                        new DocumentFormat.OpenXml.Spreadsheet.Font(),
+                        new DocumentFormat.OpenXml.Spreadsheet.Font(new FontName { Val = "OfficeIMO Last Row Test" })) { Count = 2 },
+                    new Fills(new Fill()) { Count = 1 },
+                    new Borders(new Border()) { Count = 1 },
+                    new CellFormats(
+                        new CellFormat(),
+                        new CellFormat { FontId = 1U, ApplyFont = true }) { Count = 2 });
+                stylesPart.Stylesheet.Save();
+
+                var sheetData = sheet.WorksheetPart.Worksheet.GetFirstChild<SheetData>()!;
+                var styledRow = new Row { RowIndex = 1U };
+                styledRow.Append(new Cell { CellReference = "A1", StyleIndex = 1U });
+                sheetData.Append(styledRow);
+
+                sheet.CellValues(new[] {
+                    (2, 1, (object)"Plain"),
+                    (3, 1, (object)"Still Plain")
+                }, ExcelExecutionMode.Parallel);
+                document.Save();
+            }
+
+            using (var spreadsheet = SpreadsheetDocument.Open(filePath, false)) {
+                var cells = spreadsheet.WorkbookPart!.WorksheetParts.First().Worksheet.Descendants<Cell>().ToDictionary(c => c.CellReference!.Value!);
+
+                Assert.True(cells.ContainsKey("A2"));
+                Assert.True(cells.ContainsKey("A3"));
+                Assert.Null(cells["A2"].StyleIndex);
+                Assert.Null(cells["A3"].StyleIndex);
+            }
+        }
+
+        [Fact]
+        public void Test_CellValuesParallelSanitizesControlCharacters() {
+            string filePath = Path.Combine(_directoryWithFiles, "CellValuesParallelSanitizedControls.xlsx");
+
+            string rawAlpha = "Alpha\u0001Beta";
+            string rawGamma = "Gamma\u0000Delta";
+            string rawAlphaVariant = "Alpha\u0002Beta";
+
+            string sanitizedAlpha = "AlphaBeta";
+            string sanitizedGamma = "GammaDelta";
+
+            using (var document = ExcelDocument.Create(filePath)) {
+                var sheet = document.AddWorksheet("Data");
+                var cells = new (int, int, object)[] {
+                    (1, 1, (object)rawAlpha),
+                    (1, 2, (object)rawGamma),
+                    (2, 1, (object)rawAlphaVariant)
+                };
+                sheet.CellValues(cells, ExcelExecutionMode.Parallel);
+                document.Save();
+            }
+
+            using (var spreadsheet = SpreadsheetDocument.Open(filePath, false)) {
+                ValidateSpreadsheetDocument(filePath, spreadsheet);
+
+                WorksheetPart wsPart = spreadsheet.WorkbookPart!.WorksheetParts.First();
+                SharedStringTablePart shared = spreadsheet.WorkbookPart!.SharedStringTablePart!;
+
+                OpenXmlValidator validator = new OpenXmlValidator();
+                Assert.Empty(validator.Validate(spreadsheet));
+
+                Cell cellA1 = wsPart.Worksheet.Descendants<Cell>().First(c => c.CellReference == "A1");
+                Assert.Equal(CellValues.SharedString, cellA1.DataType!.Value);
+                int indexA1 = int.Parse(cellA1.CellValue!.Text);
+                Assert.Equal(sanitizedAlpha, shared.SharedStringTable!.ElementAt(indexA1).InnerText);
+
+                Cell cellB1 = wsPart.Worksheet.Descendants<Cell>().First(c => c.CellReference == "B1");
+                Assert.Equal(CellValues.SharedString, cellB1.DataType!.Value);
+                int indexB1 = int.Parse(cellB1.CellValue!.Text);
+                Assert.Equal(sanitizedGamma, shared.SharedStringTable!.ElementAt(indexB1).InnerText);
+
+                Cell cellA2 = wsPart.Worksheet.Descendants<Cell>().First(c => c.CellReference == "A2");
+                Assert.Equal(CellValues.SharedString, cellA2.DataType!.Value);
+                int indexA2 = int.Parse(cellA2.CellValue!.Text);
+                Assert.Equal(sanitizedAlpha, shared.SharedStringTable!.ElementAt(indexA2).InnerText);
+                Assert.Equal(indexA1, indexA2);
+
+                Assert.Equal(2, shared.SharedStringTable!.Count());
+            }
+        }
+
+        [Fact]
+        public void Test_CellValueThrowsOnTooLongString() {
+            string filePath = Path.Combine(_directoryWithFiles, "TooLongString.xlsx");
+
+            using (var document = ExcelDocument.Create(filePath)) {
+                var sheet = document.AddWorksheet("Data");
+                string longText = new string('a', 32768);
+                Assert.Throws<ArgumentException>(() => sheet.CellValue(1, 1, longText));
+            }
+        }
+
+        [Fact]
+        public void Test_CellValuesParallel_AppliesAutomaticDateAndDurationFormatting() {
+            string filePath = Path.Combine(_directoryWithFiles, "CellValuesParallelFormatting.xlsx");
+            var date = new DateTime(2024, 5, 1, 10, 30, 0);
+            var duration = new TimeSpan(1, 2, 3, 4);
+            try {
+                using (var document = ExcelDocument.Create(filePath)) {
+                    var sheet = document.AddWorksheet("Data");
+                    var cells = new (int Row, int Column, object Value)[] {
+                        (1, 1, date),
+                        (2, 1, duration)
+                    };
+
+                    sheet.CellValues(cells, ExcelExecutionMode.Parallel);
+                    document.Save();
+                }
+
+                using var spreadsheet = SpreadsheetDocument.Open(filePath, false);
+                ValidateSpreadsheetDocument(filePath, spreadsheet);
+
+                var workbookPart = spreadsheet.WorkbookPart!;
+                var styles = workbookPart.WorkbookStylesPart!.Stylesheet!;
+                var cellFormats = styles.CellFormats!.Elements<CellFormat>().ToList();
+                var cellsOnSheet = workbookPart.WorksheetParts.First().Worksheet.Descendants<Cell>().ToList();
+
+                var dateCell = cellsOnSheet.First(c => c.CellReference == "A1");
+                var dateFormat = cellFormats[(int)dateCell.StyleIndex!.Value];
+                Assert.Equal(14U, dateFormat.NumberFormatId!.Value);
+                Assert.True(dateFormat.ApplyNumberFormat?.Value ?? false);
+
+                var durationCell = cellsOnSheet.First(c => c.CellReference == "A2");
+                var durationFormat = cellFormats[(int)durationCell.StyleIndex!.Value];
+                Assert.Equal(46U, durationFormat.NumberFormatId!.Value);
+                Assert.True(durationFormat.ApplyNumberFormat?.Value ?? false);
+            } finally {
+                if (File.Exists(filePath)) {
+                    File.Delete(filePath);
+                }
+            }
+        }
+    }
+}
+

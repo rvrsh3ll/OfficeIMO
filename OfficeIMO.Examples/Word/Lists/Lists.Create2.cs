@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using DocumentFormat.OpenXml.Wordprocessing;
 using OfficeIMO.Word;
-using Color = SixLabors.ImageSharp.Color;
+using Color = OfficeIMO.Drawing.OfficeColor;
 
 namespace OfficeIMO.Examples.Word {
     internal static partial class Lists {
@@ -12,7 +12,7 @@ namespace OfficeIMO.Examples.Word {
             foreach (var listStyle in listOfListStyles) {
                 var paragraph = document.AddParagraph(listStyle.ToString());
                 paragraph.SetColor(Color.Red).SetBold();
-                paragraph.ParagraphAlignment = JustificationValues.Center;
+                paragraph.ParagraphAlignment = WordParagraphAlignment.Center;
 
                 var wordList1 = document.AddList(listStyle);
                 if (listStyle == WordListStyle.Chapters) {
@@ -49,7 +49,7 @@ namespace OfficeIMO.Examples.Word {
             document.Save(outputStream);
             File.WriteAllBytes(filePath, outputStream.ToArray());
 
-            Helpers.Open(filePath, openWord);
+            if (openWord) ExampleFileLauncher.Open(filePath);
         }
     }
 }

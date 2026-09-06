@@ -1,0 +1,278 @@
+{
+  "schema": "officeimo.showcase-evidence",
+  "schemaVersion": 1,
+  "artifacts": [
+    {
+      "id": "powerpoint-output",
+      "path": "/downloads/showcase/powerpoint/design-brief-recommendations.pptx",
+      "bytes": 34755,
+      "sha256": "c1b000b8eaffc984be9af826a21a9666aea8f6220eb9e8dd499296e81d3e3d4c",
+      "generator": "dotnet run --project OfficeIMO.Examples -f net10.0 -- --powerpoint-design-brief",
+      "evidence": "Editable PPTX; Open XML validation is part of the example."
+    },
+    {
+      "id": "powerpoint-preview",
+      "path": "/downloads/showcase/powerpoint/design-brief-selected.png",
+      "bytes": 45800,
+      "sha256": "649f6cfc762f0f322fd741d643f91fe2f3e180e95899fbeb47c1af73223c7486",
+      "generator": "OfficeIMO.PowerPoint design-brief rendering proof",
+      "evidence": "Rendered selected-direction slide from the same example."
+    },
+    {
+      "id": "pdf-output",
+      "path": "/downloads/showcase/pdf/showcase-dashboard.pdf",
+      "bytes": 19707,
+      "sha256": "3f9025afa9a09b08be54fac5bd48a119619223ce234d0664d0cc8e1bb0bdfc31",
+      "generator": "dotnet run --project OfficeIMO.Examples -f net10.0 -- --pdf-showcase",
+      "evidence": "First-party PDF dashboard output."
+    },
+    {
+      "id": "pdf-preview",
+      "path": "/downloads/showcase/pdf/showcase-dashboard-page1.png",
+      "bytes": 77071,
+      "sha256": "302da0600dfc6a0239e8ff95e98be4c41d1be505216b30a5b97ef63392c273b6",
+      "generator": "OfficeIMO.Pdf visual baseline rendered with Poppler",
+      "evidence": "Approved page-one visual baseline for the generated dashboard."
+    },
+    {
+      "id": "html-pdf-output",
+      "path": "/downloads/showcase/html/invoice.pdf",
+      "bytes": 162718,
+      "sha256": "7375be4bb2ca55e72fd5a5393e8b81ff8974351d1965c69e25b39f2759d60f79",
+      "generator": "dotnet run --project OfficeIMO.Examples -f net10.0 -- --html-invoice",
+      "evidence": "Three-page searchable purchase report with wrapped rows, repeated table headers, page counters, and one totals block."
+    },
+    {
+      "id": "html-png-output",
+      "path": "/downloads/showcase/html/invoice.png",
+      "bytes": 104280,
+      "sha256": "ce504ed926c801ac8a39b6a33119893ef0590aeb4924c22bfb831bc1d6e8417e",
+      "generator": "dotnet run --project OfficeIMO.Examples -f net10.0 -- --html-invoice",
+      "evidence": "First-page PNG generated from the same parsed HTML and options object as the multi-page PDF."
+    },
+    {
+      "id": "html-svg-output",
+      "path": "/downloads/showcase/html/invoice.svg",
+      "bytes": 33800,
+      "sha256": "32f7cf8fc9c5ec2f5e7bae7fdeee3b64b67393c29d6c5e2e2349d9943c995d11",
+      "generator": "dotnet run --project OfficeIMO.Examples -f net10.0 -- --html-invoice",
+      "evidence": "First-page SVG generated from the same parsed HTML and options object as the multi-page PDF."
+    },
+    {
+      "id": "html-renderer-gallery-source",
+      "path": "/downloads/showcase/html/managed-renderer-gallery.source.txt",
+      "bytes": 10394,
+      "sha256": "643f0209aaa5215f7b649447b28ed9a24c56dd47f803318c8deb3b6485cfb03a",
+      "generator": "dotnet run --project OfficeIMO.Examples -f net10.0 -- --html-renderer-gallery",
+      "evidence": "Authored HTML and CSS source used for every managed renderer gallery output."
+    },
+    {
+      "id": "html-renderer-gallery-pdf",
+      "path": "/downloads/showcase/html/managed-renderer-gallery.pdf",
+      "bytes": 512835,
+      "sha256": "351753fd47e378517c2e68080ad1998dcaec4aab5515fa475629fbe1e206be03",
+      "generator": "dotnet run --project OfficeIMO.Examples -f net10.0 -- --html-renderer-gallery",
+      "evidence": "Searchable managed PDF with native AcroForm controls and page-margin content."
+    },
+    {
+      "id": "html-renderer-gallery-png",
+      "path": "/downloads/showcase/html/managed-renderer-gallery.png",
+      "bytes": 90855,
+      "sha256": "21979561a6d0d91d7bac9c750c7e1745571cc630db3e6a2c63937d51763585de",
+      "generator": "dotnet run --project OfficeIMO.Examples -f net10.0 -- --html-renderer-gallery",
+      "evidence": "Deterministic first-page PNG generated from the same managed scene as the PDF."
+    },
+    {
+      "id": "html-renderer-gallery-svg",
+      "path": "/downloads/showcase/html/managed-renderer-gallery.svg",
+      "bytes": 51584,
+      "sha256": "1b77443a1279eef621636833da522ae0ebe14d10ae8700141271e6184c0c1f01",
+      "generator": "dotnet run --project OfficeIMO.Examples -f net10.0 -- --html-renderer-gallery",
+      "evidence": "Vector SVG generated from the shared backend-neutral scene."
+    },
+    {
+      "id": "word-workflow-source",
+      "path": "/downloads/showcase/word/customer-delivery-summary.docx",
+      "bytes": 20887,
+      "sha256": "408004b32a1e201efc908750348b11ccdb9427899ef30aa691632a2c08c1dea1",
+      "generator": "dotnet run --project OfficeIMO.Examples -f net10.0 -- --showcase-real-world",
+      "evidence": "Editable DOCX generated from the same Word model as the PDF conversion."
+    },
+    {
+      "id": "word-workflow-pdf",
+      "path": "/downloads/showcase/word/customer-delivery-summary.pdf",
+      "bytes": 9245,
+      "sha256": "9915934d40153af92b6839584ce61feff1d7b33f2ab269b944473045c6b5f0b3",
+      "generator": "dotnet run --project OfficeIMO.Examples -f net10.0 -- --showcase-real-world",
+      "evidence": "First-party Word-to-PDF conversion of the downloadable DOCX."
+    },
+    {
+      "id": "word-workflow-preview",
+      "path": "/downloads/showcase/word/customer-delivery-summary-page1.png",
+      "bytes": 89136,
+      "sha256": "85142e1c587cdd8249f7a44e32b03ea5b1dbb40a87e08016c91584f759439b84",
+      "generator": "Poppler pdftocairo page-one render of the generated Word PDF",
+      "evidence": "Independent page-one render of the first-party Word-to-PDF result."
+    },
+    {
+      "id": "rtf-workflow-source",
+      "path": "/downloads/showcase/rtf/change-approval-memo.rtf",
+      "bytes": 1752,
+      "sha256": "33fed5d86ed690e6f86205fdd2b44be50273dfcc4c254715387f4a0338c41cdb",
+      "generator": "dotnet run --project OfficeIMO.Examples -f net10.0 -- --showcase-real-world",
+      "evidence": "RTF memo generated from the same model as the PDF conversion."
+    },
+    {
+      "id": "rtf-workflow-pdf",
+      "path": "/downloads/showcase/rtf/change-approval-memo.pdf",
+      "bytes": 6094,
+      "sha256": "f1843e8d92e227ea29d591c403972774fc0c8c71daa0c86d4f7133e6dd4c5b44",
+      "generator": "dotnet run --project OfficeIMO.Examples -f net10.0 -- --showcase-real-world",
+      "evidence": "First-party RTF-to-PDF conversion of the downloadable memo."
+    },
+    {
+      "id": "rtf-workflow-preview",
+      "path": "/downloads/showcase/rtf/change-approval-memo-page1.png",
+      "bytes": 71001,
+      "sha256": "500fd5d53c4d73c622943f257a1eb8e36a651b26acf9fc948601a6906d35a9d6",
+      "generator": "Poppler pdftocairo page-one render of the generated RTF PDF",
+      "evidence": "Independent page-one render of the first-party RTF-to-PDF result."
+    },
+    {
+      "id": "markdown-workflow-source",
+      "path": "/downloads/showcase/markdown/release-readiness-report.md",
+      "bytes": 587,
+      "sha256": "67d284044dba2925da6bf0561fe2d42760c50a009556693272b04b71305858e3",
+      "generator": "dotnet run --project OfficeIMO.Examples -f net10.0 -- --showcase-real-world",
+      "evidence": "Portable Markdown source generated from the same document model as the PDF."
+    },
+    {
+      "id": "markdown-workflow-pdf",
+      "path": "/downloads/showcase/markdown/release-readiness-report.pdf",
+      "bytes": 200031,
+      "sha256": "e29568be950461f0c620d13c90220df33776818f71a9d36d1ef59f0b0110b3d8",
+      "generator": "dotnet run --project OfficeIMO.Examples -f net10.0 -- --showcase-real-world",
+      "evidence": "Themed first-party Markdown-to-PDF conversion."
+    },
+    {
+      "id": "markdown-workflow-preview",
+      "path": "/downloads/showcase/markdown/release-readiness-report-page1.png",
+      "bytes": 85978,
+      "sha256": "3c20d2deebb1ef93fae0bc3e39014d3e3ca102cbc6637ebb25628cbe713a622d",
+      "generator": "Poppler pdftocairo page-one render of the generated Markdown PDF",
+      "evidence": "Independent page-one render of the themed Markdown PDF."
+    },
+    {
+      "id": "opendocument-workflow-source",
+      "path": "/downloads/showcase/open-document/project-handover-brief.odt",
+      "bytes": 2586,
+      "sha256": "8ad148bfe35728b066321dc86975a4ecdce2273d74fab3213e9ddb2418db86f3",
+      "generator": "dotnet run --project OfficeIMO.Examples -f net10.0 -- --showcase-real-world",
+      "evidence": "Vendor-neutral ODT source generated from the OpenDocument model."
+    },
+    {
+      "id": "opendocument-workflow-pdf",
+      "path": "/downloads/showcase/open-document/project-handover-brief.pdf",
+      "bytes": 6722,
+      "sha256": "e2aa2b0d017931934f35d41c6629ff3b6a30d0496d3b4cda8c14e6cbcbb673a4",
+      "generator": "dotnet run --project OfficeIMO.Examples -f net10.0 -- --showcase-real-world",
+      "evidence": "First-party OpenDocument-to-PDF conversion of the downloadable ODT."
+    },
+    {
+      "id": "opendocument-workflow-preview",
+      "path": "/downloads/showcase/open-document/project-handover-brief-page1.png",
+      "bytes": 68648,
+      "sha256": "b890928c89b573388f2cc6aab07f89e09807b2cdd520c0819e46e58abf001cbd",
+      "generator": "Poppler pdftocairo page-one render of the generated OpenDocument PDF",
+      "evidence": "Independent page-one render of the first-party OpenDocument-to-PDF result."
+    },
+    {
+      "id": "excel-output",
+      "path": "/downloads/showcase/excel/report-workflow.xlsx",
+      "bytes": 11782,
+      "sha256": "470d4dc3e962705e557d0f9f80343a114b1b0050d922c633f2a2bf0a8bbf096d",
+      "generator": "dotnet run --project OfficeIMO.Examples -f net10.0 -- --excel-report-workflow",
+      "evidence": "Editable XLSX with formulas, chart, table, and pivot metadata."
+    },
+    {
+      "id": "excel-preview",
+      "path": "/downloads/showcase/excel/report-workflow.png",
+      "bytes": 13303,
+      "sha256": "693e2c645ee100983bec0e9be2bbdabbdd54a4967298eef1ae274b3c7013e00e",
+      "generator": "OfficeIMO.Excel range ExportImage",
+      "evidence": "Dependency-free rendered worksheet range."
+    },
+    {
+      "id": "excel-preflight",
+      "path": "/downloads/showcase/excel/report-workflow.preflight.txt",
+      "bytes": 231,
+      "sha256": "0dde47663fd954941e6dc3754e9dc73250b08bf6b4c63ca853a75d683f007a98",
+      "generator": "OfficeIMO.Excel InspectFeatures",
+      "evidence": "Real blocked-PDF diagnostic for unmaterialized pivot output."
+    },
+    {
+      "id": "visio-output",
+      "path": "/downloads/showcase/visio/premium-cloud-architecture.vsdx",
+      "bytes": 73699,
+      "sha256": "da09ad4c9e3c29e083e36a74974153ba9a04a685cfe962711e704a81d78a651a",
+      "generator": "dotnet run --project OfficeIMO.Examples -f net10.0 -- --visio-premium",
+      "evidence": "Editable VSDX validated by the premium gallery example."
+    },
+    {
+      "id": "visio-preview",
+      "path": "/downloads/showcase/visio/premium-cloud-architecture-page1.png",
+      "bytes": 52998,
+      "sha256": "1b8133e3956193559709760421dda7e7dfaabd7d1f2ad86fae054f5825c27de1",
+      "generator": "OfficeIMO.Visio dependency-free native PNG renderer",
+      "evidence": "Approved native-renderer baseline for the same premium scenario."
+    },
+    {
+      "id": "reader-output",
+      "path": "/downloads/showcase/reader/design-brief.reader.json",
+      "bytes": 226979,
+      "sha256": "390b0327c1993b4ee0ca97079444b4e7007cc7471cc29958b982ee0b1b9c0bf7",
+      "generator": "officeimo reader read - --name design-brief.pptx --format json",
+      "evidence": "Schema-versioned Reader result generated from the downloadable PPTX."
+    },
+    {
+      "id": "onenote-section",
+      "path": "/downloads/showcase/onenote/offline-planning.one",
+      "bytes": 4656,
+      "sha256": "ba9284753455378dc8be99ad0c96576b5bb12f30f965dd1e691f6f234cc4f9bc",
+      "generator": "dotnet run --project OfficeIMO.Examples -f net10.0 -- --onenote",
+      "evidence": "Native offline OneNote section."
+    },
+    {
+      "id": "onenote-package",
+      "path": "/downloads/showcase/onenote/offline-planning.onepkg",
+      "bytes": 6464,
+      "sha256": "5f34586150f20d89a28e8addd40795dc0efc959cfde79f70a898b19e5605385d",
+      "generator": "dotnet run --project OfficeIMO.Examples -f net10.0 -- --onenote",
+      "evidence": "Native offline OneNote notebook package."
+    },
+    {
+      "id": "onenote-pdf",
+      "path": "/downloads/showcase/onenote/offline-planning.pdf",
+      "bytes": 186622,
+      "sha256": "6e667187dcc4135c9aa20bf403c2944fa583feed5c212e02b8902a2c04635ee4",
+      "generator": "OfficeIMO.OneNote.Pdf SaveAsPdf",
+      "evidence": "PDF export of the same generated section."
+    },
+    {
+      "id": "onenote-html",
+      "path": "/downloads/showcase/onenote/offline-planning.html.txt",
+      "bytes": 248,
+      "sha256": "b24aaabf637d521d90cec2722bcfda202ae844b051fab4ba57f3621660bd1dd8",
+      "generator": "OfficeIMO.OneNote.Html SaveAsHtml",
+      "evidence": "HTML export used by the code-native gallery preview."
+    },
+    {
+      "id": "onenote-markdown",
+      "path": "/downloads/showcase/onenote/offline-planning.md",
+      "bytes": 125,
+      "sha256": "3f14b94b74f8b1ac76631ed2ebf31d601f8b5aea63fc6b99d119df612a0b1d15",
+      "generator": "OfficeIMO.OneNote.Markdown ToMarkdown",
+      "evidence": "Markdown export of the same generated section."
+    }
+  ]
+}

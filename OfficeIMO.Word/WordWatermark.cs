@@ -1,72 +1,52 @@
-using System;
-using System.Collections.Generic;
-using System.Globalization;
-using System.Linq;
-using System.Text;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Vml;
 using DocumentFormat.OpenXml.Wordprocessing;
-using DocumentFormat.OpenXml;
-using V = DocumentFormat.OpenXml.Vml;
+using System.Globalization;
+using System.IO;
 using Ovml = DocumentFormat.OpenXml.Vml.Office;
 using Paragraph = DocumentFormat.OpenXml.Wordprocessing.Paragraph;
 using ParagraphProperties = DocumentFormat.OpenXml.Wordprocessing.ParagraphProperties;
 using Picture = DocumentFormat.OpenXml.Wordprocessing.Picture;
 using Run = DocumentFormat.OpenXml.Wordprocessing.Run;
 using RunProperties = DocumentFormat.OpenXml.Wordprocessing.RunProperties;
+using V = DocumentFormat.OpenXml.Vml;
 using Wvml = DocumentFormat.OpenXml.Vml.Wordprocessing;
-using DocumentFormat.OpenXml.Vml;
-using Color = SixLabors.ImageSharp.Color;
 
 namespace OfficeIMO.Word {
+    /// <summary>
+    /// Specifies the type of watermark to insert into a Word document.
+    /// </summary>
     public enum WordWatermarkStyle {
+        /// <summary>
+        /// Indicates a text watermark.
+        /// </summary>
         Text,
+
+        /// <summary>
+        /// Indicates an image watermark.
+        /// </summary>
         Image
     }
 
+    /// <summary>
+    /// Represents a watermark element within a Word document.
+    /// </summary>
     public class WordWatermark : WordElement {
         private WordDocument _document;
         private SdtBlock _sdtBlock;
-        private WordHeader _wordHeader;
-        private WordSection _section;
+        private WordHeader? _wordHeader;
+        private WordSection? _section;
         //private WordParagraph _wordParagraph;
 
+        /// <summary>
+        /// Gets or sets the watermark text.
+        /// </summary>
         public string Text {
-            get {
-                var paragraph = _sdtBlock.SdtContentBlock.ChildElements.OfType<Paragraph>().FirstOrDefault();
-                if (paragraph != null) {
-                    var run = paragraph.Descendants().OfType<Run>().FirstOrDefault();
-                    if (run != null) {
-                        var picture = run.Descendants().OfType<Picture>().FirstOrDefault();
-                        if (picture != null) {
-                            var shape = picture.Descendants().OfType<Shape>().FirstOrDefault();
-                            if (shape != null) {
-                                TextPath textPath = shape.GetFirstChild<V.TextPath>();
-                                if (textPath != null) {
-                                    return textPath.String;
-
-                                }
-                            }
-                        }
-                    }
-                }
-
-                return "";
-            }
+            get => _textPath?.String?.Value ?? string.Empty;
             set {
-                var paragraph = _sdtBlock.SdtContentBlock.ChildElements.OfType<Paragraph>().FirstOrDefault();
-                if (paragraph != null) {
-                    var run = paragraph.Descendants().OfType<Run>().FirstOrDefault();
-                    if (run != null) {
-                        var picture = run.Descendants().OfType<Picture>().FirstOrDefault();
-                        if (picture != null) {
-                            var shape = picture.Descendants().OfType<Shape>().FirstOrDefault();
-                            if (shape != null) {
-                                TextPath textPath = shape.GetFirstChild<V.TextPath>();
-                                if (textPath != null) {
-                                    textPath.String = value;
-                                }
-                            }
-                        }
-                    }
+                var textPath = _textPath;
+                if (textPath != null) {
+                    textPath.String = value;
                 }
             }
         }
@@ -76,110 +56,138 @@ namespace OfficeIMO.Word {
         /// </summary>
         public int? Rotation {
             get {
-                var shape = _shape;
-                if (shape != null) {
-
-                    // Style = "position:absolute;margin-left:0;margin-top:0;width:527.85pt;height:131.95pt;rotation:315;z-index:-251657216;mso-position-horizontal:center;mso-position-horizontal-relative:margin;mso-position-vertical:center;mso-position-vertical-relative:margin", OptionalString = "_x0000_s1025", AllowInCell = false, FillColor = "silver", Stroked = false, Type = "#_x0000_t136" };
-                    //
-                    var style = shape.Style.Value;
-                    if (style != null) {
-                        var rotation = style.Split(';').FirstOrDefault(c => c.StartsWith("rotation:"));
-                        if (rotation != null) {
-                            var rotationValue = rotation.Split(':').LastOrDefault();
-                            if (rotationValue != null) {
-                                return int.Parse(rotationValue);
-                            }
-                        }
-                    }
-                }
-                return null;
+                var rotationValue = GetShapeStyleComponent("rotation");
+                return rotationValue == null ? null : int.Parse(rotationValue);
             }
-            set {
-                var shape = _shape;
-                if (shape != null) {
-                    var style = shape.Style.Value;
-                    if (style != null) {
-                        var rotation = style.Split(';').FirstOrDefault(c => c.StartsWith("rotation:"));
-                        if (rotation != null) {
-                            var rotationValue = rotation.Split(':').LastOrDefault();
-                            if (rotationValue != null) {
-                                shape.Style.Value = style.Replace(rotation, "rotation:" + value);
-                            }
-                        }
-                    }
-                }
-            }
+            set => SetShapeStyleComponent("rotation", value?.ToString() ?? string.Empty);
         }
 
+        /// <summary>
+        /// Gets or sets the width of the watermark in points.
+        /// </summary>
         public double? Width {
             get {
-                var shape = _shape;
-                if (shape != null) {
-                    var style = shape.Style.Value;
-                    if (style != null) {
-                        var width = style.Split(';').FirstOrDefault(c => c.StartsWith("width:"));
-                        if (width != null) {
-                            var widthValue = width.Split(':').LastOrDefault();
-                            if (widthValue != null) {
-                                string stringValue = widthValue.Replace("pt", "");
-                                return double.Parse(stringValue, CultureInfo.InvariantCulture);
-                            }
-                        }
-                    }
+                var widthValue = GetShapeStyleComponent("width");
+                if (widthValue == null) {
+                    return null;
+                }
+
+                return ParseWatermarkStylePoint(widthValue);
+            }
+            set => SetShapeStyleComponent("width", value + "pt");
+        }
+
+        /// <summary>
+        /// Gets or sets the height of the watermark in points.
+        /// </summary>
+        public double? Height {
+            get {
+                var heightValue = GetShapeStyleComponent("height");
+                if (heightValue == null) {
+                    return null;
+                }
+
+                return ParseWatermarkStylePoint(heightValue);
+            }
+            set => SetShapeStyleComponent("height", value + "pt");
+        }
+
+        /// <summary>
+        /// Horizontal offset (margin-left) of the watermark in points.
+        /// </summary>
+        public double? HorizontalOffset {
+            get {
+                var value = GetShapeStyleComponent("margin-left");
+                if (value == null) {
+                    return null;
+                }
+
+                return ParseWatermarkStylePoint(value);
+            }
+            set => SetShapeStyleComponent("margin-left", value + "pt");
+        }
+
+        /// <summary>
+        /// Vertical offset (margin-top) of the watermark in points.
+        /// </summary>
+        public double? VerticalOffset {
+            get {
+                var value = GetShapeStyleComponent("margin-top");
+                if (value == null) {
+                    return null;
+                }
+
+                return ParseWatermarkStylePoint(value);
+            }
+            set => SetShapeStyleComponent("margin-top", value + "pt");
+        }
+
+        /// <summary>
+        /// Font family used for text watermark.
+        /// </summary>
+        public string? FontFamily {
+            get {
+                var value = GetTextPathStyleComponent("font-family");
+                return value?.Trim('"');
+            }
+            set => SetTextPathStyleComponent("font-family", "\"" + value + "\"");
+        }
+
+        /// <summary>
+        /// Font size of text watermark in points.
+        /// </summary>
+        public double? FontSize {
+            get {
+                var value = GetTextPathStyleComponent("font-size");
+                if (value == null) {
+                    return null;
+                }
+
+                return ParseWatermarkStylePoint(value);
+            }
+            set => SetTextPathStyleComponent("font-size", value + "pt");
+        }
+
+        /// <summary>
+        /// Opacity of the watermark fill. Value should be between 0 and 1.
+        /// </summary>
+        public double? Opacity {
+            get {
+                if (_shape?.GetFirstChild<V.Fill>()?.Opacity?.Value is string opacity) {
+                    return ParseOpacity(opacity);
                 }
                 return null;
             }
             set {
-                var shape = _shape;
-                if (shape != null) {
-                    var style = shape.Style.Value;
-                    if (style != null) {
-                        var width = style.Split(';').FirstOrDefault(c => c.StartsWith("width:"));
-                        if (width != null) {
-                            var widthValue = width.Split(':').LastOrDefault();
-                            if (widthValue != null) {
-                                shape.Style.Value = style.Replace(width, "width:" + value + "pt");
-                            }
-                        }
-                    }
+                var fill = _shape?.GetFirstChild<V.Fill>();
+                if (fill != null && value != null) {
+                    fill.Opacity = value.Value.ToString(CultureInfo.InvariantCulture);
                 }
             }
         }
 
-        public double? Height {
-            get {
-                var shape = _shape;
-                if (shape != null) {
-                    var style = shape.Style.Value;
-                    if (style != null) {
-                        var height = style.Split(';').FirstOrDefault(c => c.StartsWith("height:"));
-                        if (height != null) {
-                            var heightValue = height.Split(':').LastOrDefault();
-                            if (heightValue != null) {
-                                string stringValue = heightValue.Replace("pt", "");
-                                return double.Parse(stringValue, CultureInfo.InvariantCulture);
-                            }
-                        }
-                    }
-                }
+        private static double? ParseOpacity(string? opacity) {
+            if (string.IsNullOrWhiteSpace(opacity)) {
                 return null;
             }
-            set {
-                var shape = _shape;
-                if (shape != null) {
-                    var style = shape.Style.Value;
-                    if (style != null) {
-                        var height = style.Split(';').FirstOrDefault(c => c.StartsWith("height:"));
-                        if (height != null) {
-                            var heightValue = height.Split(':').LastOrDefault();
-                            if (heightValue != null) {
-                                shape.Style.Value = style.Replace(height, "height:" + value + "pt");
-                            }
-                        }
-                    }
-                }
+
+            string value = opacity!.Trim();
+            double? parsed;
+            if (value.EndsWith("%", StringComparison.OrdinalIgnoreCase)) {
+                parsed = TryParseDouble(value.Substring(0, value.Length - 1), out double percent) ? percent / 100D : null;
+            } else if (value.EndsWith("f", StringComparison.OrdinalIgnoreCase) &&
+                       TryParseDouble(value.Substring(0, value.Length - 1), out double fixedPoint)) {
+                parsed = fixedPoint / 65536D;
+            } else {
+                parsed = TryParseDouble(value, out double numeric) ? numeric : null;
             }
+
+            return parsed.HasValue ? Math.Max(0D, Math.Min(1D, parsed.Value)) : null;
         }
+
+        private static bool TryParseDouble(string value, out double result) =>
+            double.TryParse(value.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out result) ||
+            double.TryParse(value.Trim().Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture, out result);
 
         /// <summary>
         /// Get or Set if watermark is stroked.
@@ -187,14 +195,14 @@ namespace OfficeIMO.Word {
         public bool Stroked {
             get {
                 var shape = _shape;
-                if (shape != null) {
+                if (shape?.Stroked?.Value != null) {
                     return shape.Stroked.Value;
                 }
                 return false;
             }
             set {
                 var shape = _shape;
-                if (shape != null) {
+                if (shape?.Stroked != null) {
                     shape.Stroked.Value = value;
                 }
             }
@@ -206,14 +214,14 @@ namespace OfficeIMO.Word {
         public bool? AllowInCell {
             get {
                 var shape = _shape;
-                if (shape != null) {
+                if (shape?.AllowInCell?.Value != null) {
                     return shape.AllowInCell.Value;
                 }
                 return null;
             }
             set {
                 var shape = _shape;
-                if (shape != null) {
+                if (shape?.AllowInCell != null && value.HasValue) {
                     shape.AllowInCell.Value = value.Value;
                 }
             }
@@ -221,89 +229,258 @@ namespace OfficeIMO.Word {
 
         /// <summary>
         /// Gets or sets color of the watermark.
-        /// Some colors are not supported. If you set unsupported color, it will be ignored.
+        /// Accepted formats for setting the color are named colors (for example, "red")
+        /// or three- or six-digit hexadecimal strings with or without a leading '#'.
+        /// Invalid color values will result in <see cref="ArgumentException"/> being thrown.
         /// </summary>
-        public SixLabors.ImageSharp.Color? Color {
+        public OfficeIMO.Drawing.OfficeColor? Color {
             get {
                 if (ColorHex == "") {
                     return null;
                 }
 
-                return SixLabors.ImageSharp.Color.Parse(ColorHex);
+                return OfficeIMO.Drawing.OfficeColor.Parse(ColorHex);
 
             }
             set {
                 if (value != null) {
-                    this.ColorHex = ColorNameResolver.GetColorName(value.Value); //value.Value.ToHex();
+                    this.ColorHex = value.Value.ToRgbHex();
                 }
             }
         }
 
         /// <summary>
-        /// Gets or sets color of the watermark using hex value.
-        /// Setting colors using this property is not recommended because it doesn't actually accept hex values, but rather color names.
+        /// Gets or sets the fill color of the watermark.
+        /// The value can be a named color (e.g., "red") or a three- or six-digit hex value with
+        /// or without the leading '#'. Three-digit hex values are expanded to six digits.
+        /// Invalid inputs will throw <see cref="ArgumentException"/>.
         /// </summary>
         public string ColorHex {
             get {
                 var shape = _shape;
-                if (shape != null && shape.FillColor != null) {
-                    return shape.FillColor.Value;
+                if (shape?.FillColor?.Value != null) {
+                    var color = shape.FillColor.Value;
+                    return color.StartsWith("#", StringComparison.Ordinal) ? color.Substring(1) : color;
                 }
                 return "";
             }
             set {
                 var shape = _shape;
-                if (shape != null) {
-                    shape.FillColor.Value = value;
-                }
-            }
-        }
+                if (shape?.FillColor != null && value != null) {
+                    var normalized = Helpers.NormalizeColor(value);
+                    if (normalized == null) {
+                        throw new ArgumentException("Color value cannot be null or empty.", nameof(value));
+                    }
+                    var colorWithHash = "#" + normalized;
+                    shape.FillColor.Value = colorWithHash;
 
-        private Shape _shape {
-            get {
+                    var fill = shape.GetFirstChild<V.Fill>();
+                    if (fill != null) {
+                        fill.Color = colorWithHash;
+                    }
 
-                var shape = _picture.Descendants().OfType<Shape>().FirstOrDefault();
-                if (shape != null) {
-                    return shape;
-                }
-                return null;
-            }
-        }
-
-        private Picture _picture {
-            get {
-                if (_sdtBlock != null) {
-                    if (_sdtBlock.SdtContentBlock != null) {
-                        var paragraph = _sdtBlock.SdtContentBlock.ChildElements.OfType<Paragraph>().FirstOrDefault();
-                        if (paragraph != null) {
-                            var run = paragraph.Descendants().OfType<Run>().FirstOrDefault();
-                            if (run != null) {
-                                var picture = run.Descendants().OfType<Picture>().FirstOrDefault();
-                                if (picture != null) {
-                                    return picture;
-                                }
-                            }
-                        }
+                    var textPath = shape.GetFirstChild<V.TextPath>();
+                    if (textPath != null) {
+                        textPath.SetAttribute(new OpenXmlAttribute("fillcolor", string.Empty, colorWithHash));
+                        textPath.SetAttribute(new OpenXmlAttribute("strokecolor", string.Empty, colorWithHash));
                     }
                 }
-                return null;
             }
         }
 
-        private SdtContentBlock _sdtContentBlock {
+        private Shape? _shape {
+            get => _picture?.Descendants().OfType<Shape>().FirstOrDefault();
+        }
+
+        private Picture? _picture {
+            get => _sdtBlock?.SdtContentBlock?
+                .ChildElements.OfType<Paragraph>().FirstOrDefault()?
+                .Descendants().OfType<Run>().FirstOrDefault()?
+                .Descendants().OfType<Picture>().FirstOrDefault();
+        }
+
+        private SdtContentBlock? _sdtContentBlock {
+            get => _sdtBlock?.GetFirstChild<SdtContentBlock>();
+        }
+
+        private V.TextPath? _textPath => _shape?.GetFirstChild<V.TextPath>();
+
+        internal bool HasImage {
             get {
-                var sdtBlock = _sdtBlock;
-                if (sdtBlock != null) {
-                    var sdtContentBlock = sdtBlock.GetFirstChild<SdtContentBlock>();
-                    if (sdtContentBlock != null) {
-                        return sdtContentBlock;
+                string? relationshipId = GetImageRelationshipId();
+                return !string.IsNullOrWhiteSpace(relationshipId);
+            }
+        }
+
+        internal bool TryGetImageBytes(out byte[] bytes, out string? unsupportedReason) {
+            bytes = Array.Empty<byte>();
+            unsupportedReason = null;
+
+            string? relationshipId = GetImageRelationshipId();
+            if (string.IsNullOrWhiteSpace(relationshipId)) {
+                unsupportedReason = "Watermark image relationship is missing.";
+                return false;
+            }
+
+            if (!TryGetImagePart(relationshipId!, out ImagePart? imagePart) || imagePart == null) {
+                unsupportedReason = "Watermark image relationship '" + relationshipId + "' could not be resolved.";
+                return false;
+            }
+
+            using Stream stream = imagePart.GetStream(FileMode.Open, FileAccess.Read);
+            using var memoryStream = new MemoryStream();
+            stream.CopyTo(memoryStream);
+            bytes = memoryStream.ToArray();
+            if (bytes.Length == 0) {
+                unsupportedReason = "Watermark image part is empty.";
+                return false;
+            }
+
+            return true;
+        }
+
+        private string? GetImageRelationshipId() =>
+            _shape?.GetFirstChild<V.ImageData>()?.RelationshipId?.Value;
+
+        private bool TryGetImagePart(string relationshipId, out ImagePart? imagePart) {
+            imagePart = null;
+
+            HeaderPart? containingHeaderPart = _shape?.Ancestors<Header>().FirstOrDefault()?.HeaderPart ??
+                                               _wordHeader?._header?.HeaderPart;
+            if (TryGetImagePart(containingHeaderPart, relationshipId, out imagePart)) {
+                return true;
+            }
+
+            FooterPart? containingFooterPart = _shape?.Ancestors<Footer>().FirstOrDefault()?.FooterPart;
+            if (TryGetImagePart(containingFooterPart, relationshipId, out imagePart)) {
+                return true;
+            }
+
+            MainDocumentPart? mainPart = _document?._wordprocessingDocument?.MainDocumentPart;
+            if (TryGetImagePart(mainPart, relationshipId, out imagePart)) {
+                return true;
+            }
+
+            if (mainPart != null) {
+                foreach (HeaderPart headerPart in mainPart.HeaderParts) {
+                    if (TryGetImagePart(headerPart, relationshipId, out imagePart)) {
+                        return true;
                     }
                 }
-                return null;
+
+                foreach (FooterPart footerPart in mainPart.FooterParts) {
+                    if (TryGetImagePart(footerPart, relationshipId, out imagePart)) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private static bool TryGetImagePart(OpenXmlPartContainer? container, string relationshipId, out ImagePart? imagePart) {
+            imagePart = null;
+            if (container == null) {
+                return false;
+            }
+
+            try {
+                imagePart = container.GetPartById(relationshipId) as ImagePart;
+                return imagePart != null;
+            } catch (ArgumentOutOfRangeException) {
+                return false;
             }
         }
 
-        private static SdtBlock GetStyle(WordWatermarkStyle style) {
+        private string? GetShapeStyleComponent(string key) =>
+            GetStyleComponent(_shape?.Style?.Value, key);
+
+        private void SetShapeStyleComponent(string key, string replacementValue) {
+            var shape = _shape;
+            var style = shape?.Style?.Value;
+            if (shape?.Style == null || style == null) {
+                return;
+            }
+
+            var component = GetStyleSegment(style, key);
+            if (component == null) {
+                return;
+            }
+
+            shape.Style.Value = style.Replace(component, key + ":" + replacementValue);
+        }
+
+        private string? GetTextPathStyleComponent(string key) =>
+            GetStyleComponent(_textPath?.Style?.Value, key);
+
+        private void SetTextPathStyleComponent(string key, string replacementValue) {
+            var textPath = _textPath;
+            if (textPath == null) {
+                return;
+            }
+
+            var dict = ParseStyleMap(textPath.Style?.Value ?? string.Empty);
+            dict[key] = replacementValue;
+            textPath.Style ??= new StringValue();
+            textPath.Style.Value = string.Join(";", dict.Select(kvp => $"{kvp.Key}:{kvp.Value}"));
+        }
+
+        private static string? GetStyleComponent(string? style, string key) {
+            var component = GetStyleSegment(style, key);
+            return component?.Split(':').LastOrDefault();
+        }
+
+        private static string? GetStyleSegment(string? style, string key) {
+            if (style == null) {
+                return null;
+            }
+
+            return style.Split(';').FirstOrDefault(component => component.StartsWith(key + ":", StringComparison.Ordinal));
+        }
+
+        private static Dictionary<string, string> ParseStyleMap(string style) =>
+            style.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(part => part.Split(':'))
+                .ToDictionary(part => part[0], part => part.Length > 1 ? part[1] : string.Empty);
+
+        private static double? ParseWatermarkStylePoint(string value) {
+            string stringValue = value.Trim();
+            if (stringValue.EndsWith("pt", StringComparison.OrdinalIgnoreCase)) {
+                stringValue = stringValue.Substring(0, stringValue.Length - 2);
+                return ParseWatermarkStyleNumber(stringValue);
+            }
+
+            if (stringValue.EndsWith("in", StringComparison.OrdinalIgnoreCase)) {
+                return ParseWatermarkStyleNumber(stringValue.Substring(0, stringValue.Length - 2)) * 72D;
+            }
+
+            if (stringValue.EndsWith("cm", StringComparison.OrdinalIgnoreCase)) {
+                return ParseWatermarkStyleNumber(stringValue.Substring(0, stringValue.Length - 2)) * 28.3464566929D;
+            }
+
+            if (stringValue.EndsWith("mm", StringComparison.OrdinalIgnoreCase)) {
+                return ParseWatermarkStyleNumber(stringValue.Substring(0, stringValue.Length - 2)) * 2.83464566929D;
+            }
+
+            if (stringValue.EndsWith("px", StringComparison.OrdinalIgnoreCase)) {
+                return ParseWatermarkStyleNumber(stringValue.Substring(0, stringValue.Length - 2)) * 0.75D;
+            }
+
+            return ParseWatermarkStyleNumber(stringValue);
+        }
+
+        private static double? ParseWatermarkStyleNumber(string stringValue) {
+            if (double.TryParse(stringValue, NumberStyles.Float, CultureInfo.InvariantCulture, out double result)) {
+                return result;
+            }
+
+            stringValue = stringValue.Replace(',', '.');
+            return double.TryParse(stringValue, NumberStyles.Float, CultureInfo.InvariantCulture, out result)
+                ? result
+                : null;
+        }
+
+        private SdtBlock GetStyle(WordWatermarkStyle style) {
             switch (style) {
                 case WordWatermarkStyle.Text: return TextWatermark;
                 case WordWatermarkStyle.Image: return Confidential2;
@@ -312,81 +489,169 @@ namespace OfficeIMO.Word {
             throw new ArgumentOutOfRangeException(nameof(style));
         }
 
-        public WordWatermark(WordDocument wordDocument, WordSection wordSection, WordWatermarkStyle style, string textOrFilePath) {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="WordWatermark"/> class for the specified section.
+        /// </summary>
+        /// <param name="wordDocument">The parent document.</param>
+        /// <param name="wordSection">The section to which the watermark should be added.</param>
+        /// <param name="style">The type of watermark to add.</param>
+        /// <param name="textOrFilePath">Text to use or path to the watermark image.</param>
+        /// <param name="horizontalOffset">Horizontal offset in points.</param>
+        /// <param name="verticalOffset">Vertical offset in points.</param>
+        /// <param name="scale">Scale factor for width and height.</param>
+        public WordWatermark(WordDocument wordDocument, WordSection wordSection, WordWatermarkStyle style, string textOrFilePath, double? horizontalOffset = null, double? verticalOffset = null, double scale = 1.0) {
             this._document = wordDocument;
-            this._section = wordSection;
+            this._section = wordSection ?? throw new ArgumentNullException(nameof(wordSection));
 
             if (style == WordWatermarkStyle.Text) {
                 this._sdtBlock = GetStyle(style);
 
                 this.Text = textOrFilePath;
 
-                //this._document._document.Body.Append(_sdtBlock);
                 if (this._section.Paragraphs.Count == 0) {
-                    this._document._document.Body.Append(_sdtBlock);
+                    var body = this._document._document.Body ?? throw new InvalidOperationException("Document body is missing");
+                    body.Append(_sdtBlock);
                 } else {
                     var lastParagraph = this._section.Paragraphs.Last();
-                    lastParagraph._paragraph.Parent.Append(_sdtBlock);
+                    var parent = lastParagraph._paragraph.Parent ?? throw new InvalidOperationException("Paragraph parent is missing");
+                    parent.Append(_sdtBlock);
                 }
             } else {
-                // TODO: Add handling for watermark image
+                this._sdtBlock = GetStyle(style);
 
+                var fileName = System.IO.Path.GetFileName(textOrFilePath);
+                using var imageStream = new System.IO.FileStream(textOrFilePath, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.Read);
 
+                if (this._section.Paragraphs.Count == 0) {
+                    var body = this._document._document.Body ?? throw new InvalidOperationException("Document body is missing");
+                    body.Append(_sdtBlock);
+                } else {
+                    var lastParagraph = this._section.Paragraphs.Last();
+                    var parent = lastParagraph._paragraph.Parent ?? throw new InvalidOperationException("Paragraph parent is missing");
+                    parent.Append(_sdtBlock);
+                }
+
+                var sdtContentBlock = this._sdtBlock.SdtContentBlock ?? throw new InvalidOperationException("Missing content block in watermark");
+                var paragraph = sdtContentBlock.GetFirstChild<Paragraph>() ?? sdtContentBlock.AppendChild(new Paragraph());
+                var wordParagraph = new WordParagraph(wordDocument, paragraph);
+                var imageLocation = WordImage.AddImageToLocation(wordDocument, wordParagraph, imageStream, fileName);
+                SetWatermarkImageData(imageLocation);
+            }
+
+            if (horizontalOffset != null) {
+                this.HorizontalOffset = horizontalOffset.Value;
+            }
+
+            if (verticalOffset != null) {
+                this.VerticalOffset = verticalOffset.Value;
+            }
+
+            if (Math.Abs(scale - 1.0) > double.Epsilon) {
+                if (this.Width != null) this.Width = this.Width.Value * scale;
+                if (this.Height != null) this.Height = this.Height.Value * scale;
             }
         }
 
-        public WordWatermark(WordDocument wordDocument, WordSection wordSection, WordHeader wordHeader, WordWatermarkStyle style, string textOrFilePath) {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="WordWatermark"/> class for the specified header.
+        /// </summary>
+        /// <param name="wordDocument">The parent document.</param>
+        /// <param name="wordSection">The section associated with the header.</param>
+        /// <param name="wordHeader">The header where the watermark will be placed.</param>
+        /// <param name="style">The type of watermark to add.</param>
+        /// <param name="textOrFilePath">Text to use or path to the watermark image.</param>
+        /// <param name="horizontalOffset">Horizontal offset in points.</param>
+        /// <param name="verticalOffset">Vertical offset in points.</param>
+        /// <param name="scale">Scale factor for width and height.</param>
+        public WordWatermark(WordDocument wordDocument, WordSection wordSection, WordHeader wordHeader, WordWatermarkStyle style, string textOrFilePath, double? horizontalOffset = null, double? verticalOffset = null, double scale = 1.0) {
             this._document = wordDocument;
-            this._section = wordSection;
+            this._section = wordSection ?? throw new ArgumentNullException(nameof(wordSection));
 
             if (wordHeader == null) {
                 // user didn't create headers first, so we do it for the user
                 wordDocument.AddHeadersAndFooters();
-                wordHeader = wordDocument.Header.Default;
+                var hdrs = wordDocument.Header ?? throw new InvalidOperationException("Headers not initialized after AddHeadersAndFooters().");
+                var def = hdrs.Default ?? throw new InvalidOperationException("Default header not initialized after AddHeadersAndFooters().");
+                wordHeader = def;
             }
             this._wordHeader = wordHeader;
 
             if (style == WordWatermarkStyle.Text) {
                 this._sdtBlock = GetStyle(style);
 
-
                 this.Text = textOrFilePath;
 
-                wordHeader._header.Append(_sdtBlock);
+                wordHeader._header?.Append(_sdtBlock);
             } else {
+                this._sdtBlock = GetStyle(style);
+
                 var fileName = System.IO.Path.GetFileName(textOrFilePath);
-                using var imageStream = new System.IO.FileStream(textOrFilePath, System.IO.FileMode.Open);
+                using var imageStream = new System.IO.FileStream(textOrFilePath, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.Read);
 
-                var wordParagraph = this._wordHeader.AddParagraph();
+                wordHeader._header?.Append(_sdtBlock);
 
+                var sdtContentBlock = this._sdtBlock.SdtContentBlock ?? throw new InvalidOperationException("Missing content block in watermark");
+                var paragraph = sdtContentBlock.GetFirstChild<Paragraph>() ?? sdtContentBlock.AppendChild(new Paragraph());
+                var wordParagraph = new WordParagraph(wordDocument, paragraph);
                 var imageLocation = WordImage.AddImageToLocation(wordDocument, wordParagraph, imageStream, fileName);
-                AddWatermarkImage(wordParagraph, imageLocation);
+                SetWatermarkImageData(imageLocation);
+            }
+
+            if (horizontalOffset != null) {
+                this.HorizontalOffset = horizontalOffset.Value;
+            }
+
+            if (verticalOffset != null) {
+                this.VerticalOffset = verticalOffset.Value;
+            }
+
+            if (Math.Abs(scale - 1.0) > double.Epsilon) {
+                if (this.Width != null) this.Width = this.Width.Value * scale;
+                if (this.Height != null) this.Height = this.Height.Value * scale;
             }
         }
 
-        public WordWatermark(WordDocument wordDocument, SdtBlock sdtBlock) {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="WordWatermark"/> class from an existing structured document tag.
+        /// </summary>
+        /// <param name="wordDocument">The parent document.</param>
+        /// <param name="sdtBlock">The structured document tag block representing the watermark.</param>
+        internal WordWatermark(WordDocument wordDocument, SdtBlock sdtBlock) {
             _document = wordDocument;
             _sdtBlock = sdtBlock;
         }
 
-        private static SdtBlock TextWatermark {
-            get {
-                SdtBlock sdtBlock1 = new SdtBlock();
+        private SdtBlock TextWatermark => PrepareWatermark(CreateTextWatermarkTemplate);
 
-                SdtProperties sdtProperties1 = new SdtProperties();
-                SdtId sdtId1 = new SdtId() { Val = -78212419 };
+        private SdtBlock Confidential2 => PrepareWatermark(CreateConfidential2Template);
 
-                SdtContentDocPartObject sdtContentDocPartObject1 = new SdtContentDocPartObject();
-                DocPartGallery docPartGallery1 = new DocPartGallery() { Val = "Watermarks" };
-                DocPartUnique docPartUnique1 = new DocPartUnique();
+        private SdtBlock PrepareWatermark(Func<SdtBlock> factory) {
+            if (_document == null) {
+                throw new InvalidOperationException("Document context is not initialized for watermark creation.");
+            }
 
-                sdtContentDocPartObject1.Append(docPartGallery1);
-                sdtContentDocPartObject1.Append(docPartUnique1);
+            var block = factory();
+            _document.AssignNewSdtIds(block);
+            return block;
+        }
 
-                sdtProperties1.Append(sdtId1);
-                sdtProperties1.Append(sdtContentDocPartObject1);
+        private static SdtBlock CreateTextWatermarkTemplate() {
+            SdtBlock sdtBlock1 = new SdtBlock();
 
-                SdtContentBlock sdtContentBlock1 = new SdtContentBlock();
+            SdtProperties sdtProperties1 = new SdtProperties();
+            SdtId sdtId1 = new SdtId();
+
+            SdtContentDocPartObject sdtContentDocPartObject1 = new SdtContentDocPartObject();
+            DocPartGallery docPartGallery1 = new DocPartGallery() { Val = "Watermarks" };
+            DocPartUnique docPartUnique1 = new DocPartUnique();
+
+            sdtContentDocPartObject1.Append(docPartGallery1);
+            sdtContentDocPartObject1.Append(docPartUnique1);
+
+            sdtProperties1.Append(sdtId1);
+            sdtProperties1.Append(sdtContentDocPartObject1);
+
+            SdtContentBlock sdtContentBlock1 = new SdtContentBlock();
 
                 Paragraph paragraph1 = new Paragraph() { RsidParagraphAddition = "003C040D", RsidRunAdditionDefault = "003C040D", ParagraphId = "7710D5F9", TextId = "47C6A96F" };
 
@@ -477,30 +742,28 @@ namespace OfficeIMO.Word {
 
                 sdtContentBlock1.Append(paragraph1);
 
-                sdtBlock1.Append(sdtProperties1);
-                sdtBlock1.Append(sdtContentBlock1);
-                return sdtBlock1;
-            }
+            sdtBlock1.Append(sdtProperties1);
+            sdtBlock1.Append(sdtContentBlock1);
+            return sdtBlock1;
         }
 
-        private static SdtBlock Confidential2 {
-            get {
-                SdtBlock sdtBlock1 = new SdtBlock();
+        private static SdtBlock CreateConfidential2Template() {
+            SdtBlock sdtBlock1 = new SdtBlock();
 
-                SdtProperties sdtProperties1 = new SdtProperties();
-                SdtId sdtId1 = new SdtId() { Val = 1122028455 };
+            SdtProperties sdtProperties1 = new SdtProperties();
+            SdtId sdtId1 = new SdtId();
 
-                SdtContentDocPartObject sdtContentDocPartObject1 = new SdtContentDocPartObject();
-                DocPartGallery docPartGallery1 = new DocPartGallery() { Val = "Watermarks" };
-                DocPartUnique docPartUnique1 = new DocPartUnique();
+            SdtContentDocPartObject sdtContentDocPartObject1 = new SdtContentDocPartObject();
+            DocPartGallery docPartGallery1 = new DocPartGallery() { Val = "Watermarks" };
+            DocPartUnique docPartUnique1 = new DocPartUnique();
 
-                sdtContentDocPartObject1.Append(docPartGallery1);
-                sdtContentDocPartObject1.Append(docPartUnique1);
+            sdtContentDocPartObject1.Append(docPartGallery1);
+            sdtContentDocPartObject1.Append(docPartUnique1);
 
-                sdtProperties1.Append(sdtId1);
-                sdtProperties1.Append(sdtContentDocPartObject1);
+            sdtProperties1.Append(sdtId1);
+            sdtProperties1.Append(sdtContentDocPartObject1);
 
-                SdtContentBlock sdtContentBlock1 = new SdtContentBlock();
+            SdtContentBlock sdtContentBlock1 = new SdtContentBlock();
 
                 Paragraph paragraph1 = new Paragraph() { RsidParagraphAddition = "003C040D", RsidRunAdditionDefault = "00F42210", ParagraphId = "7710D5F9", TextId = "7F2AA104" };
 
@@ -585,10 +848,9 @@ namespace OfficeIMO.Word {
 
                 sdtContentBlock1.Append(paragraph1);
 
-                sdtBlock1.Append(sdtProperties1);
-                sdtBlock1.Append(sdtContentBlock1);
-                return sdtBlock1;
-            }
+            sdtBlock1.Append(sdtProperties1);
+            sdtBlock1.Append(sdtContentBlock1);
+            return sdtBlock1;
         }
 
         private void AddWatermarkImage(WordParagraph wordParagraph, WordImageLocation imageLocation) {
@@ -659,8 +921,10 @@ namespace OfficeIMO.Word {
             };
 
             var style = ImageShapeStyleHelper.GetStyle(shape1);
-            style["width"] = imageLocation.Width + "pt";
-            style["height"] = imageLocation.Height + "pt";
+            double widthPt = Helpers.ConvertPixelsToPoints(imageLocation.Width);
+            double heightPt = Helpers.ConvertPixelsToPoints(imageLocation.Height);
+            style["width"] = widthPt + "pt";
+            style["height"] = heightPt + "pt";
             ImageShapeStyleHelper.SetStyle(shape1, style);
 
             shape1.Append(imageData1);
@@ -671,11 +935,38 @@ namespace OfficeIMO.Word {
             run1.Append(runProperties1);
             run1.Append(picture1);
 
-            wordParagraph._paragraphProperties.Remove();
-            wordParagraph._paragraph.Append(paragraphProperties1);
+            wordParagraph._paragraphProperties?.Remove();
+            wordParagraph._paragraph!.Append(paragraphProperties1);
             wordParagraph._paragraph.Append(run1);
         }
 
+        private void SetWatermarkImageData(WordImageLocation imageLocation) {
+            var shape = _sdtBlock.Descendants<V.Shape>().FirstOrDefault();
+            if (shape == null) return;
+
+            shape.RemoveAllChildren<V.TextPath>();
+
+            V.ImageData imageData1 = new V.ImageData() {
+                Gain = "19661f",
+                BlackLevel = "22938f",
+                Title = imageLocation.ImageName,
+                RelationshipId = imageLocation.RelationshipId
+            };
+
+            var style = ImageShapeStyleHelper.GetStyle(shape);
+            double widthPt = Helpers.ConvertPixelsToPoints(imageLocation.Width);
+            double heightPt = Helpers.ConvertPixelsToPoints(imageLocation.Height);
+            style["width"] = widthPt + "pt";
+            style["height"] = heightPt + "pt";
+            ImageShapeStyleHelper.SetStyle(shape, style);
+
+            shape.Append(imageData1);
+        }
+
+        /// <summary>
+        /// Removes this watermark from the document by deleting the structured
+        /// document tag that stores its content.
+        /// </summary>
         public void Remove() {
             _sdtBlock.Remove();
         }

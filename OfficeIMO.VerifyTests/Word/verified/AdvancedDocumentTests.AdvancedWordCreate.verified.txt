@@ -25,7 +25,7 @@
   <w:body>
     <w:sdt>
       <w:sdtPr>
-        <w:id w:val="-116450603" />
+        <w:id w:val="1" />
         <w:docPartObj>
           <w:docPartGallery w:val="Cover Pages" />
           <w:docPartUnique />
@@ -68,7 +68,7 @@
                             </w:rPr>
                             <w:alias w:val="Title" />
                             <w:tag w:val="" />
-                            <w:id w:val="-554696155" />
+                            <w:id w:val="2" />
                             <w:showingPlcHdr />
                             <w:dataBinding w:prefixMappings="xmlns:ns0='http://purl.org/dc/elements/1.1/' xmlns:ns1='http://schemas.openxmlformats.org/package/2006/metadata/core-properties' " w:xpath="/ns1:coreProperties[1]/ns0:title[1]" w:storeItemID="{6C3C8BC8-F283-45AE-878A-BAB7291924A1}" />
                             <w:text />
@@ -127,7 +127,7 @@
                           </w:rPr>
                           <w:alias w:val="Company" />
                           <w:tag w:val="" />
-                          <w:id w:val="-1880927279" />
+                          <w:id w:val="3" />
                           <w:showingPlcHdr />
                           <w:dataBinding w:prefixMappings="xmlns:ns0='http://schemas.openxmlformats.org/officeDocument/2006/extended-properties' " w:xpath="/ns0:Properties[1]/ns0:Company[1]" w:storeItemID="{6668398D-A668-4E3E-A5EB-62B293D839F1}" />
                           <w:text />
@@ -171,7 +171,7 @@
                           </w:rPr>
                           <w:alias w:val="Address" />
                           <w:tag w:val="" />
-                          <w:id w:val="-1023088507" />
+                          <w:id w:val="4" />
                           <w:showingPlcHdr />
                           <w:dataBinding w:prefixMappings="xmlns:ns0='http://schemas.microsoft.com/office/2006/coverPageProps' " w:xpath="/ns0:CoverPageProperties[1]/ns0:CompanyAddress[1]" w:storeItemID="{55AF091B-3C7A-41E3-B477-F2FDAA23CFDA}" />
                           <w:text />
@@ -213,7 +213,7 @@
                         </w:rPr>
                         <w:alias w:val="Subtitle" />
                         <w:tag w:val="" />
-                        <w:id w:val="-1452929454" />
+                        <w:id w:val="5" />
                         <w:showingPlcHdr />
                         <w:dataBinding w:prefixMappings="xmlns:ns0='http://purl.org/dc/elements/1.1/' xmlns:ns1='http://schemas.openxmlformats.org/package/2006/metadata/core-properties' " w:xpath="/ns1:coreProperties[1]/ns0:subject[1]" w:storeItemID="{6C3C8BC8-F283-45AE-878A-BAB7291924A1}" />
                         <w:text />
@@ -252,7 +252,7 @@
                         </w:rPr>
                         <w:alias w:val="Author" />
                         <w:tag w:val="" />
-                        <w:id w:val="-954487662" />
+                        <w:id w:val="6" />
                         <w:showingPlcHdr />
                         <w:dataBinding w:prefixMappings="xmlns:ns0='http://purl.org/dc/elements/1.1/' xmlns:ns1='http://schemas.openxmlformats.org/package/2006/metadata/core-properties' " w:xpath="/ns1:coreProperties[1]/ns0:creator[1]" w:storeItemID="{6C3C8BC8-F283-45AE-878A-BAB7291924A1}" />
                         <w:text />
@@ -305,7 +305,7 @@
                         </w:rPr>
                         <w:alias w:val="Year" />
                         <w:tag w:val="" />
-                        <w:id w:val="1595126926" />
+                        <w:id w:val="7" />
                         <w:showingPlcHdr />
                         <w:dataBinding w:prefixMappings="xmlns:ns0='http://schemas.microsoft.com/office/2006/coverPageProps' " w:xpath="/ns0:CoverPageProperties[1]/ns0:PublishDate[1]" w:storeItemID="{55AF091B-3C7A-41E3-B477-F2FDAA23CFDA}" />
                         <w:date w:fullDate="2012-03-16T00:00:00Z">
@@ -351,7 +351,7 @@
     </w:sdt>
     <w:sdt>
       <w:sdtPr>
-        <w:id w:val="-619995952" />
+        <w:id w:val="8" />
         <w:docPartObj>
           <w:docPartGallery w:val="Table of Contents" />
           <w:docPartUnique />
@@ -378,7 +378,7 @@
           </w:r>
         </w:p>
         <w:p w:rsidR="00327375" w:rsidRDefault="00327375" w14:paraId="770BF6F5" w14:textId="2FB682F4">
-          <w:fldSimple w:instr=" TOC \o &quot;1-3&quot; \h \z \u ">
+          <w:fldSimple w:instr=" TOC \o &quot;1-3&quot; \h \z \u " w:dirty="true">
             <w:r>
               <w:rPr>
                 <w:b />
@@ -405,7 +405,6 @@
         </w:numPr>
       </w:pPr>
       <w:r>
-        <w:rPr />
         <w:t xml:space="preserve">How to add a table to document?</w:t>
       </w:r>
     </w:p>
@@ -419,13 +418,13 @@
       <w:tblPr>
         <w:tblStyle w:val="GridTable5Dark-Accent5" />
         <w:tblW w:w="0" w:type="auto" />
-        <w:tblLook w:val="04A0" w:firstRow="true" w:lastRow="false" w:firstColumn="true" w:lastColumn="false" w:noHBand="false" w:noVBand="true" />
+        <w:tblLook w:val="04A0" />
       </w:tblPr>
       <w:tblGrid>
-        <w:gridCol />
-        <w:gridCol />
-        <w:gridCol />
-        <w:gridCol />
+        <w:gridCol w:w="2400" />
+        <w:gridCol w:w="2400" />
+        <w:gridCol w:w="2400" />
+        <w:gridCol w:w="2400" />
       </w:tblGrid>
       <w:tr>
         <w:tc>
@@ -651,7 +650,6 @@
         </w:numPr>
       </w:pPr>
       <w:r>
-        <w:rPr />
         <w:t xml:space="preserve">How to add a list to document?</w:t>
       </w:r>
     </w:p>
@@ -673,7 +671,6 @@
         </w:numPr>
       </w:pPr>
       <w:r>
-        <w:rPr />
         <w:t xml:space="preserve">First element of list</w:t>
       </w:r>
     </w:p>
@@ -686,7 +683,6 @@
         </w:numPr>
       </w:pPr>
       <w:r>
-        <w:rPr />
         <w:t xml:space="preserve">Second element of list</w:t>
       </w:r>
     </w:p>
@@ -714,7 +710,6 @@
         </w:numPr>
       </w:pPr>
       <w:r>
-        <w:rPr />
         <w:t xml:space="preserve">3rd element of list, but added after hyperlink</w:t>
       </w:r>
     </w:p>
@@ -727,7 +722,6 @@
         </w:numPr>
       </w:pPr>
       <w:r>
-        <w:rPr />
         <w:t xml:space="preserve">4th element with hyperlink </w:t>
       </w:r>
       <w:hyperlink w:history="true" r:id="R00000002">
@@ -753,7 +747,6 @@
         </w:numPr>
       </w:pPr>
       <w:r>
-        <w:rPr />
         <w:t xml:space="preserve">Different list number 1</w:t>
       </w:r>
     </w:p>
@@ -766,7 +759,6 @@
         </w:numPr>
       </w:pPr>
       <w:r>
-        <w:rPr />
         <w:t xml:space="preserve">Different list number 2</w:t>
       </w:r>
     </w:p>
@@ -779,7 +771,6 @@
         </w:numPr>
       </w:pPr>
       <w:r>
-        <w:rPr />
         <w:t xml:space="preserve">Different list number 3</w:t>
       </w:r>
     </w:p>
@@ -792,7 +783,6 @@
         </w:numPr>
       </w:pPr>
       <w:r>
-        <w:rPr />
         <w:t xml:space="preserve">Different list number 4</w:t>
       </w:r>
     </w:p>
@@ -801,6 +791,8 @@
         <w:sectPr w:rsidR="R00000001">
           <w:headerReference w:type="default" r:id="R00000001" />
           <w:footerReference w:type="default" r:id="R00000001" />
+          <w:pgSz w:w="12240" w:h="15840" w:code="1" />
+          <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0" />
         </w:sectPr>
       </w:pPr>
     </w:p>
@@ -813,13 +805,13 @@
         </w:numPr>
       </w:pPr>
       <w:r>
-        <w:rPr />
         <w:t xml:space="preserve">Adding headers / footers</w:t>
       </w:r>
     </w:p>
     <w:p>
       <w:pPr>
         <w:sectPr w:rsidR="R00000002">
+          <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0" />
           <w:pgSz w:w="16838" w:h="11906" w:orient="landscape" w:code="9" />
         </w:sectPr>
       </w:pPr>
@@ -833,13 +825,12 @@
         </w:numPr>
       </w:pPr>
       <w:r>
-        <w:rPr />
         <w:t xml:space="preserve">Adding custom properties and page numbers to document</w:t>
       </w:r>
     </w:p>
     <w:sdt>
       <w:sdtPr>
-        <w:id w:val="-78212419" />
+        <w:id w:val="9" />
         <w:docPartObj>
           <w:docPartGallery w:val="Watermarks" />
           <w:docPartUnique />
@@ -890,6 +881,7 @@
       </w:sdtContent>
     </w:sdt>
     <w:sectPr w:rsidR="R00000003">
+      <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0" />
       <w:pgSz w:w="8391" w:h="11906" w:code="11" />
     </w:sectPr>
   </w:body>
@@ -11715,87 +11707,87 @@
 <w:numbering xmlns:wpc="http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas" xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex" xmlns:cx1="http://schemas.microsoft.com/office/drawing/2015/9/8/chartex" xmlns:cx2="http://schemas.microsoft.com/office/drawing/2015/10/21/chartex" xmlns:cx3="http://schemas.microsoft.com/office/drawing/2016/5/9/chartex" xmlns:cx4="http://schemas.microsoft.com/office/drawing/2016/5/10/chartex" xmlns:cx5="http://schemas.microsoft.com/office/drawing/2016/5/11/chartex" xmlns:cx6="http://schemas.microsoft.com/office/drawing/2016/5/12/chartex" xmlns:cx7="http://schemas.microsoft.com/office/drawing/2016/5/13/chartex" xmlns:cx8="http://schemas.microsoft.com/office/drawing/2016/5/14/chartex" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:aink="http://schemas.microsoft.com/office/drawing/2016/ink" xmlns:am3d="http://schemas.microsoft.com/office/drawing/2017/model3d" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:oel="http://schemas.microsoft.com/office/2019/extlst" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:wp14="http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:w10="urn:schemas-microsoft-com:office:word" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml" xmlns:w16cex="http://schemas.microsoft.com/office/word/2018/wordml/cex" xmlns:w16cid="http://schemas.microsoft.com/office/word/2016/wordml/cid" xmlns:w16="http://schemas.microsoft.com/office/word/2018/wordml" xmlns:w16sdtdh="http://schemas.microsoft.com/office/word/2020/wordml/sdtdatahash" xmlns:w16se="http://schemas.microsoft.com/office/word/2015/wordml/symex" xmlns:wpg="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup" xmlns:wpi="http://schemas.microsoft.com/office/word/2010/wordprocessingInk" xmlns:wne="http://schemas.microsoft.com/office/word/2006/wordml" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" mc:Ignorable="w14 w15 w16se w16cid w16 w16cex w16sdtdh wp14">
   <w:abstractNum w:abstractNumId="0" w15:restartNumberingAfterBreak="0">
     <w:nsid w:val="00000001" />
-    <w:multiLevelType w:val="multilevel" />
-    <w:tmpl w:val="04090025" />
-    <w:lvl w:ilvl="0">
+    <w:multiLevelType w:val="hybridMultilevel" />
+    <w:tmpl w:val="25BE4216" />
+    <w:lvl w:ilvl="0" w:tplc="0409000F">
       <w:start w:val="1" />
       <w:numFmt w:val="decimal" />
-      <w:lvlText w:val="%1" />
+      <w:lvlText w:val="%1." />
       <w:lvlJc w:val="left" />
       <w:pPr>
-        <w:ind w:left="432" w:hanging="432" />
+        <w:ind w:left="720" w:hanging="360" />
       </w:pPr>
     </w:lvl>
-    <w:lvl w:ilvl="1">
+    <w:lvl w:ilvl="1" w:tplc="04090019" w:tentative="true">
       <w:start w:val="1" />
-      <w:numFmt w:val="decimal" />
-      <w:lvlText w:val="%1.%2" />
+      <w:numFmt w:val="lowerLetter" />
+      <w:lvlText w:val="%2." />
       <w:lvlJc w:val="left" />
       <w:pPr>
-        <w:ind w:left="576" w:hanging="576" />
+        <w:ind w:left="1440" w:hanging="360" />
       </w:pPr>
     </w:lvl>
-    <w:lvl w:ilvl="2">
+    <w:lvl w:ilvl="2" w:tplc="0409001B" w:tentative="true">
       <w:start w:val="1" />
-      <w:numFmt w:val="decimal" />
-      <w:lvlText w:val="%1.%2.%3" />
+      <w:numFmt w:val="lowerRoman" />
+      <w:lvlText w:val="%3." />
       <w:lvlJc w:val="left" />
       <w:pPr>
-        <w:ind w:left="720" w:hanging="720" />
+        <w:ind w:left="2160" w:hanging="180" />
       </w:pPr>
     </w:lvl>
-    <w:lvl w:ilvl="3">
+    <w:lvl w:ilvl="3" w:tplc="0409000F" w:tentative="true">
       <w:start w:val="1" />
       <w:numFmt w:val="decimal" />
-      <w:lvlText w:val="%1.%2.%3.%4" />
+      <w:lvlText w:val="%4." />
       <w:lvlJc w:val="left" />
       <w:pPr>
-        <w:ind w:left="864" w:hanging="864" />
+        <w:ind w:left="2880" w:hanging="360" />
       </w:pPr>
     </w:lvl>
-    <w:lvl w:ilvl="4">
+    <w:lvl w:ilvl="4" w:tplc="04090019" w:tentative="true">
       <w:start w:val="1" />
-      <w:numFmt w:val="decimal" />
-      <w:lvlText w:val="%1.%2.%3.%4.%5" />
+      <w:numFmt w:val="lowerLetter" />
+      <w:lvlText w:val="%5." />
       <w:lvlJc w:val="left" />
       <w:pPr>
-        <w:ind w:left="1008" w:hanging="1008" />
+        <w:ind w:left="3600" w:hanging="360" />
       </w:pPr>
     </w:lvl>
-    <w:lvl w:ilvl="5">
+    <w:lvl w:ilvl="5" w:tplc="0409001B" w:tentative="true">
       <w:start w:val="1" />
-      <w:numFmt w:val="decimal" />
-      <w:lvlText w:val="%1.%2.%3.%4.%5.%6" />
+      <w:numFmt w:val="lowerRoman" />
+      <w:lvlText w:val="%6." />
       <w:lvlJc w:val="left" />
       <w:pPr>
-        <w:ind w:left="1152" w:hanging="1152" />
+        <w:ind w:left="4320" w:hanging="180" />
       </w:pPr>
     </w:lvl>
-    <w:lvl w:ilvl="6">
+    <w:lvl w:ilvl="6" w:tplc="0409000F" w:tentative="true">
       <w:start w:val="1" />
       <w:numFmt w:val="decimal" />
-      <w:lvlText w:val="%1.%2.%3.%4.%5.%6.%7" />
+      <w:lvlText w:val="%7." />
       <w:lvlJc w:val="left" />
       <w:pPr>
-        <w:ind w:left="1296" w:hanging="1296" />
+        <w:ind w:left="5040" w:hanging="360" />
       </w:pPr>
     </w:lvl>
-    <w:lvl w:ilvl="7">
+    <w:lvl w:ilvl="7" w:tplc="04090019" w:tentative="true">
       <w:start w:val="1" />
-      <w:numFmt w:val="decimal" />
-      <w:lvlText w:val="%1.%2.%3.%4.%5.%6.%7.%8" />
+      <w:numFmt w:val="lowerLetter" />
+      <w:lvlText w:val="%8." />
       <w:lvlJc w:val="left" />
       <w:pPr>
-        <w:ind w:left="1440" w:hanging="1440" />
+        <w:ind w:left="5760" w:hanging="360" />
       </w:pPr>
     </w:lvl>
-    <w:lvl w:ilvl="8">
+    <w:lvl w:ilvl="8" w:tplc="0409001B" w:tentative="true">
       <w:start w:val="1" />
-      <w:numFmt w:val="decimal" />
-      <w:lvlText w:val="%1.%2.%3.%4.%5.%6.%7.%8.%9" />
+      <w:numFmt w:val="lowerRoman" />
+      <w:lvlText w:val="%9." />
       <w:lvlJc w:val="left" />
       <w:pPr>
-        <w:ind w:left="1584" w:hanging="1584" />
+        <w:ind w:left="6480" w:hanging="180" />
       </w:pPr>
     </w:lvl>
   </w:abstractNum>
@@ -12103,10 +12095,10 @@
 <!--------------------------------------------------------------------------------------------------------------------->
 /word/footer1.xml
 <!--------------------------------------------------------------------------------------------------------------------->
-<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:sdt>
+<w:ftr xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:wpg="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:sdt xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:wpg="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml">
     <w:sdtPr>
-      <w:id w:val="-94168831" />
+      <w:id w:val="1" />
       <w:docPartObj>
         <w:docPartGallery w:val="Page Numbers (Top of Page)" />
         <w:docPartUnique />
@@ -12118,7 +12110,7 @@
       </w:rPr>
     </w:sdtEndPr>
     <w:sdtContent>
-      <w:p w:rsidR="000003E1" w:rsidRDefault="000003E1" w14:paraId="2D5F018E" w14:textId="0961F169" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml">
+      <w:p w:rsidR="000003E1" w:rsidRDefault="000003E1" w14:paraId="2D5F018E" w14:textId="0961F169">
         <w:pPr>
           <w:pStyle w:val="Header" />
         </w:pPr>

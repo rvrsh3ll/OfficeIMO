@@ -54,7 +54,8 @@ namespace OfficeIMO.Examples.Word {
                 Console.WriteLine("Embedded documents in Section 1: " + document.Sections[1].EmbeddedDocuments.Count);
                 Console.WriteLine("Content type: " + document.EmbeddedDocuments[0].ContentType);
 
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
     }

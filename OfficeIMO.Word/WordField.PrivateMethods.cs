@@ -1,14 +1,12 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Wordprocessing;
 
 namespace OfficeIMO.Word {
+    /// <summary>
+    /// Holds private helpers for field processing.
+    /// </summary>
     public partial class WordField {
-        private static SimpleField AddSimpleField(WordFieldType wordFieldType, WordFieldFormat? wordFieldFormat = null, List<String> parameters = null) {
-            SimpleField simpleField1 = new SimpleField() { Instruction = GenerateField(wordFieldType, wordFieldFormat, parameters) };
+        private static SimpleField AddSimpleField(WordFieldType wordFieldType, WordFieldFormat? wordFieldFormat = null, string? customFormat = null, List<string>? parameters = null) {
+            SimpleField simpleField1 = new SimpleField() { Instruction = GenerateField(wordFieldType, wordFieldFormat, customFormat, parameters) };
 
             Run run1 = new Run();
 
@@ -28,7 +26,7 @@ namespace OfficeIMO.Word {
         }
 
 
-        private static Run AddAdvancedField(WordFieldType wordFieldType, WordFieldFormat? wordFieldFormat = null, List<String> parameters = null) {
+        private static Run AddAdvancedField(WordFieldType wordFieldType, WordFieldFormat? wordFieldFormat = null, string? customFormat = null, List<string>? parameters = null) {
             Run run = new Run();
 
             RunProperties runProperties = new RunProperties();
@@ -36,7 +34,7 @@ namespace OfficeIMO.Word {
 
             FieldCode fieldCode1 = new FieldCode {
                 Space = SpaceProcessingModeValues.Preserve,
-                Text = GenerateField(wordFieldType, wordFieldFormat, parameters)
+                Text = GenerateField(wordFieldType, wordFieldFormat, customFormat, parameters)
             };
 
             run.Append(runProperties);
@@ -44,16 +42,19 @@ namespace OfficeIMO.Word {
             return run;
         }
 
-        private static string GenerateField(WordFieldType wordFieldType, WordFieldFormat? wordFieldFormat = null, List<String> parameters = null) {
+        private static string GenerateField(WordFieldType wordFieldType, WordFieldFormat? wordFieldFormat = null, string? customFormat = null, List<string>? parameters = null) {
             var fieldType = " " + wordFieldType.ToString().ToUpper() + " ";
-            var fieldFormat = "";
+            var fieldFormat = string.Empty;
             if (wordFieldFormat != null) {
                 fieldFormat = @"\* " + wordFieldFormat + " ";
             }
+            if (!string.IsNullOrWhiteSpace(customFormat)) {
+                fieldFormat += $"\\@ \"{customFormat}\" ";
+            }
 
             var switchesList = " ";
-            if (parameters != null) {
-                switchesList += parameters.Select(s => s.Trim()).Aggregate((s1, s2) => s1 + ' ' + s2);
+            if (parameters != null && parameters.Count > 0) {
+                switchesList += string.Join(" ", parameters.Select(s => s.Trim()));
             }
 
             return fieldType + switchesList + fieldFormat + @"\* MERGEFORMAT ";

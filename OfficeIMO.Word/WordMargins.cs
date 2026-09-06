@@ -1,22 +1,52 @@
-using System;
-using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Wordprocessing;
 
 namespace OfficeIMO.Word {
+    /// <summary>
+    /// Predefined margin configurations available for a document section.
+    /// </summary>
     public enum WordMargin {
+        /// <summary>
+        /// Standard one inch margins on all sides.
+        /// </summary>
         Normal,
+        /// <summary>
+        /// Mirrored inside and outside margins for book binding.
+        /// </summary>
         Mirrored,
+        /// <summary>
+        /// Slightly smaller left and right margins.
+        /// </summary>
         Moderate,
+        /// <summary>
+        /// Minimal margins on all sides.
+        /// </summary>
         Narrow,
+        /// <summary>
+        /// Extra wide margins on left and right.
+        /// </summary>
         Wide,
+        /// <summary>
+        /// Margin preset used by Word 2003.
+        /// </summary>
         Office2003Default,
+        /// <summary>
+        /// Custom margins not represented by other presets.
+        /// </summary>
         Unknown
     }
 
+    /// <summary>
+    /// Provides access to page margin settings for a document section.
+    /// </summary>
     public class WordMargins {
         private readonly WordDocument _document;
         private readonly WordSection _section;
 
+        /// <summary>
+        /// Initializes a new instance for managing margins within the specified section.
+        /// </summary>
+        /// <param name="wordDocument">Parent document.</param>
+        /// <param name="wordSection">Section associated with the margins.</param>
         public WordMargins(WordDocument wordDocument, WordSection wordSection) {
             _document = wordDocument;
             _section = wordSection;
@@ -25,14 +55,10 @@ namespace OfficeIMO.Word {
         /// <summary>
         /// Get or set the left margin in Twips
         /// </summary>
-        public UInt32Value Left {
+        public uint Left {
             get {
-                var pageMargin = _section._sectionProperties.GetFirstChild<PageMargin>();
-                if (pageMargin != null) {
-                    return pageMargin.Left;
-                }
-
-                return null;
+                var left = _section._sectionProperties.GetFirstChild<PageMargin>()?.Left ?? WordMargins.Normal.Left;
+                return (left ?? new UInt32Value()).Value;
             }
             set {
                 var pageMargin = _section._sectionProperties.GetFirstChild<PageMargin>();
@@ -41,21 +67,17 @@ namespace OfficeIMO.Word {
                     pageMargin = _section._sectionProperties.GetFirstChild<PageMargin>();
                 }
 
-                pageMargin.Left = value;
+                pageMargin!.Left = value;
             }
         }
 
         /// <summary>
         /// Get or set the right margin in Twips
         /// </summary>
-        public UInt32Value Right {
+        public uint Right {
             get {
-                var pageMargin = _section._sectionProperties.GetFirstChild<PageMargin>();
-                if (pageMargin != null) {
-                    return pageMargin.Right;
-                }
-
-                return null;
+                var right = _section._sectionProperties.GetFirstChild<PageMargin>()?.Right ?? WordMargins.Normal.Right;
+                return (right ?? new UInt32Value()).Value;
             }
             set {
                 var pageMargin = _section._sectionProperties.GetFirstChild<PageMargin>();
@@ -64,7 +86,7 @@ namespace OfficeIMO.Word {
                     pageMargin = _section._sectionProperties.GetFirstChild<PageMargin>();
                 }
 
-                pageMargin.Right = value;
+                pageMargin!.Right = value;
             }
         }
 
@@ -73,12 +95,8 @@ namespace OfficeIMO.Word {
         /// </summary>
         public int? Top {
             get {
-                var pageMargin = _section._sectionProperties.GetFirstChild<PageMargin>();
-                if (pageMargin != null) {
-                    return pageMargin.Top;
-                }
-
-                return null;
+                return _section._sectionProperties.GetFirstChild<PageMargin>()?.Top?.Value
+                       ?? WordMargins.Normal.Top?.Value;
             }
             set {
                 var pageMargin = _section._sectionProperties.GetFirstChild<PageMargin>();
@@ -87,7 +105,7 @@ namespace OfficeIMO.Word {
                     pageMargin = _section._sectionProperties.GetFirstChild<PageMargin>();
                 }
 
-                pageMargin.Top = value;
+                pageMargin!.Top = value;
             }
         }
 
@@ -96,12 +114,8 @@ namespace OfficeIMO.Word {
         /// </summary>
         public int? Bottom {
             get {
-                var pageMargin = _section._sectionProperties.GetFirstChild<PageMargin>();
-                if (pageMargin != null) {
-                    return pageMargin.Bottom;
-                }
-
-                return null;
+                return _section._sectionProperties.GetFirstChild<PageMargin>()?.Bottom?.Value
+                       ?? WordMargins.Normal.Bottom?.Value;
             }
             set {
                 var pageMargin = _section._sectionProperties.GetFirstChild<PageMargin>();
@@ -110,7 +124,7 @@ namespace OfficeIMO.Word {
                     pageMargin = _section._sectionProperties.GetFirstChild<PageMargin>();
                 }
 
-                pageMargin.Bottom = value;
+                pageMargin!.Bottom = value;
             }
         }
 
@@ -119,12 +133,12 @@ namespace OfficeIMO.Word {
         /// </summary>
         public double? TopCentimeters {
             get {
-                if (Top != null) {
-                    return Helpers.ConvertTwipsToCentimeters(Top.Value);
-                }
-                return null;
+                var top = Top;
+                return top.HasValue ? Helpers.ConvertTwipsToCentimeters(top.Value) : (double?)null;
             }
-            set => Top = Helpers.ConvertCentimetersToTwips(value.Value);
+            set {
+                Top = value.HasValue ? Helpers.ConvertCentimetersToTwips(value.Value) : (int?)null;
+            }
         }
 
         /// <summary>
@@ -132,13 +146,12 @@ namespace OfficeIMO.Word {
         /// </summary>
         public double? BottomCentimeters {
             get {
-                if (Bottom != null) {
-                    return Helpers.ConvertTwipsToCentimeters(Bottom.Value);
-
-                }
-                return null;
+                var bottom = Bottom;
+                return bottom.HasValue ? Helpers.ConvertTwipsToCentimeters(bottom.Value) : (double?)null;
             }
-            set => Bottom = Helpers.ConvertCentimetersToTwips(value.Value);
+            set {
+                Bottom = value.HasValue ? Helpers.ConvertCentimetersToTwips(value.Value) : (int?)null;
+            }
         }
 
         /// <summary>
@@ -146,12 +159,14 @@ namespace OfficeIMO.Word {
         /// </summary>
         public double? LeftCentimeters {
             get {
-                if (Left != null) {
-                    return Helpers.ConvertTwipsToCentimeters(Left.Value);
-                }
-                return null;
+                var left = Left;
+                return Helpers.ConvertTwipsToCentimeters(left);
             }
-            set => Left = Helpers.ConvertCentimetersToTwipsUInt32(value.Value);
+            set {
+                if (value.HasValue) {
+                    Left = Helpers.ConvertCentimetersToTwipsUInt32(value.Value);
+                }
+            }
         }
 
         /// <summary>
@@ -159,25 +174,23 @@ namespace OfficeIMO.Word {
         /// </summary>
         public double? RightCentimeters {
             get {
-                if (Right != null) {
-                    return Helpers.ConvertTwipsToCentimeters(Right.Value);
-                }
-                return null;
+                var right = Right;
+                return Helpers.ConvertTwipsToCentimeters(right);
             }
-            set => Right = Helpers.ConvertCentimetersToTwipsUInt32(value.Value);
+            set {
+                if (value.HasValue) {
+                    Right = Helpers.ConvertCentimetersToTwipsUInt32(value.Value);
+                }
+            }
         }
 
         /// <summary>
         /// Get or set the header distance in Twips
         /// </summary>
-        public UInt32Value HeaderDistance {
+        public uint HeaderDistance {
             get {
-                var pageMargin = _section._sectionProperties.GetFirstChild<PageMargin>();
-                if (pageMargin != null) {
-                    return pageMargin.Header;
-                }
-
-                return null;
+                var header = _section._sectionProperties.GetFirstChild<PageMargin>()?.Header ?? WordMargins.Normal.Header;
+                return (header ?? new UInt32Value()).Value;
             }
             set {
                 var pageMargin = _section._sectionProperties.GetFirstChild<PageMargin>();
@@ -186,21 +199,17 @@ namespace OfficeIMO.Word {
                     pageMargin = _section._sectionProperties.GetFirstChild<PageMargin>();
                 }
 
-                pageMargin.Header = value;
+                pageMargin!.Header = value;
             }
         }
 
         /// <summary>
         /// Get or set the footer distance in Twips
         /// </summary>
-        public UInt32Value FooterDistance {
+        public uint FooterDistance {
             get {
-                var pageMargin = _section._sectionProperties.GetFirstChild<PageMargin>();
-                if (pageMargin != null) {
-                    return pageMargin.Footer;
-                }
-
-                return null;
+                var footer = _section._sectionProperties.GetFirstChild<PageMargin>()?.Footer ?? WordMargins.Normal.Footer;
+                return (footer ?? new UInt32Value()).Value;
             }
             set {
                 var pageMargin = _section._sectionProperties.GetFirstChild<PageMargin>();
@@ -209,18 +218,17 @@ namespace OfficeIMO.Word {
                     pageMargin = _section._sectionProperties.GetFirstChild<PageMargin>();
                 }
 
-                pageMargin.Footer = value;
+                pageMargin!.Footer = value;
             }
         }
 
-        public UInt32Value Gutter {
+        /// <summary>
+        /// Gets or sets the gutter size in Twips.
+        /// </summary>
+        public uint Gutter {
             get {
-                var pageMargin = _section._sectionProperties.GetFirstChild<PageMargin>();
-                if (pageMargin != null) {
-                    return pageMargin.Gutter;
-                }
-
-                return null;
+                var gutter = _section._sectionProperties.GetFirstChild<PageMargin>()?.Gutter ?? WordMargins.Normal.Gutter;
+                return (gutter ?? new UInt32Value()).Value;
             }
             set {
                 var pageMargin = _section._sectionProperties.GetFirstChild<PageMargin>();
@@ -229,15 +237,18 @@ namespace OfficeIMO.Word {
                     pageMargin = _section._sectionProperties.GetFirstChild<PageMargin>();
                 }
 
-                pageMargin.Gutter = value;
+                pageMargin!.Gutter = value;
             }
         }
 
+        /// <summary>
+        /// Gets or sets a predefined margin set that matches the current settings.
+        /// </summary>
         public WordMargin? Type {
             get {
                 var pageMargin = _section._sectionProperties.GetFirstChild<PageMargin>();
                 if (pageMargin != null) {
-                    foreach (WordMargin wordMargin in Enum.GetValues(typeof(WordMargin))) {
+                    foreach (WordMargin wordMargin in global::OfficeIMO.Internal.EnumCompat.GetValues<WordMargin>()) {
                         if (wordMargin == WordMargin.Unknown) {
                             continue;
                         }
@@ -277,7 +288,7 @@ namespace OfficeIMO.Word {
                     return WordMargin.Unknown;
                 }
 
-                return null;
+                return WordMargin.Normal;
             }
             set => SetMargins(value);
         }
@@ -303,6 +314,12 @@ namespace OfficeIMO.Word {
             }
         }
 
+        /// <summary>
+        /// Applies a predefined margin configuration to the given section.
+        /// </summary>
+        /// <param name="wordSection">Target section to update.</param>
+        /// <param name="pageMargins">Predefined margin set to apply.</param>
+        /// <returns>The updated section.</returns>
         public static WordSection SetMargins(WordSection wordSection, WordMargin pageMargins) {
             var pageMarginData = GetDefault(pageMargins);
 

@@ -1,0 +1,139 @@
+using DocumentFormat.OpenXml.Packaging;
+using A = DocumentFormat.OpenXml.Drawing;
+
+namespace OfficeIMO.PowerPoint {
+    public partial class PowerPointTextRun {
+        /// <summary>Whether this run has click interaction markup, including hyperlinks, actions, or sounds.</summary>
+        public bool HasClickInteraction => GetInteraction(mouseOver: false) != null;
+
+        /// <summary>Whether this run has mouse-over interaction markup, including hyperlinks, actions, or sounds.</summary>
+        public bool HasMouseOverInteraction => GetInteraction(mouseOver: true) != null;
+
+        /// <summary>Gets the DrawingML click action URI, when one is authored.</summary>
+        public string? ClickAction => GetInteraction(mouseOver: false)?.Action?.Value;
+
+        /// <summary>Gets the DrawingML mouse-over action URI, when one is authored.</summary>
+        public string? MouseOverAction => GetInteraction(mouseOver: true)?.Action?.Value;
+
+        /// <summary>Whether clicking this run stops the currently playing sound.</summary>
+        public bool ClickStopsSound => GetInteraction(mouseOver: false)?.EndSound?.Value == true;
+
+        /// <summary>Whether entering this run stops the currently playing sound.</summary>
+        public bool MouseOverStopsSound => GetInteraction(mouseOver: true)?.EndSound?.Value == true;
+
+        /// <summary>Gets the sound name played when this text run is clicked.</summary>
+        public string? ClickSoundName => GetInteractionSound(mouseOver: false)?
+            .Name?.Value;
+
+        /// <summary>Gets the sound name played when the pointer enters this text run.</summary>
+        public string? MouseOverSoundName => GetInteractionSound(mouseOver: true)?
+            .Name?.Value;
+
+        /// <summary>Sets an embedded WAV or AIFF sound played when this text run is clicked.</summary>
+        public void SetClickSound(Stream audio, string name,
+            string contentType = "audio/wav", string extension = ".wav") =>
+            SetInteractionSound(mouseOver: false, audio, name, contentType,
+                extension);
+
+        /// <summary>Sets an embedded WAV or AIFF sound played when the pointer enters this text run.</summary>
+        public void SetMouseOverSound(Stream audio, string name,
+            string contentType = "audio/wav", string extension = ".wav") =>
+            SetInteractionSound(mouseOver: true, audio, name, contentType,
+                extension);
+
+        /// <summary>Controls whether clicking this text run stops the currently playing sound.</summary>
+        public void SetClickStopsSound(bool value) =>
+            SetInteractionStopsSound(mouseOver: false, value);
+
+        /// <summary>Controls whether entering this text run stops the currently playing sound.</summary>
+        public void SetMouseOverStopsSound(bool value) =>
+            SetInteractionStopsSound(mouseOver: true, value);
+
+        /// <summary>Removes the sound played when this text run is clicked.</summary>
+        public void ClearClickSound() => ClearInteractionSound(mouseOver: false);
+
+        /// <summary>Removes the sound played when the pointer enters this text run.</summary>
+        public void ClearMouseOverSound() => ClearInteractionSound(mouseOver: true);
+
+        /// <summary>Returns the exact embedded click-sound bytes, when present.</summary>
+        public byte[]? GetClickSoundBytes() => GetInteractionSoundBytes(
+            mouseOver: false);
+
+        /// <summary>Returns the exact embedded mouse-over-sound bytes, when present.</summary>
+        public byte[]? GetMouseOverSoundBytes() => GetInteractionSoundBytes(
+            mouseOver: true);
+
+        private void SetInteractionSound(bool mouseOver, Stream audio,
+            string name, string contentType, string extension) {
+            OpenXmlPart? ownerPart = _ownerPart as OpenXmlPart ?? _slidePart;
+            if (ownerPart == null) {
+                throw new InvalidOperationException(
+                    "Action sounds require a text run attached to a presentation part.");
+            }
+            if (string.IsNullOrWhiteSpace(name)) {
+                throw new ArgumentException("An action sound name is required.",
+                    nameof(name));
+            }
+            string? previousRelationshipId = GetInteractionSound(mouseOver)?
+                .Embed?.Value;
+            string relationshipId = PowerPointEmbeddedSound.Add(ownerPart,
+                audio, contentType, extension);
+            A.HyperlinkType hyperlink = GetOrCreateInteraction(mouseOver);
+            hyperlink.RemoveAllChildren<A.HyperlinkSound>();
+            hyperlink.Append(new A.HyperlinkSound {
+                Embed = relationshipId,
+                Name = name
+            });
+            PowerPointEmbeddedSound.RemoveIfUnused(ownerPart,
+                previousRelationshipId);
+        }
+
+        private void SetInteractionStopsSound(bool mouseOver, bool value) {
+            A.HyperlinkType? hyperlink = value
+                ? GetOrCreateInteraction(mouseOver)
+                : GetInteraction(mouseOver);
+            if (hyperlink != null) hyperlink.EndSound = value ? true : null;
+        }
+
+        private void ClearInteractionSound(bool mouseOver) {
+            OpenXmlPart? ownerPart = _ownerPart as OpenXmlPart ?? _slidePart;
+            if (ownerPart == null) return;
+            A.HyperlinkType? hyperlink = GetInteraction(mouseOver);
+            string? relationshipId = hyperlink?
+                .GetFirstChild<A.HyperlinkSound>()?.Embed?.Value;
+            hyperlink?.RemoveAllChildren<A.HyperlinkSound>();
+            PowerPointEmbeddedSound.RemoveIfUnused(ownerPart,
+                relationshipId);
+        }
+
+        private byte[]? GetInteractionSoundBytes(bool mouseOver) {
+            OpenXmlPart? ownerPart = _ownerPart as OpenXmlPart ?? _slidePart;
+            if (ownerPart == null) return null;
+            return PowerPointEmbeddedSound.Read(ownerPart,
+                GetInteractionSound(mouseOver)?.Embed?.Value);
+        }
+
+        private A.HyperlinkSound? GetInteractionSound(bool mouseOver) =>
+            GetInteraction(mouseOver)?.GetFirstChild<A.HyperlinkSound>();
+
+        private A.HyperlinkType? GetInteraction(bool mouseOver) {
+            A.RunProperties? properties = RunProperties;
+            return mouseOver
+                ? properties?.GetFirstChild<A.HyperlinkOnMouseOver>()
+                : properties?.GetFirstChild<A.HyperlinkOnClick>();
+        }
+
+        private A.HyperlinkType GetOrCreateInteraction(bool mouseOver) {
+            A.RunProperties properties = EnsureRunProperties();
+            A.HyperlinkType? existing = mouseOver
+                ? properties.GetFirstChild<A.HyperlinkOnMouseOver>()
+                : properties.GetFirstChild<A.HyperlinkOnClick>();
+            if (existing != null) return existing;
+            A.HyperlinkType created = mouseOver
+                ? new A.HyperlinkOnMouseOver { Id = string.Empty }
+                : new A.HyperlinkOnClick { Id = string.Empty };
+            properties.Append(created);
+            return created;
+        }
+    }
+}

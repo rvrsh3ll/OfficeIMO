@@ -24,7 +24,8 @@ namespace OfficeIMO.Examples.Word {
 
                 document.AddEmbeddedDocument(rtfFilePath);
 
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
     }

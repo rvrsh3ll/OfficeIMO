@@ -1,0 +1,12 @@
+count=1
+[chunk:0]
+id=epub-golden-epub-ch0001-0000
+kind=Epub
+path=golden.epub::OEBPS/chapter.xhtml
+block=0
+sourceBlock=0
+heading=Fixture Chapter
+text=# Fixture Chapter\n\nEPUB fixture body text.
+markdown=## Fixture Chapter\n\n# Fixture Chapter\n\nEPUB fixture body text.
+warnings=
+tables=

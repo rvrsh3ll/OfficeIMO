@@ -1,0 +1,111 @@
+using OfficeIMO.Word.Pdf;
+using OfficeIMO.Word;
+using System.IO;
+using System.Linq;
+using System.Text;
+using PdfPigDocument = UglyToad.PdfPig.PdfDocument;
+using Xunit;
+
+namespace OfficeIMO.Tests;
+
+public partial class Word {
+    [Fact]
+    public void Test_WordDocument_SaveAsPdf_MultiLevelLists() {
+        string docPath = Path.Combine(_directoryWithFiles, "PdfListSample.docx");
+        string pdfPath = Path.Combine(_directoryWithFiles, "PdfListSample.pdf");
+
+        using (WordDocument document = WordDocument.Create(docPath)) {
+            WordList numbered = document.AddList(WordListStyle.Numbered);
+            numbered.AddItem("Numbered 1");
+            numbered.AddItem("Numbered 2");
+            numbered.AddItem("Numbered 2.1", 1);
+            numbered.AddItem("Numbered 3");
+
+            WordList bullet = document.AddList(WordListStyle.Bulleted);
+            bullet.AddItem("Bullet 1");
+            bullet.AddItem("Bullet 2");
+            bullet.AddItem("Bullet 2.1", 1);
+            bullet.AddItem("Bullet 3");
+
+            document.Save();
+            document.SaveAsPdf(pdfPath);
+        }
+
+        Assert.True(File.Exists(pdfPath));
+
+        byte[] bytes = File.ReadAllBytes(pdfPath);
+        string content = ReadFirstPdfStreamContent(bytes);
+        Assert.False(string.IsNullOrEmpty(content));
+    }
+
+    [Fact]
+    public void SaveAsPdf_AutomaticFallbacksIncludeGeneratedUnicodeListMarkers() {
+        using WordDocument document = WordDocument.Create();
+        WordList list = document.AddList(WordListStyle.Bulleted);
+        list.Numbering.Levels[0].LevelText = "Ź";
+        list.AddItem("ASCII list item");
+
+        byte[] bytes = document.ToPdfBytes();
+        using PdfPigDocument pdf = PdfPigDocument.Open(bytes);
+        string text = string.Concat(pdf.GetPages().Select(page => page.Text));
+
+        Assert.Contains("Ź", text, StringComparison.Ordinal);
+        Assert.Contains("ASCII list item", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SaveAsPdf_OfficeIMOEngine_Renders_Charts_In_List_Paragraphs() {
+        string docPath = Path.Combine(_directoryWithFiles, "PdfListChart.docx");
+        string pdfPath = Path.Combine(_directoryWithFiles, "PdfListChart.pdf");
+
+        using (WordDocument document = WordDocument.Create(docPath)) {
+            WordList list = document.AddList(WordListStyle.Numbered);
+            WordParagraph item = list.AddItem("List item with chart");
+            WordChart chart = item.AddChart("List Chart", false, 240, 160);
+            chart.AddPie("Passed", 2);
+            chart.AddPie("Failed", 1);
+            document.AddParagraph("After list chart");
+
+            document.Save();
+            document.SaveAsPdf(pdfPath, new WordToPdfOptions {
+                IncludePageNumbers = false
+            });
+        }
+
+        Assert.True(File.Exists(pdfPath));
+        using (PdfPigDocument pdf = PdfPigDocument.Open(pdfPath)) {
+            string text = string.Concat(pdf.GetPages().Select(page => page.Text));
+            Assert.Contains("After list chart", text);
+        }
+
+        string content = PdfOperatorSearchText.From(File.ReadAllBytes(pdfPath));
+        Assert.Contains("0.122 0.306 0.475 rg", content);
+    }
+
+    [Fact]
+    public void SaveAsPdf_OfficeIMOEngine_Renders_PictureControls_In_List_Paragraphs() {
+        string docPath = Path.Combine(_directoryWithFiles, "PdfListPictureControl.docx");
+        string pdfPath = Path.Combine(_directoryWithFiles, "PdfListPictureControl.pdf");
+        string imagePath = Path.Combine(_directoryWithImages, "EvotecLogo.png");
+
+        using (WordDocument document = WordDocument.Create(docPath)) {
+            WordList list = document.AddList(WordListStyle.Numbered);
+            WordParagraph item = list.AddItem("List item with picture control");
+            item.AddPictureControl(imagePath, 48, 48, "List Logo", "ListLogo");
+            document.AddParagraph("After list picture control");
+
+            document.Save();
+            document.SaveAsPdf(pdfPath, new WordToPdfOptions {
+                IncludePageNumbers = false
+            });
+        }
+
+        Assert.True(File.Exists(pdfPath));
+        string content = PdfOperatorSearchText.From(File.ReadAllBytes(pdfPath));
+        Assert.Contains("/Subtype /Image", content);
+        Assert.Contains("36 0 0 36", content);
+        using PdfPigDocument pdf = PdfPigDocument.Open(pdfPath);
+        string text = string.Concat(pdf.GetPages().Select(page => page.Text));
+        Assert.Contains("After list picture control", text);
+    }
+}

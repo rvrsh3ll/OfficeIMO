@@ -1,81 +1,656 @@
-using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Text;
-using System.Linq;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 
 namespace OfficeIMO.Word {
+    /// <summary>
+    /// Adds public operations for working with sections.
+    /// </summary>
     public partial class WordSection {
+        /// <summary>
+        /// Updates the margins for this section.
+        /// </summary>
+        /// <param name="pageMargins">Margin values to apply.</param>
+        /// <returns>The current section.</returns>
         public WordSection SetMargins(WordMargin pageMargins) {
             return WordMargins.SetMargins(this, pageMargins);
         }
 
+        /// <summary>
+        /// Adds a new paragraph to the section.
+        /// </summary>
+        /// <param name="newRun">Whether to create a run within the paragraph.</param>
+        /// <returns>The created paragraph.</returns>
         public WordParagraph AddParagraph(bool newRun) {
             var wordParagraph = new WordParagraph(_document, newParagraph: true, newRun: newRun);
-            if (this.Paragraphs.Count == 0) {
-                WordParagraph paragraph = this._document.AddParagraph(wordParagraph);
-                return paragraph;
-            } else {
-                WordParagraph lastParagraphWithinSection = this.Paragraphs.Last();
-                WordParagraph paragraph = lastParagraphWithinSection.AddParagraphAfterSelf(this, wordParagraph);
-                return paragraph;
-            }
+            AppendParagraphToSection(wordParagraph);
+            return wordParagraph;
         }
 
+        /// <summary>
+        /// Adds a new paragraph containing the specified text.
+        /// </summary>
+        /// <param name="text">Text to place in the paragraph.</param>
+        /// <returns>The created paragraph.</returns>
         public WordParagraph AddParagraph(string text = "") {
-            if (this.Paragraphs.Count == 0) {
-                WordParagraph paragraph = this._document.AddParagraph();
-                if (text != "") {
-                    paragraph.Text = text;
+            WordParagraph paragraph = new WordParagraph(_document, newParagraph: true, newRun: false);
+            if (!string.IsNullOrEmpty(text)) {
+                paragraph.Text = text;
+            }
+
+            AppendParagraphToSection(paragraph);
+            return paragraph;
+        }
+
+        /// <summary>
+        /// Appends the provided paragraph to the end of this section in the document body.
+        /// </summary>
+        /// <param name="wordParagraph">Paragraph to append.</param>
+        internal void AppendParagraphToSection(WordParagraph wordParagraph) {
+            if (wordParagraph == null) {
+                throw new ArgumentNullException(nameof(wordParagraph));
+            }
+
+            if (wordParagraph._paragraph == null) {
+                throw new InvalidOperationException("Paragraph does not contain an OpenXml representation.");
+            }
+
+            if (wordParagraph._paragraph.Parent != null) {
+                wordParagraph._paragraph.Remove();
+            }
+            wordParagraph._document = _document;
+            AppendElementToSection(wordParagraph._paragraph);
+            wordParagraph.Parent = this;
+        }
+
+        private void AppendElementToSection(OpenXmlElement element) {
+            var body = _document._wordprocessingDocument?.MainDocumentPart?.Document?.Body
+                ?? throw new InvalidOperationException("Document body is missing.");
+
+            var insertBefore = GetInsertionBoundaryElement();
+            if (insertBefore != null && insertBefore.Parent == body) {
+                body.InsertBefore(element, insertBefore);
+                return;
+            }
+
+            if (_sectionProperties.Parent == body) {
+                body.InsertBefore(element, _sectionProperties);
+                return;
+            }
+
+            body.Append(element);
+        }
+
+        private OpenXmlElement? GetInsertionBoundaryElement() {
+            var sections = _document.Sections;
+            var currentIndex = sections.IndexOf(this);
+            if (currentIndex < 0) {
+                return GetSectionBoundaryElement() ?? GetFinalSectionBoundaryElement();
+            }
+
+            if (currentIndex == sections.Count - 1) {
+                return GetFinalSectionBoundaryElement() ?? GetSectionBoundaryElement();
+            }
+
+            return GetSectionBoundaryElement() ?? GetNextSectionBoundaryElement(currentIndex);
+        }
+
+        private OpenXmlElement? GetNextSectionBoundaryElement(int currentIndex) {
+            var sections = _document.Sections;
+            if (currentIndex < 0) {
+                return null;
+            }
+
+            for (int i = currentIndex + 1; i < sections.Count; i++) {
+                var boundary = sections[i].GetSectionBoundaryElement();
+                if (boundary != null) {
+                    return boundary;
                 }
+            }
 
+            return null;
+        }
+
+        private OpenXmlElement? GetFinalSectionBoundaryElement() {
+            return _document.GetFinalSectionPropertiesInsertionBoundary()
+                ?? (_sectionProperties.Parent is Body ? _sectionProperties : null);
+        }
+
+        private OpenXmlElement? GetSectionBoundaryElement() {
+            if (_sectionProperties.Parent is Body) {
+                return _sectionProperties;
+            }
+
+            if (_sectionProperties.Parent is ParagraphProperties paragraphProperties
+                && paragraphProperties.Parent is Paragraph paragraph
+                && paragraph.Parent is Body) {
                 return paragraph;
-            } else {
-                WordParagraph lastParagraphWithinSection = this.Paragraphs.Last();
+            }
 
-                WordParagraph paragraph = lastParagraphWithinSection.AddParagraphAfterSelf(this);
-                paragraph._document = this._document;
-                if (text != "") {
-                    paragraph.Text = text;
-                }
+            if (_paragraph != null && _paragraph.Parent is Body) {
+                return _paragraph;
+            }
 
-                return paragraph;
+            return null;
+        }
+
+        /// <summary>
+        /// Adds a table to the section.
+        /// </summary>
+        /// <param name="rows">Number of rows.</param>
+        /// <param name="columns">Number of columns.</param>
+        /// <param name="tableStyle">Table style to apply.</param>
+        public WordTable AddTable(int rows, int columns, WordTableStyle tableStyle = WordTableStyle.TableGrid) {
+            var table = WordTable.Create(_document, rows, columns, tableStyle);
+            AppendElementToSection(table._table);
+            return table;
+        }
+
+        /// <summary>
+        /// Returns an existing header of the requested <paramref name="type"/> or creates it if missing.
+        /// For <see cref="HeaderFooterValues.Default"/>, this ensures default header/footer parts exist.
+        /// For <see cref="HeaderFooterValues.First"/> and <see cref="HeaderFooterValues.Even"/>, this toggles
+        /// the appropriate section option which provisions the corresponding parts and settings.
+        /// </summary>
+        public WordHeader GetOrCreateHeader(WordHeaderFooterType type) {
+            if (type == WordHeaderFooterType.Default) {
+                if (Header.Default == null) AddHeadersAndFooters();
+                return Header.Default ?? throw new InvalidOperationException("Failed to create default header.");
+            }
+
+            if (type == WordHeaderFooterType.First) {
+                if (Header.First == null) DifferentFirstPage = true;
+                return Header.First ?? throw new InvalidOperationException("Failed to create first-page header.");
+            }
+
+            if (type == WordHeaderFooterType.Even) {
+                if (Header.Even == null) DifferentOddAndEvenPages = true;
+                return Header.Even ?? throw new InvalidOperationException("Failed to create even-page header.");
+            }
+
+            throw new ArgumentOutOfRangeException(nameof(type), type, "Unsupported header type.");
+        }
+
+        /// <summary>
+        /// Returns an existing footer of the requested <paramref name="type"/> or creates it if missing.
+        /// Behavior mirrors <see cref="GetOrCreateHeader"/>.
+        /// </summary>
+        public WordFooter GetOrCreateFooter(WordHeaderFooterType type) {
+            if (type == WordHeaderFooterType.Default) {
+                if (Footer.Default == null) AddHeadersAndFooters();
+                return Footer.Default ?? throw new InvalidOperationException("Failed to create default footer.");
+            }
+
+            if (type == WordHeaderFooterType.First) {
+                if (Footer.First == null) DifferentFirstPage = true;
+                return Footer.First ?? throw new InvalidOperationException("Failed to create first-page footer.");
+            }
+
+            if (type == WordHeaderFooterType.Even) {
+                if (Footer.Even == null) DifferentOddAndEvenPages = true;
+                return Footer.Even ?? throw new InvalidOperationException("Failed to create even-page footer.");
+            }
+
+            throw new ArgumentOutOfRangeException(nameof(type), type, "Unsupported footer type.");
+        }
+
+        /// <summary>
+        /// Adds a watermark to the section.
+        /// </summary>
+        /// <param name="watermarkStyle">Watermark style.</param>
+        /// <param name="textOrFilePath">Text or image file path.</param>
+        /// <param name="horizontalOffset">Horizontal offset in points.</param>
+        /// <param name="verticalOffset">Vertical offset in points.</param>
+        /// <param name="scale">Scale factor for width and height.</param>
+        /// <returns>The created <see cref="WordWatermark"/> instance.</returns>
+        public WordWatermark AddWatermark(WordWatermarkStyle watermarkStyle, string textOrFilePath, double? horizontalOffset = null, double? verticalOffset = null, double scale = 1.0) {
+            // return new WordWatermark(this._document, this, this.Header.Default, watermarkStyle, text);
+            return new WordWatermark(this._document, this, watermarkStyle, textOrFilePath, horizontalOffset, verticalOffset, scale);
+        }
+
+        /// <summary>
+        /// Removes all watermarks from this section including headers.
+        /// </summary>
+        public void RemoveWatermark() {
+            foreach (var watermark in Watermarks.ToList()) {
+                watermark.Remove();
             }
         }
 
-        public WordWatermark AddWatermark(WordWatermarkStyle watermarkStyle, string textOrFilePath) {
-            // return new WordWatermark(this._document, this, this.Header.Default, watermarkStyle, text);
-            return new WordWatermark(this._document, this, watermarkStyle, textOrFilePath);
-        }
-
+        /// <summary>
+        /// Applies border settings to the section.
+        /// </summary>
+        /// <param name="wordBorder">Border preset to apply.</param>
+        /// <returns>The current section.</returns>
         public WordSection SetBorders(WordBorder wordBorder) {
             this.Borders.SetBorder(wordBorder);
 
             return this;
         }
 
-        public WordParagraph AddHorizontalLine(BorderValues? lineType = null, SixLabors.ImageSharp.Color? color = null, uint size = 12, uint space = 1) {
-            lineType ??= BorderValues.Single;
+        /// <summary>
+        /// Inserts a horizontal line paragraph into the section.
+        /// </summary>
+        /// <param name="lineType">Border style of the line.</param>
+        /// <param name="color">Line color.</param>
+        /// <param name="size">Line width.</param>
+        /// <param name="space">Line spacing.</param>
+        /// <returns>The paragraph containing the line.</returns>
+        public WordParagraph AddHorizontalLine(WordBorderStyle? lineType = null, OfficeIMO.Drawing.OfficeColor? color = null, uint size = 12, uint space = 1) {
+            lineType ??= WordBorderStyle.Single;
             return this.AddParagraph("").AddHorizontalLine(lineType.Value, color, size, space);
         }
 
+        /// <summary>
+        /// Adds a hyperlink paragraph pointing to a URI.
+        /// </summary>
+        /// <param name="text">Display text.</param>
+        /// <param name="uri">Target URI.</param>
+        /// <param name="addStyle">Whether to apply hyperlink style.</param>
+        /// <param name="tooltip">Optional tooltip.</param>
+        /// <param name="history">Add to document history.</param>
+        /// <returns>The created paragraph.</returns>
         public WordParagraph AddHyperLink(string text, Uri uri, bool addStyle = false, string tooltip = "", bool history = true) {
             return this.AddParagraph("").AddHyperLink(text, uri, addStyle, tooltip, history);
         }
 
+        /// <summary>
+        /// Adds a hyperlink paragraph pointing to an internal anchor.
+        /// </summary>
+        /// <param name="text">Display text.</param>
+        /// <param name="anchor">Bookmark anchor name.</param>
+        /// <param name="addStyle">Whether to apply hyperlink style.</param>
+        /// <param name="tooltip">Optional tooltip.</param>
+        /// <param name="history">Add to document history.</param>
+        /// <returns>The created paragraph.</returns>
         public WordParagraph AddHyperLink(string text, string anchor, bool addStyle = false, string tooltip = "", bool history = true) {
             return this.AddParagraph("").AddHyperLink(text, anchor, addStyle, tooltip, history);
         }
 
+        /// <summary>
+        /// Adds default headers and footers to the section.
+        /// </summary>
         public void AddHeadersAndFooters() {
             WordHeadersAndFooters.AddHeadersAndFooters(this);
         }
 
-        public WordTextBox AddTextBox(string text, WrapTextImage wrapTextImage = WrapTextImage.Square) {
+        /// <summary>
+        /// Adds a text box paragraph to the section.
+        /// </summary>
+        /// <param name="text">Initial text inside the text box.</param>
+        /// <param name="wrapTextImage">Wrapping style.</param>
+        /// <returns>The created <see cref="WordTextBox"/>.</returns>
+        public WordTextBox AddTextBox(string text, WordImageTextWrapping wrapTextImage = WordImageTextWrapping.Square) {
             return AddParagraph(newRun: true).AddTextBox(text, wrapTextImage);
+        }
+
+        /// <summary>
+        /// Adds a VML text box paragraph to the section.
+        /// </summary>
+        /// <param name="text">Initial text content inserted into the VML text box.</param>
+        public WordTextBox AddTextBoxVml(string text) {
+            return AddParagraph(newRun: true).AddTextBoxVml(text);
+        }
+
+        /// <summary>
+        /// Adds a VML image to the section.
+        /// </summary>
+        /// <param name="filePathImage">Path to the image file to embed.</param>
+        /// <param name="width">Optional image width in points.</param>
+        /// <param name="height">Optional image height in points.</param>
+        public WordImage AddImageVml(string filePathImage, double? width = null, double? height = null) {
+            var paragraph = AddParagraph(newRun: true);
+            paragraph.AddImageVml(filePathImage, width, height);
+            return paragraph.Image ?? throw new InvalidOperationException("Failed to create VML image.");
+        }
+
+        /// <summary>
+        /// Adds a VML shape to the section.
+        /// </summary>
+        /// <param name="shapeType">Type of shape to create.</param>
+        /// <param name="widthPt">Width in points or line end X.</param>
+        /// <param name="heightPt">Height in points or line end Y.</param>
+        /// <param name="fillColor">Fill color specified as a hex string (for example, <c>#RRGGBB</c>).</param>
+        /// <param name="strokeColor">Stroke color specified as a hex string (for example, <c>#RRGGBB</c>).</param>
+        /// <param name="strokeWeightPt">Stroke weight in points.</param>
+        /// <param name="arcSize">Rounded corner size expressed as a fraction between 0 and 1.</param>
+        public WordShape AddShape(WordShapeType shapeType, double widthPt, double heightPt,
+            string fillColor = "#FFFFFF", string strokeColor = "#000000", double strokeWeightPt = 1, double arcSize = 0.25) {
+            return AddParagraph(newRun: true).AddShape(shapeType, widthPt, heightPt, fillColor, strokeColor, strokeWeightPt, arcSize);
+        }
+
+        /// <summary>
+        /// Adds a VML shape to the section using <see cref="OfficeIMO.Drawing.OfficeColor"/> values.
+        /// </summary>
+        public WordShape AddShape(WordShapeType shapeType, double widthPt, double heightPt,
+            OfficeIMO.Drawing.OfficeColor fillColor, OfficeIMO.Drawing.OfficeColor strokeColor, double strokeWeightPt = 1, double arcSize = 0.25) {
+            return AddShape(shapeType, widthPt, heightPt, fillColor.ToRgbHex(), strokeColor.ToRgbHex(), strokeWeightPt, arcSize);
+        }
+
+        /// <summary>
+        /// Adds a DrawingML shape to the section.
+        /// </summary>
+        /// <param name="shapeType">Type of shape to create.</param>
+        /// <param name="widthPt">Width in points.</param>
+        /// <param name="heightPt">Height in points.</param>
+        public WordShape AddShapeDrawing(WordShapeType shapeType, double widthPt, double heightPt) {
+            return AddParagraph(newRun: true).AddShapeDrawing(shapeType, widthPt, heightPt);
+        }
+
+        /// <summary>
+        /// Inserts a SmartArt diagram into this section.
+        /// </summary>
+        /// <param name="type">Layout type of the SmartArt.</param>
+        /// <returns>The created <see cref="WordSmartArt"/>.</returns>
+        public WordSmartArt AddSmartArt(WordSmartArtType type) {
+            var paragraph = AddParagraph(newRun: true);
+            var smartArt = new WordSmartArt(_document, paragraph, type);
+            return smartArt;
+        }
+
+        /// <summary>
+        /// Configures footnote properties for the section.
+        /// </summary>
+        /// <param name="numberingFormat">Numbering format.</param>
+        /// <param name="position">Footnote position.</param>
+        /// <param name="restartNumbering">Restart numbering option.</param>
+        /// <param name="startNumber">Starting number.</param>
+        /// <returns>The current section.</returns>
+        public WordSection AddFootnoteProperties(WordNumberFormat? numberingFormat = null,
+            WordFootnotePosition? position = null,
+            WordNoteNumberRestart? restartNumbering = null,
+            int? startNumber = null) {
+            var props = _sectionProperties.GetFirstChild<FootnoteProperties>();
+            if (props == null) {
+                props = new FootnoteProperties();
+                _sectionProperties.Append(props);
+            }
+
+            props.RemoveAllChildren<NumberingFormat>();
+            props.RemoveAllChildren<FootnotePosition>();
+            props.RemoveAllChildren<NumberingRestart>();
+            props.RemoveAllChildren<NumberingStart>();
+
+            if (numberingFormat != null) {
+                props.Append(new NumberingFormat() { Val = numberingFormat.Value.ToOpenXml() });
+            }
+
+            if (position != null) {
+                props.Append(new FootnotePosition() { Val = position.Value.ToOpenXml() });
+            }
+
+            if (restartNumbering != null) {
+                props.Append(new NumberingRestart() { Val = restartNumbering.Value.ToOpenXml() });
+            }
+
+            if (startNumber != null) {
+                props.Append(new NumberingStart() { Val = (UInt16Value)startNumber.Value });
+            }
+
+            return this;
+        }
+
+        /// <summary>
+        /// Configures endnote properties for the section.
+        /// </summary>
+        /// <param name="numberingFormat">Numbering format.</param>
+        /// <param name="position">Endnote position.</param>
+        /// <param name="restartNumbering">Restart numbering option.</param>
+        /// <param name="startNumber">Starting number.</param>
+        /// <returns>The current section.</returns>
+        public WordSection AddEndnoteProperties(WordNumberFormat? numberingFormat = null,
+            WordEndnotePosition? position = null,
+            WordNoteNumberRestart? restartNumbering = null,
+            int? startNumber = null) {
+            var props = _sectionProperties.GetFirstChild<EndnoteProperties>();
+            if (props == null) {
+                props = new EndnoteProperties();
+                _sectionProperties.Append(props);
+            }
+
+            props.RemoveAllChildren<NumberingFormat>();
+            props.RemoveAllChildren<EndnotePosition>();
+            props.RemoveAllChildren<NumberingRestart>();
+            props.RemoveAllChildren<NumberingStart>();
+
+            if (numberingFormat != null) {
+                props.Append(new NumberingFormat() { Val = numberingFormat.Value.ToOpenXml() });
+            }
+
+            if (position != null) {
+                props.Append(new EndnotePosition() { Val = position.Value.ToOpenXml() });
+            }
+
+            if (restartNumbering != null) {
+                props.Append(new NumberingRestart() { Val = restartNumbering.Value.ToOpenXml() });
+            }
+
+            if (startNumber != null) {
+                props.Append(new NumberingStart() { Val = (UInt16Value)startNumber.Value });
+            }
+
+            return this;
+        }
+
+        /// <summary>
+        /// Adds or updates page numbering for the section.
+        /// </summary>
+        /// <param name="startNumber">Starting page number.</param>
+        /// <param name="format">Number format.</param>
+        /// <returns>The current section.</returns>
+        public WordSection AddPageNumbering(int? startNumber = null, WordNumberFormat? format = null) {
+            var existing = _sectionProperties.GetFirstChild<PageNumberType>();
+            existing?.Remove();
+
+            if (startNumber != null || format != null) {
+                var pageNumberType = new PageNumberType();
+                if (format != null) {
+                    pageNumberType.Format = format.Value.ToOpenXml();
+                }
+                if (startNumber != null) {
+                    pageNumberType.Start = startNumber.Value;
+                }
+                var refNode = _sectionProperties.Elements<FooterReference>().Cast<OpenXmlElement>()
+                    .Concat(_sectionProperties.Elements<HeaderReference>()).LastOrDefault();
+                if (refNode != null) {
+                    _sectionProperties.InsertAfter(pageNumberType, refNode);
+                } else {
+                    _sectionProperties.InsertAt(pageNumberType, 0);
+                }
+            }
+
+            return this;
+        }
+
+        /// <summary>
+        /// Creates a copy of this section and inserts it after the current section.
+        /// </summary>
+        /// <returns>The cloned <see cref="WordSection"/>.</returns>
+        public WordSection CloneSection() {
+            var body = _document._wordprocessingDocument!.MainDocumentPart!.Document!.Body!;
+            OpenXmlElement sectionEnd;
+            if (_sectionProperties.Parent is ParagraphProperties pPr && pPr.Parent is Paragraph para) {
+                sectionEnd = para;
+            } else {
+                sectionEnd = _sectionProperties;
+            }
+            var bodyElements = body.ChildElements.ToList();
+            int endIndex = bodyElements.IndexOf(sectionEnd);
+            int startIndex = endIndex;
+
+            while (startIndex > 0) {
+                var previous = bodyElements[startIndex - 1];
+                if (previous is Paragraph p && p.ParagraphProperties?.SectionProperties != null) {
+                    break;
+                }
+                if (previous is SectionProperties) {
+                    break;
+                }
+                startIndex--;
+            }
+
+            OpenXmlElement reference = sectionEnd;
+            for (int i = startIndex; i < endIndex; i++) {
+                var clone = bodyElements[i].CloneNode(true);
+                reference = reference.InsertAfterSelf(clone);
+            }
+
+            WordSection newSection;
+            if (sectionEnd is Paragraph paragraph) {
+                var clonedParagraph = (Paragraph)paragraph.CloneNode(true);
+                reference = reference.InsertAfterSelf(clonedParagraph);
+                var sectPr = clonedParagraph.ParagraphProperties?.SectionProperties;
+                newSection = new WordSection(_document, sectPr, clonedParagraph);
+            } else {
+                var clonedSectionProperties = (SectionProperties)_sectionProperties.CloneNode(true);
+                reference = reference.InsertAfterSelf(clonedSectionProperties);
+                newSection = new WordSection(_document, clonedSectionProperties, null);
+            }
+
+            int index = _document.Sections.IndexOf(this);
+            _document.Sections.Remove(newSection);
+            _document.Sections.Insert(index + 1, newSection);
+
+            return newSection;
+        }
+
+        /// <summary>
+        /// Removes this section and all of its content from the document,
+        /// cleaning up numbering and any unreferenced header and footer parts.
+        /// </summary>
+        public void RemoveSection() {
+            HashSet<int> numberingIds = CollectReferencedNumberingIds();
+
+            foreach (var element in this.ElementsByType.ToList()) {
+                switch (element) {
+                    case WordParagraph paragraph:
+                        paragraph.Remove();
+                        break;
+                    case WordTable table:
+                        table.Remove();
+                        break;
+                    case WordTextBox textBox:
+                        textBox.Remove();
+                        break;
+                    case WordImage image:
+                        image.Remove();
+                        break;
+                    case WordEmbeddedDocument embedded:
+                        embedded.Remove();
+                        break;
+                }
+            }
+
+            foreach (var headerRef in _sectionProperties.Elements<HeaderReference>().ToList()) {
+                var id = headerRef.Id?.Value;
+                if (id != null) {
+                    bool usedElsewhere = _document.Sections
+                        .Where(s => s != this)
+                        .Any(s => s._sectionProperties.Elements<HeaderReference>().Any(hr => hr.Id == id));
+                    if (!usedElsewhere) {
+                        var mainDocumentPart = _document._wordprocessingDocument?.MainDocumentPart;
+                        var part = mainDocumentPart?.Parts
+                            .FirstOrDefault(candidate => candidate.RelationshipId == id)
+                            .OpenXmlPart as HeaderPart;
+                        if (part != null) {
+                            mainDocumentPart!.DeletePart(part);
+                        }
+                    }
+                }
+                headerRef.Remove();
+            }
+
+            foreach (var footerRef in _sectionProperties.Elements<FooterReference>().ToList()) {
+                var id = footerRef.Id?.Value;
+                if (id != null) {
+                    bool usedElsewhere = _document.Sections
+                        .Where(s => s != this)
+                        .Any(s => s._sectionProperties.Elements<FooterReference>().Any(fr => fr.Id == id));
+                    if (!usedElsewhere) {
+                        var mainDocumentPart = _document._wordprocessingDocument?.MainDocumentPart;
+                        var part = mainDocumentPart?.Parts
+                            .FirstOrDefault(candidate => candidate.RelationshipId == id)
+                            .OpenXmlPart as FooterPart;
+                        if (part != null) {
+                            mainDocumentPart!.DeletePart(part);
+                        }
+                    }
+                }
+                footerRef.Remove();
+            }
+
+            if (_sectionProperties.Parent is Paragraph p) {
+                p.Remove();
+            } else if (_sectionProperties.Parent != null) {
+                _sectionProperties.Remove();
+            }
+
+            _document.Sections.Remove(this);
+            RemoveOrphanedNumbering(numberingIds);
+        }
+
+        private void RemoveOrphanedNumbering(IEnumerable<int> numberingIds) {
+            NumberingDefinitionsPart? numberingPart =
+                _document._wordprocessingDocument?.MainDocumentPart?.NumberingDefinitionsPart;
+            Numbering? numbering = numberingPart?.Numbering;
+            if (numbering == null) {
+                return;
+            }
+
+            HashSet<int> referencedIds = CollectReferencedNumberingIds();
+
+            foreach (int numberingId in numberingIds.Where(id => !referencedIds.Contains(id))) {
+                NumberingInstance? instance = numbering.Elements<NumberingInstance>()
+                    .FirstOrDefault(candidate => candidate.NumberID?.Value == numberingId);
+                int? abstractId = instance?.AbstractNumId?.Val?.Value;
+                instance?.Remove();
+
+                if (abstractId.HasValue &&
+                    !numbering.Elements<NumberingInstance>()
+                        .Any(candidate => candidate.AbstractNumId?.Val?.Value == abstractId.Value)) {
+                    numbering.Elements<AbstractNum>()
+                        .FirstOrDefault(candidate => candidate.AbstractNumberId?.Value == abstractId.Value)
+                        ?.Remove();
+                }
+            }
+
+            if (!numbering.Elements<AbstractNum>().Any() &&
+                !numbering.Elements<NumberingInstance>().Any() &&
+                !numbering.Elements<NumberingPictureBullet>().Any() &&
+                numberingPart != null) {
+                _document._wordprocessingDocument!.MainDocumentPart!.DeletePart(numberingPart);
+            }
+        }
+
+        private HashSet<int> CollectReferencedNumberingIds() {
+            var numberingIds = new HashSet<int>();
+            MainDocumentPart? mainPart = _document._wordprocessingDocument?.MainDocumentPart;
+            if (mainPart == null) {
+                return numberingIds;
+            }
+
+            var visited = new HashSet<OpenXmlPart>();
+            void Visit(OpenXmlPart part) {
+                if (!visited.Add(part)) {
+                    return;
+                }
+
+                OpenXmlPartRootElement? root = part.RootElement;
+                if (root != null) {
+                    foreach (NumberingId numberingId in root.Descendants<NumberingId>()) {
+                        if (numberingId.Val?.Value is int value) {
+                            numberingIds.Add(value);
+                        }
+                    }
+                }
+
+                foreach (IdPartPair child in part.Parts) {
+                    Visit(child.OpenXmlPart);
+                }
+            }
+
+            Visit(mainPart);
+            return numberingIds;
         }
     }
 }

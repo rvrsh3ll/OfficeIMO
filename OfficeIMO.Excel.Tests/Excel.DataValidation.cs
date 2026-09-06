@@ -1,0 +1,278 @@
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Spreadsheet;
+using OfficeIMO.Excel;
+using System;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using Xunit;
+
+namespace OfficeIMO.Tests {
+    /// <summary>
+    /// Tests for various data validation types.
+    /// </summary>
+    public partial class Excel {
+        [Fact]
+        public void ValidationWholeNumberBetween() {
+            string filePath = Path.Combine(_directoryWithFiles, "ValidationWholeNumber.xlsx");
+            using (ExcelDocument document = ExcelDocument.Create(filePath)) {
+                ExcelSheet sheet = document.AddWorksheet("Data");
+                sheet.ValidationWholeNumber("A1:A10", ExcelDataValidationOperator.Between, 1, 10, errorTitle: "Error", errorMessage: "1-10");
+                document.Save();
+            }
+
+            using (SpreadsheetDocument spreadsheet = SpreadsheetDocument.Open(filePath, false)) {
+                WorksheetPart wsPart = spreadsheet.WorkbookPart!.WorksheetParts.First();
+                DataValidation dv = wsPart.Worksheet.Descendants<DataValidation>().First();
+                Assert.Equal(DataValidationValues.Whole, dv.Type!.Value);
+                Assert.Equal(DataValidationOperatorValues.Between, dv.Operator!.Value);
+                Assert.Equal("1", dv.GetFirstChild<Formula1>()!.Text);
+                Assert.Equal("10", dv.GetFirstChild<Formula2>()!.Text);
+                Assert.Equal("Error", dv.ErrorTitle!.Value);
+                Assert.Equal("1-10", dv.Error!.Value);
+            }
+
+            using (ExcelDocument document = ExcelDocument.Load(filePath, new OfficeIMO.Excel.ExcelLoadOptions { AccessMode = OfficeIMO.DocumentAccessMode.ReadOnly })) {
+                Assert.Empty(document.ValidateOpenXml());
+            }
+        }
+
+        [Fact]
+        public void ValidationRangeFluentListAndMessages() {
+            string filePath = Path.Combine(_directoryWithFiles, "ValidationRangeFluentList.xlsx");
+            using (ExcelDocument document = ExcelDocument.Create(filePath)) {
+                ExcelSheet sheet = document.AddWorksheet("Data");
+                sheet.Range("B2:B5").Validation.List("Open", "Closed", "Pending");
+                sheet.Range("B2:B5").Validation.Messages(new ExcelDataValidationMessageOptions {
+                    PromptTitle = "Status",
+                    Prompt = "Pick a status",
+                    ErrorTitle = "Invalid status",
+                    Error = "Use the list"
+                });
+                document.Save();
+            }
+
+            using (SpreadsheetDocument spreadsheet = SpreadsheetDocument.Open(filePath, false)) {
+                WorksheetPart wsPart = spreadsheet.WorkbookPart!.WorksheetParts.First();
+                DataValidation dv = wsPart.Worksheet.Descendants<DataValidation>().First();
+                Assert.Equal(DataValidationValues.List, dv.Type!.Value);
+                Assert.Equal("B2:B5", dv.SequenceOfReferences!.InnerText);
+                Assert.Equal("\"Open,Closed,Pending\"", dv.GetFirstChild<Formula1>()!.Text);
+                Assert.Equal("Status", dv.PromptTitle!.Value);
+                Assert.Equal("Invalid status", dv.ErrorTitle!.Value);
+            }
+
+            using (ExcelDocument document = ExcelDocument.Load(filePath, new OfficeIMO.Excel.ExcelLoadOptions { AccessMode = OfficeIMO.DocumentAccessMode.ReadOnly })) {
+                Assert.Empty(document.ValidateOpenXml());
+            }
+        }
+
+        [Fact]
+        public void ValidationDecimalGreaterThan() {
+            string filePath = Path.Combine(_directoryWithFiles, "ValidationDecimal.xlsx");
+            using (ExcelDocument document = ExcelDocument.Create(filePath)) {
+                ExcelSheet sheet = document.AddWorksheet("Data");
+                sheet.ValidationDecimal("B1:B10", ExcelDataValidationOperator.GreaterThan, 5.5);
+                document.Save();
+            }
+
+            using (SpreadsheetDocument spreadsheet = SpreadsheetDocument.Open(filePath, false)) {
+                WorksheetPart wsPart = spreadsheet.WorkbookPart!.WorksheetParts.First();
+                DataValidation dv = wsPart.Worksheet.Descendants<DataValidation>().First();
+                Assert.Equal(DataValidationValues.Decimal, dv.Type!.Value);
+                Assert.Equal(DataValidationOperatorValues.GreaterThan, dv.Operator!.Value);
+                Assert.Equal("5.5", dv.GetFirstChild<Formula1>()!.Text);
+                Assert.Null(dv.GetFirstChild<Formula2>());
+            }
+
+            using (ExcelDocument document = ExcelDocument.Load(filePath, new OfficeIMO.Excel.ExcelLoadOptions { AccessMode = OfficeIMO.DocumentAccessMode.ReadOnly })) {
+                Assert.Empty(document.ValidateOpenXml());
+            }
+        }
+
+        [Fact]
+        public void ValidationDateLessThanOrEqual() {
+            string filePath = Path.Combine(_directoryWithFiles, "ValidationDate.xlsx");
+            DateTime dt = new DateTime(2024, 1, 1);
+            using (ExcelDocument document = ExcelDocument.Create(filePath)) {
+                ExcelSheet sheet = document.AddWorksheet("Data");
+                sheet.ValidationDate("C1:C10", ExcelDataValidationOperator.LessThanOrEqual, dt);
+                document.Save();
+            }
+
+            using (SpreadsheetDocument spreadsheet = SpreadsheetDocument.Open(filePath, false)) {
+                WorksheetPart wsPart = spreadsheet.WorkbookPart!.WorksheetParts.First();
+                DataValidation dv = wsPart.Worksheet.Descendants<DataValidation>().First();
+                Assert.Equal(DataValidationValues.Date, dv.Type!.Value);
+                Assert.Equal(DataValidationOperatorValues.LessThanOrEqual, dv.Operator!.Value);
+                string expected = dt.ToOADate().ToString(CultureInfo.InvariantCulture);
+                Assert.Equal(expected, dv.GetFirstChild<Formula1>()!.Text);
+            }
+
+            using (ExcelDocument document = ExcelDocument.Load(filePath, new OfficeIMO.Excel.ExcelLoadOptions { AccessMode = OfficeIMO.DocumentAccessMode.ReadOnly })) {
+                Assert.Empty(document.ValidateOpenXml());
+            }
+        }
+
+        [Fact]
+        public void ValidationTimeEqual() {
+            string filePath = Path.Combine(_directoryWithFiles, "ValidationTime.xlsx");
+            TimeSpan ts = TimeSpan.FromHours(12);
+            using (ExcelDocument document = ExcelDocument.Create(filePath)) {
+                ExcelSheet sheet = document.AddWorksheet("Data");
+                sheet.ValidationTime("D1:D10", ExcelDataValidationOperator.Equal, ts);
+                document.Save();
+            }
+
+            using (SpreadsheetDocument spreadsheet = SpreadsheetDocument.Open(filePath, false)) {
+                WorksheetPart wsPart = spreadsheet.WorkbookPart!.WorksheetParts.First();
+                DataValidation dv = wsPart.Worksheet.Descendants<DataValidation>().First();
+                Assert.Equal(DataValidationValues.Time, dv.Type!.Value);
+                Assert.Equal(DataValidationOperatorValues.Equal, dv.Operator!.Value);
+                string expected = ts.TotalDays.ToString(CultureInfo.InvariantCulture);
+                Assert.Equal(expected, dv.GetFirstChild<Formula1>()!.Text);
+            }
+
+            using (ExcelDocument document = ExcelDocument.Load(filePath, new OfficeIMO.Excel.ExcelLoadOptions { AccessMode = OfficeIMO.DocumentAccessMode.ReadOnly })) {
+                Assert.Empty(document.ValidateOpenXml());
+            }
+        }
+
+        [Fact]
+        public void ValidationTextLengthLessThan() {
+            string filePath = Path.Combine(_directoryWithFiles, "ValidationTextLength.xlsx");
+            using (ExcelDocument document = ExcelDocument.Create(filePath)) {
+                ExcelSheet sheet = document.AddWorksheet("Data");
+                sheet.ValidationTextLength("E1:E10", ExcelDataValidationOperator.LessThan, 10);
+                document.Save();
+            }
+
+            using (SpreadsheetDocument spreadsheet = SpreadsheetDocument.Open(filePath, false)) {
+                WorksheetPart wsPart = spreadsheet.WorkbookPart!.WorksheetParts.First();
+                DataValidation dv = wsPart.Worksheet.Descendants<DataValidation>().First();
+                Assert.Equal(DataValidationValues.TextLength, dv.Type!.Value);
+                Assert.Equal(DataValidationOperatorValues.LessThan, dv.Operator!.Value);
+                Assert.Equal("10", dv.GetFirstChild<Formula1>()!.Text);
+            }
+
+            using (ExcelDocument document = ExcelDocument.Load(filePath, new OfficeIMO.Excel.ExcelLoadOptions { AccessMode = OfficeIMO.DocumentAccessMode.ReadOnly })) {
+                Assert.Empty(document.ValidateOpenXml());
+            }
+        }
+
+        [Fact]
+        public void ValidationCustomFormula() {
+            string filePath = Path.Combine(_directoryWithFiles, "ValidationCustom.xlsx");
+            using (ExcelDocument document = ExcelDocument.Create(filePath)) {
+                ExcelSheet sheet = document.AddWorksheet("Data");
+                sheet.ValidationCustomFormula("F1:F10", "SUM(A1:B1)>10");
+                document.Save();
+            }
+
+            using (SpreadsheetDocument spreadsheet = SpreadsheetDocument.Open(filePath, false)) {
+                WorksheetPart wsPart = spreadsheet.WorkbookPart!.WorksheetParts.First();
+                DataValidation dv = wsPart.Worksheet.Descendants<DataValidation>().First();
+                Assert.Equal(DataValidationValues.Custom, dv.Type!.Value);
+                Assert.Null(dv.Operator);
+                Assert.Equal("SUM(A1:B1)>10", dv.GetFirstChild<Formula1>()!.Text);
+            }
+
+            using (ExcelDocument document = ExcelDocument.Load(filePath, new OfficeIMO.Excel.ExcelLoadOptions { AccessMode = OfficeIMO.DocumentAccessMode.ReadOnly })) {
+                Assert.Empty(document.ValidateOpenXml());
+            }
+        }
+
+        [Fact]
+        public void ValidationListNamedRange() {
+            string filePath = Path.Combine(_directoryWithFiles, "ValidationListNamedRange.xlsx");
+            using (ExcelDocument document = ExcelDocument.Create(filePath)) {
+                ExcelSheet options = document.AddWorksheet("Options");
+                ExcelSheet data = document.AddWorksheet("Data");
+
+                options.CellValue(1, 1, "Open");
+                options.CellValue(2, 1, "Closed");
+                options.CellValue(3, 1, "Pending");
+                document.SetNamedRange("StatusOptions", "'Options'!A1:A3", save: false);
+                data.ValidationListNamedRange("B2:B5", "StatusOptions");
+                document.Save();
+            }
+
+            using (SpreadsheetDocument spreadsheet = SpreadsheetDocument.Open(filePath, false)) {
+                WorksheetPart wsPart = spreadsheet.WorkbookPart!.WorksheetParts.Last();
+                DataValidation dv = wsPart.Worksheet.Descendants<DataValidation>().First();
+                Assert.Equal(DataValidationValues.List, dv.Type!.Value);
+                Assert.Equal("=StatusOptions", dv.GetFirstChild<Formula1>()!.Text);
+            }
+
+            using (ExcelDocument document = ExcelDocument.Load(filePath, new OfficeIMO.Excel.ExcelLoadOptions { AccessMode = OfficeIMO.DocumentAccessMode.ReadOnly })) {
+                Assert.Empty(document.ValidateOpenXml());
+            }
+        }
+
+        [Fact]
+        public void ValidationListRange() {
+            string filePath = Path.Combine(_directoryWithFiles, "ValidationListRange.xlsx");
+            using (ExcelDocument document = ExcelDocument.Create(filePath)) {
+                ExcelSheet options = document.AddWorksheet("Options");
+                ExcelSheet data = document.AddWorksheet("Data");
+
+                options.CellValue(1, 1, "Open");
+                options.CellValue(2, 1, "Closed");
+                options.CellValue(3, 1, "Pending");
+                data.ValidationListRange("B2:B5", "A1:A3", "Options");
+                document.Save();
+            }
+
+            using (SpreadsheetDocument spreadsheet = SpreadsheetDocument.Open(filePath, false)) {
+                WorksheetPart wsPart = spreadsheet.WorkbookPart!.WorksheetParts.Last();
+                DataValidation dv = wsPart.Worksheet.Descendants<DataValidation>().First();
+                Assert.Equal(DataValidationValues.List, dv.Type!.Value);
+                Assert.Equal("='Options'!A1:A3", dv.GetFirstChild<Formula1>()!.Text);
+            }
+
+            using (ExcelDocument document = ExcelDocument.Load(filePath, new OfficeIMO.Excel.ExcelLoadOptions { AccessMode = OfficeIMO.DocumentAccessMode.ReadOnly })) {
+                Assert.Empty(document.ValidateOpenXml());
+            }
+        }
+
+        [Fact]
+        public void ValidationListRangeOnCurrentSheet() {
+            string filePath = Path.Combine(_directoryWithFiles, "ValidationListRangeOnCurrentSheet.xlsx");
+            using (ExcelDocument document = ExcelDocument.Create(filePath)) {
+                ExcelSheet data = document.AddWorksheet("Data");
+
+                data.CellValue(1, 4, "Open");
+                data.CellValue(2, 4, "Closed");
+                data.CellValue(3, 4, "Pending");
+                data.ValidationListRange("B2:B5", "D1:D3");
+                document.Save();
+            }
+
+            using (SpreadsheetDocument spreadsheet = SpreadsheetDocument.Open(filePath, false)) {
+                WorksheetPart wsPart = spreadsheet.WorkbookPart!.WorksheetParts.First();
+                DataValidation dv = wsPart.Worksheet.Descendants<DataValidation>().First();
+                Assert.Equal(DataValidationValues.List, dv.Type!.Value);
+                Assert.Equal("=D1:D3", dv.GetFirstChild<Formula1>()!.Text);
+            }
+
+            using (ExcelDocument document = ExcelDocument.Load(filePath, new OfficeIMO.Excel.ExcelLoadOptions { AccessMode = OfficeIMO.DocumentAccessMode.ReadOnly })) {
+                Assert.Empty(document.ValidateOpenXml());
+            }
+        }
+
+        [Fact]
+        public void ValidationFormulaLimitsAreEnforcedBeforeInvalidOpenXmlIsWritten() {
+            using ExcelDocument document = ExcelDocument.Create();
+            ExcelSheet sheet = document.AddWorksheet("Data");
+
+            sheet.ValidationList("A1", new[] { new string('x', 253) });
+
+            Assert.Throws<ArgumentException>(() =>
+                sheet.ValidationList("A2", new[] { new string('x', 254) }));
+            Assert.Throws<ArgumentException>(() =>
+                sheet.ValidationList("A3", new[] { "one,two" }));
+            Assert.Throws<ArgumentException>(() =>
+                sheet.ValidationCustomFormula("A4", new string('x', ExcelSheet.MaximumDataValidationFormulaLength + 1)));
+        }
+    }
+}

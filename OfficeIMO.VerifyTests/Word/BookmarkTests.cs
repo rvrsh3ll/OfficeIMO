@@ -1,12 +1,15 @@
-﻿using System.Threading.Tasks;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using OfficeIMO.Word;
+using System.Threading.Tasks;
 using VerifyXunit;
 using Xunit;
 
 namespace OfficeIMO.VerifyTests.Word;
 
+/// <summary>
+/// Tests bookmark creation and removal within documents.
+/// </summary>
 public class BookmarkTests : VerifyTestBase {
 
     private static async Task DoTest(WordprocessingDocument document) {
@@ -24,7 +27,7 @@ public class BookmarkTests : VerifyTestBase {
             paragraph = paragraph.AddText(text);
             paragraph.Bold = true;
             paragraph.Italic = true;
-            paragraph.Underline = UnderlineValues.DashDotDotHeavy;
+            paragraph.Underline = WordUnderlineStyle.DashDotDotHeavy;
         }
 
         document.AddPageBreak();
@@ -54,7 +57,7 @@ public class BookmarkTests : VerifyTestBase {
         document.PageBreaks[7].Remove(includingParagraph: false);
         document.PageBreaks[6].Remove(true);
 
-        document.Save();
+        _ = document.ToBytes();
 
         await DoTest(document._wordprocessingDocument);
     }

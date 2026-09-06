@@ -1,0 +1,182 @@
+using System.IO.Compression;
+using System.Threading.Tasks;
+using System.Xml.Linq;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Spreadsheet;
+using OfficeIMO.Excel;
+using OfficeIMO.Excel.Fluent;
+using Xunit;
+
+namespace OfficeIMO.Tests;
+
+public sealed class ExcelAllSeverityBatch15SecurityTests {
+    [Fact]
+    public void FastSheetReaderIgnoresLookalikeElementsAndWrongRelationshipNamespaces() {
+        string path = Path.Combine(Path.GetTempPath(), "officeimo-sheet-fast-" + Guid.NewGuid().ToString("N") + ".xlsx");
+        try {
+            using (ExcelDocument document = ExcelDocument.Create(path)) {
+                document.AddWorksheet("Data").CellValue(1, 1, "safe");
+                document.Save();
+            }
+
+            using (ZipArchive archive = ZipFile.Open(path, ZipArchiveMode.Update)) {
+                ZipArchiveEntry entry = archive.GetEntry("xl/workbook.xml")!;
+                XDocument workbook;
+                using (Stream input = entry.Open()) workbook = XDocument.Load(input);
+                XNamespace spreadsheet = workbook.Root!.Name.Namespace;
+                XNamespace relationships = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+                XNamespace extension = "urn:attacker-extension";
+                XElement sheets = workbook.Root.Element(spreadsheet + "sheets")!;
+                string realRelationshipId = sheets.Elements(spreadsheet + "sheet").First().Attribute(relationships + "id")!.Value;
+
+                workbook.Root.AddFirst(new XElement(extension + "sheets",
+                    new XElement(extension + "sheet",
+                        new XAttribute("name", "ExtensionBogus"),
+                        new XAttribute(relationships + "id", realRelationshipId))));
+                workbook.Root.AddFirst(new XElement(extension + "wrapper",
+                    new XElement(spreadsheet + "sheets",
+                        new XElement(spreadsheet + "sheet",
+                            new XAttribute("name", "SameNamespaceBogus"),
+                            new XAttribute(relationships + "id", realRelationshipId)))));
+                sheets.AddFirst(new XElement(spreadsheet + "sheet",
+                    new XAttribute("name", "WrongNamespaceBogus"),
+                    new XAttribute(XNamespace.Xmlns + "r", "urn:attacker-relationships"),
+                    new XAttribute(XName.Get("id", "urn:attacker-relationships"), realRelationshipId)));
+
+                entry.Delete();
+                ZipArchiveEntry replacement = archive.CreateEntry("xl/workbook.xml", CompressionLevel.Optimal);
+                using Stream output = replacement.Open();
+                workbook.Save(output);
+            }
+
+            using ExcelDocumentReader reader = ExcelDocumentReader.Open(path);
+            Assert.Equal(new[] { "Data" }, reader.GetSheetNames());
+            Assert.Equal(1, reader.SheetCount);
+            Assert.NotNull(reader.GetSheet("Data"));
+            Assert.Throws<KeyNotFoundException>(() => reader.GetSheet("SameNamespaceBogus"));
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void UncachedSheetReadsDoNotMutateSharedSheetIdState() {
+        using ExcelDocument document = ExcelDocument.Create(new MemoryStream());
+        document.AddWorksheet("Data");
+        document.SheetCachingEnabled = false;
+
+        Parallel.For(0, 200, _ => Assert.Single(document.Sheets));
+    }
+
+    [Fact]
+    public void TableTotalsRetainLastCaseInsensitiveDuplicate() {
+        using ExcelDocument document = ExcelDocument.Create(new MemoryStream());
+        ExcelSheet sheet = document.AddWorksheet("Data");
+        sheet.CellValue(1, 1, "Name");
+        sheet.CellValue(1, 2, "Value");
+        sheet.CellValue(2, 1, "A");
+        sheet.CellValue(2, 2, 1);
+        sheet.AddTable("A1:B2", true, "DataTable", OfficeIMO.Excel.ExcelTableStyle.TableStyleMedium2);
+        var totals = new Dictionary<string, ExcelTableTotalsFunction>(StringComparer.Ordinal) {
+            ["Name"] = ExcelTableTotalsFunction.Count,
+            ["NAME"] = ExcelTableTotalsFunction.None
+        };
+
+        Exception? exception = Record.Exception(() => sheet.SetTableTotals("A1:B2", totals));
+
+        Assert.Null(exception);
+    }
+
+    [Fact]
+    public void SummarizeOverflowFitsMoreIntoSingleAvailableColumn() {
+        string path = Path.Combine(Path.GetTempPath(), "officeimo-summary-one-column-" + Guid.NewGuid().ToString("N") + ".xlsx");
+        try {
+            using (ExcelDocument document = ExcelDocument.Create(path)) {
+                document.Compose("Report", composer => {
+                    composer.Columns(2, columns => columns[0].TableFrom(
+                        new[] { new WideRow("Alpha", 1, 2) }, title: "Wide"),
+                        columnWidth: 1,
+                        overflow: OverflowMode.Summarize);
+                    composer.Finish(autoFitColumns: false);
+                });
+                document.Save();
+            }
+
+            using SpreadsheetDocument package = SpreadsheetDocument.Open(path, false);
+            Table table = Assert.Single(package.WorkbookPart!.WorksheetParts.First().TableDefinitionParts).Table!;
+            Assert.Equal("A2:A3", table.Reference!.Value);
+            Assert.Equal("More", Assert.Single(table.TableColumns!.Elements<TableColumn>()).Name!.Value);
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData(OverflowMode.Shrink)]
+    [InlineData(OverflowMode.Summarize)]
+    public void FixedGridOverflowReducesColumnsBeforeWorksheetBoundaryCheck(OverflowMode overflowMode) {
+        using ExcelDocument document = ExcelDocument.Create(new MemoryStream());
+        ExcelSheet sheet = document.AddWorksheet("Data");
+        var composer = new SheetComposer.ColumnComposer(sheet, new SheetTheme(), 1, A1.MaxColumns);
+        composer.SetGridConstraints(3, overflowMode);
+
+        string range = composer.TableFrom(new[] { new WideRow("Alpha", 1, 2) });
+
+        Assert.Equal("XFD1:XFD2", range);
+    }
+
+    [Theory]
+    [InlineData(OverflowMode.Shrink)]
+    [InlineData(OverflowMode.Summarize)]
+    public void FixedGridOverflowChargesCellLimitAgainstRenderedColumns(OverflowMode overflowMode) {
+        using ExcelDocument document = ExcelDocument.Create(new MemoryStream());
+        ExcelSheet sheet = document.AddWorksheet("Data");
+        var composer = new SheetComposer.ColumnComposer(sheet, new SheetTheme(), 1, 1);
+        composer.SetGridConstraints(1, overflowMode);
+
+        string range = composer.TableFrom(
+            new[] { new WideRow("Alpha", 1, 2) },
+            configure: options => options.MaxCells = 2);
+
+        Assert.Equal("A1:A2", range);
+    }
+
+    [Fact]
+    public void EmptyObjectTablesUseSingleCellFallbackWithoutChargingInferredHeaders() {
+        using ExcelDocument document = ExcelDocument.Create(new MemoryStream());
+        var rootComposer = new SheetComposer(document, "Root", new SheetTheme());
+        ExcelSheet columnSheet = document.AddWorksheet("Column");
+        var columnComposer = new SheetComposer.ColumnComposer(columnSheet, new SheetTheme(), 2, 2);
+
+        string rootRange = rootComposer.TableFrom(
+            Array.Empty<WideRow>(), configure: options => options.MaxCells = 1);
+        string columnRange = columnComposer.TableFrom(
+            Array.Empty<WideRow>(), configure: options => options.MaxCells = 1);
+
+        Assert.Equal("A1:A1", rootRange);
+        Assert.Equal("B2:B2", columnRange);
+    }
+
+    [Fact]
+    public void ParallelRowAutoFitAndRowMutationsSerializeOpenXmlTraversal() {
+        using ExcelDocument document = ExcelDocument.Create(new MemoryStream());
+        ExcelSheet sheet = document.AddWorksheet("Data");
+        for (int row = 1; row <= 100; row++) sheet.CellValue(row, 1, "row " + row);
+
+        Parallel.Invoke(
+            () => {
+                for (int row = 101; row <= 600; row++) sheet.CellValue(row, 1, "row " + row);
+            },
+            () => {
+                for (int pass = 0; pass < 8; pass++) sheet.AutoFitRows(ExcelExecutionMode.Parallel);
+            },
+            () => {
+                for (int pass = 0; pass < 8; pass++) sheet.AutoFitRows(ExcelExecutionMode.Parallel);
+            });
+
+        Assert.NotNull(sheet.WorksheetPart.Worksheet.GetFirstChild<SheetData>()!.Elements<Row>().First().Height);
+        Assert.Equal(600, sheet.WorksheetPart.Worksheet.GetFirstChild<SheetData>()!.Elements<Row>().Count());
+    }
+
+    private sealed record WideRow(string Name, int Score, int Total);
+}

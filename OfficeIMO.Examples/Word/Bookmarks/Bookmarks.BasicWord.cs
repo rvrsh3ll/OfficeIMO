@@ -18,7 +18,7 @@ namespace OfficeIMO.Examples.Word {
                     paragraph = paragraph.AddText(text);
                     paragraph.Bold = true;
                     paragraph.Italic = true;
-                    paragraph.Underline = UnderlineValues.DashDotDotHeavy;
+                    paragraph.Underline = WordUnderlineStyle.DashDotDotHeavy;
                 }
 
                 document.AddPageBreak();
@@ -51,7 +51,8 @@ namespace OfficeIMO.Examples.Word {
                 Console.WriteLine(document.DocumentIsValid);
                 Console.WriteLine(document.DocumentValidationErrors.Count);
 
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
 

@@ -1,0 +1,75 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <Description>Markdown builder, typed reader/AST, and HTML renderer for .NET with GitHub-like output and an optional portable reader profile.</Description>
+        <AssemblyName>OfficeIMO.Markdown</AssemblyName>
+        <AssemblyTitle>OfficeIMO.Markdown</AssemblyTitle>
+        <VersionPrefix>3.4.0</VersionPrefix>
+        <TargetFrameworks>netstandard2.0;net8.0;net10.0</TargetFrameworks>
+        <TargetFrameworks Condition=" '$([MSBuild]::IsOsPlatform(`Windows`))' ">
+            $(TargetFrameworks);net472</TargetFrameworks>
+        <GeneratePackageOnBuild>False</GeneratePackageOnBuild>
+        <Company>Evotec</Company>
+        <Authors>Przemyslaw Klys</Authors>
+        <PackageId>OfficeIMO.Markdown</PackageId>
+        <PackageTags>markdown;gfm;builder;fluent;readme;docs;reporting</PackageTags>
+        <PackageProjectUrl>https://github.com/EvotecIT/OfficeIMO</PackageProjectUrl>
+        <PackageLicenseExpression>MIT</PackageLicenseExpression>
+        <RepositoryUrl>https://github.com/EvotecIT/OfficeIMO</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+        <PackageIcon>OfficeIMO.png</PackageIcon>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <PackageReleaseNotes>0.6.0: adds semantic fenced-block AST support, fenced block extension APIs, improved quoted/container fence handling, and HTML parts/asset workflows aligned for downstream HTML-to-Markdown and host integrations.</PackageReleaseNotes>
+        <DebugType>portable</DebugType>
+        <ProduceReferenceAssembly>False</ProduceReferenceAssembly>
+        <IsPublishable>True</IsPublishable>
+        <SignAssembly>False</SignAssembly>
+        <GenerateDocumentationFile>True</GenerateDocumentationFile>
+        <LangVersion>Latest</LangVersion>
+        <Nullable>enable</Nullable>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\OfficeIMO.Core\OfficeIMO.Core.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="..\Assets\OfficeIMO.png">
+            <Pack>True</Pack>
+            <PackagePath>\</PackagePath>
+        </None>
+        <None Include="README.md">
+            <Pack>True</Pack>
+            <PackagePath>README.md</PackagePath>
+        </None>
+    </ItemGroup>
+
+    <ItemGroup>
+        <Using Include="System" />
+        <Using Include="System.Text" />
+        <Using Include="System.Collections.Generic" />
+        <Using Include="System.Linq" />
+        <Using Include="OfficeIMO.Drawing" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(TargetFramework)' == 'net472'">
+        <Reference Include="System.Net.Http" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <InternalsVisibleTo Include="OfficeIMO.Markdown.Tests" />
+        <InternalsVisibleTo Include="OfficeIMO.Pdf.Tests" />
+        <InternalsVisibleTo Include="OfficeIMO.Examples" />
+        <InternalsVisibleTo Include="OfficeIMO.Markdown.Html" />
+        <InternalsVisibleTo Include="OfficeIMO.Markdown.Pdf" />
+        <InternalsVisibleTo Include="OfficeIMO.MarkdownRenderer" />
+        <InternalsVisibleTo Include="OfficeIMO.Rtf.Markdown" />
+        <InternalsVisibleTo Include="OfficeIMO.Word.Markdown" />
+        <InternalsVisibleTo Include="OfficeIMO.AsciiDoc.Markdown" />
+        <InternalsVisibleTo Include="OfficeIMO.Latex.Markdown" />
+        <InternalsVisibleTo Include="OfficeIMO.Reader.Latex" />
+        <InternalsVisibleTo Include="OfficeIMO.Reader.Markdown" />
+        <InternalsVisibleTo Include="OfficeIMO.Markup" />
+    </ItemGroup>
+
+</Project>

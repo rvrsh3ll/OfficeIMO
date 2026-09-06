@@ -1,0 +1,62 @@
+{
+  "sections": [
+    {
+      "title": "General",
+      "items": [
+        {
+          "question": "Does OfficeIMO require Microsoft Office to be installed?",
+          "answer": "<p>No. OfficeIMO uses managed document engines and focused package dependencies; it does not require Microsoft Office, COM automation, or Office interop assemblies at runtime. Optional desktop Office checks are validation oracles, not runtime dependencies.</p>"
+        },
+        {
+          "question": "Does OfficeIMO support DOC, XLS, XLSB, and PPT as well as DOCX, XLSX, and PPTX?",
+          "answer": "<p>OfficeIMO classifies and reads modern and legacy Word, Excel, and PowerPoint families, writes documented native subsets, and reports conversion coverage by operation and fidelity. Use the <a href='/compatibility/'>compatibility dashboard</a> for tracked behaviors, fallbacks, and deliberate blocks.</p>"
+        },
+        {
+          "question": "What .NET versions are supported?",
+          "answer": "<p>OfficeIMO targets <strong>.NET 8.0</strong>, <strong>.NET 10.0</strong>, <strong>.NET Standard 2.0</strong>, and <strong>.NET Framework 4.7.2</strong>.</p>"
+        },
+        {
+          "question": "Is OfficeIMO free for commercial use?",
+          "answer": "<p>Yes. The OfficeIMO packages themselves are published under the <strong>MIT License</strong>. However, some optional package families build on third-party dependencies with their own upstream terms, so commercial teams should also review our <a href='/third-party/'>Third-Party Dependencies</a> page during OSS approval.</p>"
+        },
+        {
+          "question": "How does OfficeIMO compare to Aspose or GemBox?",
+          "answer": "<p>OfficeIMO is an MIT-licensed, source-available document platform for .NET and PowerShell with modern and legacy Office support, focused packages, explicit conversion-fidelity policies, and no runtime royalty. Commercial suites can provide broader portfolio coverage, more mature rendering for some workloads, formal support, and procurement SLAs. Compare the exact formats, operations, fidelity, deployment model, and support obligations your application needs on our <a href='/comparison/'>evaluation page</a>.</p>"
+        },
+        {
+          "question": "Can I use OfficeIMO in a Docker container or CI/CD pipeline?",
+          "answer": "<p>Yes. Because OfficeIMO is COM-free and runs on .NET, it fits well in Linux containers, GitHub Actions, Azure DevOps, and other CI/CD environments. For rendering-heavy scenarios such as PDF output, validate the fonts and native dependencies you plan to ship with your container image.</p>"
+        },
+        {
+          "question": "What is PSWriteOffice?",
+          "answer": "<p>PSWriteOffice is the PowerShell surface over the OfficeIMO document platform. Its command catalog is generated from the module manifest used for this release, covering Word, Excel, PowerPoint, PDF, Reader, Visio, text, open-format, email, and conversion workflows.</p>"
+        },
+        {
+          "question": "Does OfficeIMO support reading existing documents?",
+          "answer": "<p>Yes, within each package's documented format and feature boundaries. Word, Excel, and PowerPoint expose load and edit workflows for supported content. OfficeIMO.Reader provides a normalized extraction API through selective format handlers or OfficeIMO.Reader.All.</p>"
+        },
+        {
+          "question": "Is NativeAOT compilation supported?",
+          "answer": "<p>Yes, for the packages and workflows covered by the OfficeIMO validation matrix. CI validates production libraries, a bounded native workflow for the optional Google APIs credential adapter, and the production CLI tool on Windows and Linux. The Chromium browser-PDF bridge, local HTML/PDF workbench, and Avalonia-based OfficeIMO Studio use managed cross-platform deployment, while the WPF/WebView2 renderer uses managed Windows deployment. Check the <a href='/docs/advanced/aot-trimming/'>NativeAOT deployment guide</a> and <a href='/data/aot-compatibility.json'>project matrix</a> for the current project counts, exact package coverage, and runtime path.</p>"
+        }
+      ]
+    },
+    {
+      "title": "Technical",
+      "items": [
+        {
+          "question": "What are the dependencies?",
+          "answer": "<p>The core Office document packages are built on <strong>DocumentFormat.OpenXml</strong> and the first-party <strong>OfficeIMO.Core</strong> foundation. Drawing primitives remain in the <strong>OfficeIMO.Drawing</strong> namespace. HTML converter packages use <strong>AngleSharp</strong>, Excel carries compatibility helper packages on older targets, and the PDF packages use the first-party <strong>OfficeIMO.Pdf</strong> engine instead of external PDF/runtime layout libraries. The Markdown, CSV, Core, and PDF packages stay dependency-light. See the <a href='/third-party/'>Third-Party Dependencies</a> page for the package-by-package breakdown and upstream license notes.</p>"
+        },
+        {
+          "question": "Can I convert Word documents to PDF?",
+          "answer": "<p>Yes. The <strong>OfficeIMO.Word.Pdf</strong> and <strong>OfficeIMO.Excel.Pdf</strong> converter packages support PDF export without Office. There are also converters for Word-to-HTML and Word-to-Markdown.</p>"
+        },
+        {
+          "question": "Is thread safety supported?",
+          "answer": "<p>OfficeIMO.Excel supports parallel execution for bulk operations like AutoFit and bulk writes. Each document instance is independent and can be used on separate threads. Concurrent access to a single document instance is not supported.</p>"
+        }
+      ]
+    }
+  ]
+}

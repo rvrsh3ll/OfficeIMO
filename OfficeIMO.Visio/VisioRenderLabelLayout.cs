@@ -1,0 +1,436 @@
+using System;
+using System.Collections.Generic;
+using OfficeIMO.Drawing;
+using System.Linq;
+
+namespace OfficeIMO.Visio {
+    internal sealed class VisioRenderLabelLayout {
+        private const double SearchStep = 0.18D;
+        private const int MaxSearchRings = 10;
+        private const double PositionStep = 0.08D;
+        private const int MaxPositionShifts = 4;
+        private const double EndpointShapeOverlapWeight = 0.65D;
+        private const double ShapeClearance = 0.02D;
+        private const double LabelClearance = 0.04D;
+        private const double ConnectorLineClearance = 0.03D;
+
+        private readonly VisioPage _page;
+        private readonly IReadOnlyList<VisioShape> _shapes;
+        private readonly IReadOnlyDictionary<VisioShape, VisioShapeBounds> _shapeBounds;
+        private readonly IReadOnlyDictionary<VisioConnector, List<(double X, double Y)>> _connectorPaths;
+        private readonly List<VisioShapeBounds> _placedLabels = new();
+
+        private VisioRenderLabelLayout(VisioPage page) {
+            _page = page;
+            _shapes = page.AllShapes();
+            _shapeBounds = _shapes.ToDictionary(shape => shape, GetPageShapeBounds);
+            _connectorPaths = page.Connectors.ToDictionary(connector => connector, GetConnectorPoints);
+        }
+
+        internal static VisioRenderLabelLayout Create(VisioPage page) {
+            if (page == null) {
+                throw new ArgumentNullException(nameof(page));
+            }
+
+            return new VisioRenderLabelLayout(page);
+        }
+
+        internal VisioRenderConnectorLabelPlacement Resolve(VisioConnector connector, IReadOnlyList<(double X, double Y)> path) {
+            if (connector == null) {
+                throw new ArgumentNullException(nameof(connector));
+            }
+
+            if (path == null) {
+                throw new ArgumentNullException(nameof(path));
+            }
+
+            LabelPlacementSeed seed = CreateSeed(connector, path);
+            LabelCandidate best = new LabelCandidate(seed.X, seed.Y, 0D, 0D);
+            VisioShapeBounds bestBounds = GetBounds(best.X, best.Y, seed.Width, seed.Height, seed.LocPinX, seed.LocPinY);
+            LabelScore bestScore = Score(connector, bestBounds, 0D, 0D);
+            bool absolute = connector.LabelPlacement?.AbsolutePinX.HasValue == true &&
+                            connector.LabelPlacement.AbsolutePinY.HasValue;
+
+            if (!absolute) {
+                foreach (LabelCandidate candidate in EnumerateCandidates(seed, path)) {
+                    VisioShapeBounds bounds = GetBounds(candidate.X, candidate.Y, seed.Width, seed.Height, seed.LocPinX, seed.LocPinY);
+                    LabelScore score = Score(connector, bounds, candidate.DistanceFromSeed, Math.Abs(candidate.PositionDelta));
+                    if (score.IsBetterThan(bestScore)) {
+                        best = candidate;
+                        bestBounds = bounds;
+                        bestScore = score;
+                    }
+
+                    if (!bestScore.HasVisibleCollision) {
+                        break;
+                    }
+                }
+            }
+
+            _placedLabels.Add(bestBounds);
+            bool adjusted = Math.Abs(best.X - seed.X) > 1e-9 || Math.Abs(best.Y - seed.Y) > 1e-9;
+            return new VisioRenderConnectorLabelPlacement(best.X, best.Y, seed.Width, seed.Height, adjusted);
+        }
+
+        private LabelPlacementSeed CreateSeed(VisioConnector connector, IReadOnlyList<(double X, double Y)> path) {
+            VisioConnectorLabelPlacement? placement = connector.LabelPlacement;
+            double width = Math.Max(0.6D, connector.TextStyle?.TextWidth ?? placement?.Width ?? 1.35D);
+            double height = Math.Max(0.18D, connector.TextStyle?.TextHeight ?? placement?.Height ?? 0.34D);
+            double locPinX = placement?.GetLocPinX() ?? width / 2D;
+            double locPinY = placement?.GetLocPinY() ?? height / 2D;
+
+            if (placement?.AbsolutePinX.HasValue == true && placement.AbsolutePinY.HasValue) {
+                return new LabelPlacementSeed(
+                    placement.AbsolutePinX.Value,
+                    placement.AbsolutePinY.Value,
+                    VisioConnectorLabelPlacement.ClampPosition(placement.Position),
+                    width,
+                    height,
+                    locPinX,
+                    locPinY,
+                    placement.OffsetX,
+                    placement.OffsetY);
+            }
+
+            double position = VisioConnectorLabelPlacement.ClampPosition(placement?.Position ?? 0.5D);
+            (double x, double y) = OfficeGeometry.InterpolatePolyline(path, position);
+            double offsetX = placement?.OffsetX ?? 0D;
+            double offsetY = placement?.OffsetY ?? 0D;
+            return new LabelPlacementSeed(x + offsetX, y + offsetY, position, width, height, locPinX, locPinY, offsetX, offsetY);
+        }
+
+        private IEnumerable<LabelCandidate> EnumerateCandidates(LabelPlacementSeed seed, IReadOnlyList<(double X, double Y)> path) {
+            yield return new LabelCandidate(seed.X, seed.Y, 0D, 0D);
+
+            for (int shift = 1; shift <= MaxPositionShifts; shift++) {
+                double delta = shift * PositionStep;
+                foreach (int direction in new[] { 1, -1 }) {
+                    double positionDelta = delta * direction;
+                    double position = VisioConnectorLabelPlacement.ClampPosition(seed.Position + positionDelta);
+                    (double x, double y) = OfficeGeometry.InterpolatePolyline(path, position);
+                    double candidateX = x + seed.OffsetX;
+                    double candidateY = y + seed.OffsetY;
+                    yield return new LabelCandidate(
+                        candidateX,
+                        candidateY,
+                        OfficeGeometry.Distance(candidateX, candidateY, seed.X, seed.Y),
+                        positionDelta);
+                }
+            }
+
+            for (int ring = 1; ring <= MaxSearchRings; ring++) {
+                double distance = ring * SearchStep;
+                yield return new LabelCandidate(seed.X, seed.Y + distance, distance, 0D);
+                yield return new LabelCandidate(seed.X, seed.Y - distance, distance, 0D);
+                yield return new LabelCandidate(seed.X + distance, seed.Y, distance, 0D);
+                yield return new LabelCandidate(seed.X - distance, seed.Y, distance, 0D);
+                yield return new LabelCandidate(seed.X + distance, seed.Y + distance, distance * Math.Sqrt(2D), 0D);
+                yield return new LabelCandidate(seed.X - distance, seed.Y + distance, distance * Math.Sqrt(2D), 0D);
+                yield return new LabelCandidate(seed.X + distance, seed.Y - distance, distance * Math.Sqrt(2D), 0D);
+                yield return new LabelCandidate(seed.X - distance, seed.Y - distance, distance * Math.Sqrt(2D), 0D);
+            }
+        }
+
+        private LabelScore Score(VisioConnector connector, VisioShapeBounds bounds, double distanceFromSeed, double positionDelta) {
+            double pageOverflow = OutsidePageAmount(bounds);
+            double shapeOverlap = 0D;
+            VisioShapeBounds shapeClearanceBounds = ExpandBounds(bounds, ShapeClearance);
+            foreach (VisioShape shape in _shapes) {
+                bool endpointShape = ReferenceEquals(shape, connector.From) || ReferenceEquals(shape, connector.To);
+
+                if (!endpointShape &&
+                    (shape.IsContainer || shape.IsBackgroundSurface || VisioSemanticUserCells.IsGeneratedDiagramAdornment(shape))) {
+                    continue;
+                }
+
+                VisioShapeBounds shapeBounds = _shapeBounds[shape];
+                if (!endpointShape && Contains(shapeBounds, bounds)) {
+                    continue;
+                }
+
+                double overlap = OverlapArea(shapeClearanceBounds, shapeBounds);
+                shapeOverlap += endpointShape ? overlap * EndpointShapeOverlapWeight : overlap;
+            }
+
+            double labelOverlap = 0D;
+            VisioShapeBounds labelClearanceBounds = ExpandBounds(bounds, LabelClearance);
+            foreach (VisioShapeBounds placed in _placedLabels) {
+                labelOverlap += OverlapArea(labelClearanceBounds, placed);
+            }
+
+            double connectorOverlap = 0D;
+            foreach (VisioConnector otherConnector in _page.Connectors) {
+                if (ReferenceEquals(otherConnector, connector) || !HasVisibleConnectorLine(otherConnector)) {
+                    continue;
+                }
+
+                if (!_connectorPaths.TryGetValue(otherConnector, out List<(double X, double Y)>? points) ||
+                    points.Count < 2) {
+                    continue;
+                }
+
+                VisioShapeBounds paddedBounds = ExpandBounds(bounds, Math.Max(otherConnector.LineWeight / 2D, 0.02D) + ConnectorLineClearance);
+                for (int i = 1; i < points.Count; i++) {
+                    if (SegmentIntersectsBounds(points[i - 1], points[i], paddedBounds)) {
+                        connectorOverlap += Math.Max(otherConnector.LineWeight, 0.01D);
+                    }
+                }
+            }
+
+            return new LabelScore(pageOverflow, shapeOverlap, labelOverlap, connectorOverlap, distanceFromSeed, positionDelta);
+        }
+
+        private double OutsidePageAmount(VisioShapeBounds bounds) {
+            if (bounds.IsEmpty) {
+                return 0D;
+            }
+
+            double left = Math.Max(0D, -bounds.Left);
+            double bottom = Math.Max(0D, -bounds.Bottom);
+            double right = Math.Max(0D, bounds.Right - _page.Width);
+            double top = Math.Max(0D, bounds.Top - _page.Height);
+            return left + bottom + right + top;
+        }
+
+        private static VisioShapeBounds GetBounds(double x, double y, double width, double height, double locPinX, double locPinY) =>
+            new VisioShapeBounds(x - locPinX, y - locPinY, x - locPinX + width, y - locPinY + height);
+
+        private static VisioShapeBounds ExpandBounds(VisioShapeBounds bounds, double padding) =>
+            new VisioShapeBounds(bounds.Left - padding, bounds.Bottom - padding, bounds.Right + padding, bounds.Top + padding);
+
+        private static bool SegmentIntersectsBounds((double X, double Y) first, (double X, double Y) second, VisioShapeBounds bounds) {
+            if (bounds.IsEmpty) {
+                return false;
+            }
+
+            return OfficeGeometry.SegmentIntersectsRectangle(
+                first,
+                second,
+                bounds.Left,
+                bounds.Bottom,
+                bounds.Right,
+                bounds.Top);
+        }
+
+        private static bool HasVisibleConnectorLine(VisioConnector connector) =>
+            connector.LinePattern != 0 && connector.LineWeight > 0D && connector.LineColor.A > 0;
+
+        private static List<(double X, double Y)> GetConnectorPoints(VisioConnector connector) {
+            ComputeConnectorEndpoints(connector, out double startX, out double startY, out double endX, out double endY);
+            List<(double X, double Y)> waypoints = new(connector.Waypoints.Count);
+            if (connector.Waypoints.Count > 0) {
+                foreach (VisioConnectorWaypoint waypoint in connector.Waypoints) {
+                    waypoints.Add((waypoint.X, waypoint.Y));
+                }
+            }
+
+            return OfficeGeometry.BuildConnectorPolyline(
+                (startX, startY),
+                (endX, endY),
+                waypoints,
+                connector.Kind == ConnectorKind.RightAngle);
+        }
+
+        private static void ComputeConnectorEndpoints(VisioConnector connector, out double startX, out double startY, out double endX, out double endY) {
+            if (connector.FromConnectionPoint != null) {
+                (startX, startY) = GetPagePoint(connector.From, connector.FromConnectionPoint.X, connector.FromConnectionPoint.Y);
+            } else {
+                (double fromLeft, double fromBottom, double fromRight, double fromTop) = GetPageBounds(connector.From);
+                (double toLeft, double toBottom, double toRight, double toTop) = GetPageBounds(connector.To);
+                ResolveFallbackEndpoint(fromLeft, fromBottom, fromRight, fromTop, toLeft, toBottom, toRight, toTop, out startX, out startY);
+            }
+
+            if (connector.ToConnectionPoint != null) {
+                (endX, endY) = GetPagePoint(connector.To, connector.ToConnectionPoint.X, connector.ToConnectionPoint.Y);
+            } else {
+                (double toLeft, double toBottom, double toRight, double toTop) = GetPageBounds(connector.To);
+                (double fromLeft, double fromBottom, double fromRight, double fromTop) = GetPageBounds(connector.From);
+                ResolveFallbackEndpoint(toLeft, toBottom, toRight, toTop, fromLeft, fromBottom, fromRight, fromTop, out endX, out endY);
+            }
+        }
+
+        private static (double X, double Y) GetPagePoint(VisioShape shape, double x, double y) {
+            (double absX, double absY) = shape.GetAbsolutePoint(x, y);
+            return shape.Parent != null
+                ? GetPagePoint(shape.Parent, absX, absY)
+                : (absX, absY);
+        }
+
+        private static (double Left, double Bottom, double Right, double Top) GetPageBounds(VisioShape shape) {
+            (double x1, double y1) = GetPagePoint(shape, 0, 0);
+            (double x2, double y2) = GetPagePoint(shape, shape.Width, 0);
+            (double x3, double y3) = GetPagePoint(shape, 0, shape.Height);
+            (double x4, double y4) = GetPagePoint(shape, shape.Width, shape.Height);
+            double left = Math.Min(Math.Min(x1, x2), Math.Min(x3, x4));
+            double right = Math.Max(Math.Max(x1, x2), Math.Max(x3, x4));
+            double bottom = Math.Min(Math.Min(y1, y2), Math.Min(y3, y4));
+            double top = Math.Max(Math.Max(y1, y2), Math.Max(y3, y4));
+            return (left, bottom, right, top);
+        }
+
+        private static VisioShapeBounds GetPageShapeBounds(VisioShape shape) {
+            (double left, double bottom, double right, double top) = GetPageBounds(shape);
+            return new VisioShapeBounds(left, bottom, right, top);
+        }
+
+        private static void ResolveFallbackEndpoint(
+            double sourceLeft,
+            double sourceBottom,
+            double sourceRight,
+            double sourceTop,
+            double targetLeft,
+            double targetBottom,
+            double targetRight,
+            double targetTop,
+            out double x,
+            out double y) {
+            OfficeGeometry.ResolveRectangleBoundaryEndpoint(
+                sourceLeft,
+                sourceBottom,
+                sourceRight,
+                sourceTop,
+                targetLeft,
+                targetBottom,
+                targetRight,
+                targetTop,
+                out x,
+                out y);
+        }
+
+        private static bool Contains(VisioShapeBounds outer, VisioShapeBounds inner) {
+            const double tolerance = 1e-6;
+            return outer.Left <= inner.Left + tolerance &&
+                   outer.Bottom <= inner.Bottom + tolerance &&
+                   outer.Right + tolerance >= inner.Right &&
+                   outer.Top + tolerance >= inner.Top;
+        }
+
+        private static double OverlapArea(VisioShapeBounds first, VisioShapeBounds second) {
+            if (first.IsEmpty || second.IsEmpty) {
+                return 0D;
+            }
+
+            double width = Math.Max(0D, Math.Min(first.Right, second.Right) - Math.Max(first.Left, second.Left));
+            double height = Math.Max(0D, Math.Min(first.Top, second.Top) - Math.Max(first.Bottom, second.Bottom));
+            return width * height;
+        }
+
+        private readonly struct LabelPlacementSeed {
+            public LabelPlacementSeed(double x, double y, double position, double width, double height, double locPinX, double locPinY, double offsetX, double offsetY) {
+                X = x;
+                Y = y;
+                Position = position;
+                Width = width;
+                Height = height;
+                LocPinX = locPinX;
+                LocPinY = locPinY;
+                OffsetX = offsetX;
+                OffsetY = offsetY;
+            }
+
+            public double X { get; }
+
+            public double Y { get; }
+
+            public double Position { get; }
+
+            public double Width { get; }
+
+            public double Height { get; }
+
+            public double LocPinX { get; }
+
+            public double LocPinY { get; }
+
+            public double OffsetX { get; }
+
+            public double OffsetY { get; }
+        }
+
+        private readonly struct LabelCandidate {
+            public LabelCandidate(double x, double y, double distanceFromSeed, double positionDelta) {
+                X = x;
+                Y = y;
+                DistanceFromSeed = distanceFromSeed;
+                PositionDelta = positionDelta;
+            }
+
+            public double X { get; }
+
+            public double Y { get; }
+
+            public double DistanceFromSeed { get; }
+
+            public double PositionDelta { get; }
+        }
+
+        private readonly struct LabelScore {
+            public LabelScore(double pageOverflow, double shapeOverlap, double labelOverlap, double connectorOverlap, double distanceFromSeed, double positionDelta) {
+                PageOverflow = pageOverflow;
+                ShapeOverlap = shapeOverlap;
+                LabelOverlap = labelOverlap;
+                ConnectorOverlap = connectorOverlap;
+                DistanceFromSeed = distanceFromSeed;
+                PositionDelta = positionDelta;
+            }
+
+            private double PageOverflow { get; }
+
+            private double ShapeOverlap { get; }
+
+            private double LabelOverlap { get; }
+
+            private double ConnectorOverlap { get; }
+
+            private double DistanceFromSeed { get; }
+
+            private double PositionDelta { get; }
+
+            public bool HasVisibleCollision => PageOverflow > 1e-6 || ShapeOverlap > 1e-6 || LabelOverlap > 1e-6 || ConnectorOverlap > 1e-6;
+
+            public bool IsBetterThan(LabelScore other) {
+                int collision = Compare(CollisionPenalty, other.CollisionPenalty);
+                if (collision != 0) {
+                    return collision < 0;
+                }
+
+                int distance = Compare(DistanceFromSeed, other.DistanceFromSeed);
+                if (distance != 0) {
+                    return distance < 0;
+                }
+
+                return Compare(PositionDelta, other.PositionDelta) < 0;
+            }
+
+            private double CollisionPenalty => (PageOverflow * 200D) + (ShapeOverlap * 800D) + (LabelOverlap * 1000D) + (ConnectorOverlap * 1200D);
+
+            private static int Compare(double first, double second) {
+                if (Math.Abs(first - second) < 1e-9) {
+                    return 0;
+                }
+
+                return first < second ? -1 : 1;
+            }
+        }
+    }
+
+    internal readonly struct VisioRenderConnectorLabelPlacement {
+        public VisioRenderConnectorLabelPlacement(double x, double y, double width, double height, bool adjusted) {
+            X = x;
+            Y = y;
+            Width = width;
+            Height = height;
+            Adjusted = adjusted;
+        }
+
+        public double X { get; }
+
+        public double Y { get; }
+
+        public double Width { get; }
+
+        public double Height { get; }
+
+        public bool Adjusted { get; }
+    }
+}

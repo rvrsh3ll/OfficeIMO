@@ -1,8 +1,13 @@
-using System.Linq;
 using DocumentFormat.OpenXml.Wordprocessing;
 
 namespace OfficeIMO.Word {
+    /// <summary>
+    /// Provides accessors for paragraph formatting.
+    /// </summary>
     public partial class WordParagraph {
+        /// <summary>
+        /// Provides access to the borders applied to this paragraph.
+        /// </summary>
         public WordParagraphBorders Borders {
             get {
                 return new WordParagraphBorders(_document, this);
@@ -10,22 +15,34 @@ namespace OfficeIMO.Word {
         }
 
         /// <summary>
+        /// Gets the identifier of the paragraph style, if any.
+        /// </summary>
+        public string? StyleId {
+            get {
+                if (_paragraphProperties != null && _paragraphProperties.ParagraphStyleId != null) {
+                    return _paragraphProperties.ParagraphStyleId.Val;
+                }
+                return null;
+            }
+        }
+
+        /// <summary>
         /// Alignment aka Paragraph Alignment. This element specifies the paragraph alignment which shall be applied to text in this paragraph.
         /// If this element is omitted on a given paragraph, its value is determined by the setting previously set at any level of the style hierarchy (i.e.that previous setting remains unchanged). If this setting is never specified in the style hierarchy, then no alignment is applied to the paragraph.
         /// </summary>
-        public JustificationValues? ParagraphAlignment {
+        public WordParagraphAlignment? ParagraphAlignment {
             get {
                 if (_paragraphProperties != null)
                     if (_paragraphProperties.Justification != null)
-                        return _paragraphProperties.Justification.Val;
+                        return _paragraphProperties.Justification.Val?.Value.ToOfficeEnum();
                 return null;
             }
             set {
                 if (_paragraphProperties == null) {
                     _paragraph.ParagraphProperties = new ParagraphProperties();
                 }
-                _paragraphProperties.Justification = new Justification {
-                    Val = value
+                _paragraph.ParagraphProperties!.Justification = new Justification {
+                    Val = value?.ToOpenXml()
                 };
             }
         }
@@ -34,46 +51,41 @@ namespace OfficeIMO.Word {
         /// Text Alignment aka Vertical Character Alignment on Line. This element specifies the vertical alignment of all text on each line displayed within a paragraph. If the line height (before any added spacing) is larger than one or more characters on the line, all characters are aligned to each other as specified by this element.
         /// If this element is omitted on a given paragraph, its value is determined by the setting previously set at any level of the style hierarchy (i.e.that previous setting remains unchanged). If this setting is never specified in the style hierarchy, then the vertical alignment of all characters on the line shall be automatically determined by the consumer.
         /// </summary>
-        public VerticalTextAlignmentValues? VerticalCharacterAlignmentOnLine {
+        public WordVerticalCharacterAlignment? VerticalCharacterAlignmentOnLine {
             get {
                 if (_paragraphProperties != null)
                     if (_paragraphProperties.TextAlignment != null)
-                        return _paragraphProperties.TextAlignment.Val;
+                        return _paragraphProperties.TextAlignment.Val?.Value.ToOfficeEnum();
                 return null;
             }
             set {
-                DocumentFormat.OpenXml.Wordprocessing.TextAlignment textAlignment = new TextAlignment();
-                textAlignment.Val = value;
+                var textAlignment = new TextAlignment();
+                textAlignment.Val = value?.ToOpenXml();
                 if (_paragraphProperties == null) {
                     _paragraph.ParagraphProperties = new ParagraphProperties();
                 }
-                _paragraphProperties.TextAlignment = textAlignment;
+                _paragraph.ParagraphProperties!.TextAlignment = textAlignment;
             }
         }
-
+        /// <summary>
+        /// Gets or sets the indentation before the paragraph in twips (1/20 of a point).
+        /// </summary>
         public int? IndentationBefore {
             get {
                 if (_paragraphProperties != null && _paragraphProperties.Indentation != null) {
-                    //new Indentation() { Left = "720", Right = "0", FirstLine = "0" };
-                    if (_paragraphProperties.Indentation.Left != "") {
-                        return int.Parse(_paragraphProperties.Indentation.Left);
-                    } else {
-                        return null;
+                    if (!string.IsNullOrEmpty(_paragraphProperties.Indentation.Left)) {
+                        if (int.TryParse(_paragraphProperties.Indentation.Left, out var left)) {
+                            return left;
+                        }
                     }
-                } else {
-                    return null;
                 }
+                return null;
             }
             set {
-                Indentation indentation;
-                if (_paragraphProperties.Indentation == null) {
-                    indentation = new Indentation();
-                } else {
-                    indentation = _paragraphProperties.Indentation;
-                }
-
-                indentation.Left = value.ToString();
-                _paragraphProperties.Indentation = indentation;
+                var props = _paragraph.ParagraphProperties ??= new ParagraphProperties();
+                var indentation = props.Indentation ?? new Indentation();
+                indentation.Left = value?.ToString();
+                props.Indentation = indentation;
             }
         }
 
@@ -93,30 +105,25 @@ namespace OfficeIMO.Word {
                 }
             }
         }
-
+        /// <summary>
+        /// Gets or sets the indentation after the paragraph in twips (1/20 of a point).
+        /// </summary>
         public int? IndentationAfter {
             get {
                 if (_paragraphProperties != null && _paragraphProperties.Indentation != null) {
-                    //new Indentation() { Left = "720", Right = "0", FirstLine = "0" };
-                    if (_paragraphProperties.Indentation.Right != "") {
-                        return int.Parse(_paragraphProperties.Indentation.Right);
-                    } else {
-                        return null;
+                    if (!string.IsNullOrEmpty(_paragraphProperties.Indentation.Right)) {
+                        if (int.TryParse(_paragraphProperties.Indentation.Right, out var right)) {
+                            return right;
+                        }
                     }
-                } else {
-                    return null;
                 }
+                return null;
             }
             set {
-                Indentation indentation;
-                if (_paragraphProperties.Indentation == null) {
-                    indentation = new Indentation();
-                } else {
-                    indentation = _paragraphProperties.Indentation;
-                }
-
-                indentation.Right = value.ToString();
-                _paragraphProperties.Indentation = indentation;
+                var props = _paragraph.ParagraphProperties ??= new ParagraphProperties();
+                var indentation = props.Indentation ?? new Indentation();
+                indentation.Right = value?.ToString();
+                props.Indentation = indentation;
             }
         }
 
@@ -146,37 +153,88 @@ namespace OfficeIMO.Word {
                 return _paragraphProperties != null && _paragraphProperties.PageBreakBefore is not null;
             }
             set {
+                var props = _paragraph.ParagraphProperties ??= new ParagraphProperties();
                 if (value == true) {
-                    var pageBreakBefore = new PageBreakBefore();
-                    _paragraphProperties.PageBreakBefore = pageBreakBefore;
+                    props.PageBreakBefore = new PageBreakBefore();
                 } else {
-                    _paragraphProperties.PageBreakBefore = null;
+                    props.PageBreakBefore = null;
                 }
             }
         }
 
+        /// <summary>
+        /// Keeps this paragraph on the same page as the following paragraph.
+        /// </summary>
+        public bool KeepWithNext {
+            get {
+                return _paragraphProperties != null && _paragraphProperties.KeepNext is not null;
+            }
+            set {
+                var props = _paragraph.ParagraphProperties ??= new ParagraphProperties();
+                if (value) {
+                    props.KeepNext ??= new KeepNext();
+                } else {
+                    props.KeepNext?.Remove();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Keeps all lines in this paragraph together on the same page.
+        /// </summary>
+        public bool KeepLinesTogether {
+            get {
+                return _paragraphProperties != null && _paragraphProperties.KeepLines is not null;
+            }
+            set {
+                var props = _paragraph.ParagraphProperties ??= new ParagraphProperties();
+                if (value) {
+                    props.KeepLines ??= new KeepLines();
+                } else {
+                    props.KeepLines?.Remove();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Enables widow and orphan control for this paragraph.
+        /// </summary>
+        public bool AvoidWidowAndOrphan {
+            get {
+                WidowControl? widowControl = _paragraphProperties?.WidowControl;
+                return widowControl?.Val?.Value ?? widowControl is not null;
+            }
+            set {
+                var props = _paragraph.ParagraphProperties ??= new ParagraphProperties();
+                if (value) {
+                    props.WidowControl ??= new WidowControl();
+                    props.WidowControl.Val = null;
+                } else {
+                    props.WidowControl = new WidowControl {
+                        Val = false
+                    };
+                }
+            }
+        }
+        /// <summary>
+        /// Gets or sets the first line indentation in twips (1/20 of a point).
+        /// </summary>
         public int? IndentationFirstLine {
             get {
                 if (_paragraphProperties != null && _paragraphProperties.Indentation != null) {
-                    if (_paragraphProperties.Indentation.FirstLine != "") {
-                        return int.Parse(_paragraphProperties.Indentation.FirstLine);
-                    } else {
-                        return null;
+                    if (!string.IsNullOrEmpty(_paragraphProperties.Indentation.FirstLine)) {
+                        if (int.TryParse(_paragraphProperties.Indentation.FirstLine, out var firstLine)) {
+                            return firstLine;
+                        }
                     }
-                } else {
-                    return null;
                 }
+                return null;
             }
             set {
-                Indentation indentation;
-                if (_paragraphProperties.Indentation == null) {
-                    indentation = new Indentation();
-                } else {
-                    indentation = _paragraphProperties.Indentation;
-                }
-
-                indentation.FirstLine = value.ToString();
-                _paragraphProperties.Indentation = indentation;
+                var props = _paragraph.ParagraphProperties ??= new ParagraphProperties();
+                var indentation = props.Indentation ?? new Indentation();
+                indentation.FirstLine = value?.ToString();
+                props.Indentation = indentation;
             }
         }
 
@@ -196,30 +254,25 @@ namespace OfficeIMO.Word {
                 }
             }
         }
-
+        /// <summary>
+        /// Gets or sets the hanging indentation in twips (1/20 of a point).
+        /// </summary>
         public int? IndentationHanging {
             get {
                 if (_paragraphProperties != null && _paragraphProperties.Indentation != null) {
-                    //new Indentation() { Left = "720", Right = "0", FirstLine = "0" };
-                    if (_paragraphProperties.Indentation.Hanging != "") {
-                        return int.Parse(_paragraphProperties.Indentation.Hanging);
-                    } else {
-                        return null;
+                    if (!string.IsNullOrEmpty(_paragraphProperties.Indentation.Hanging)) {
+                        if (int.TryParse(_paragraphProperties.Indentation.Hanging, out var hanging)) {
+                            return hanging;
+                        }
                     }
-                } else {
-                    return null;
                 }
+                return null;
             }
             set {
-                Indentation indentation;
-                if (_paragraphProperties.Indentation == null) {
-                    indentation = new Indentation();
-                } else {
-                    indentation = _paragraphProperties.Indentation;
-                }
-
-                indentation.Hanging = value.ToString();
-                _paragraphProperties.Indentation = indentation;
+                var props = _paragraph.ParagraphProperties ??= new ParagraphProperties();
+                var indentation = props.Indentation ?? new Indentation();
+                indentation.Hanging = value?.ToString();
+                props.Indentation = indentation;
             }
         }
 
@@ -239,153 +292,209 @@ namespace OfficeIMO.Word {
                 }
             }
         }
-
-        public TextDirectionValues? TextDirection {
-            // TODO: probably needs calculated values instead of just values
-            //https://startbigthinksmall.wordpress.com/2010/01/04/points-inches-and-emus-measuring-units-in-office-open-xml/
+        /// <summary>
+        /// Gets or sets the text flow direction for the paragraph.
+        /// </summary>
+        public WordTextDirection? TextDirection {
             get {
                 if (_paragraphProperties != null && _paragraphProperties.TextDirection != null) {
-                    if (_paragraphProperties.TextDirection != null) {
-                        return _paragraphProperties.TextDirection.Val;
-                    } else {
-                        return null;
-                    }
-                } else {
-                    return null;
+                    return _paragraphProperties.TextDirection.Val?.Value.ToOfficeEnum();
                 }
+                return null;
             }
             set {
-                TextDirection textDirection = new TextDirection();
-                textDirection.Val = value;
-                _paragraphProperties.TextDirection = textDirection;
+                var textDirection = new TextDirection { Val = value?.ToOpenXml() };
+                if (_paragraphProperties == null) {
+                    _paragraph.ParagraphProperties = new ParagraphProperties();
+                }
+                _paragraph.ParagraphProperties!.TextDirection = textDirection;
             }
         }
 
-        public LineSpacingRuleValues? LineSpacingRule {
+        /// <summary>
+        /// Indicates that paragraph text should be displayed from right to left.
+        /// </summary>
+        public bool BiDi {
+            get {
+                return _paragraphProperties != null && _paragraphProperties.BiDi is not null;
+            }
+            set {
+                if (_paragraphProperties == null) {
+                    _paragraph.ParagraphProperties = new ParagraphProperties();
+                }
+
+                var paragraphProps = _paragraph.ParagraphProperties!;
+
+                if (value) {
+                    paragraphProps.BiDi ??= new BiDi();
+                } else {
+                    paragraphProps.BiDi?.Remove();
+                }
+            }
+        }
+        /// <summary>
+        /// Gets or sets the rule used to calculate line spacing for the paragraph.
+        /// </summary>
+        public WordLineSpacingRule? LineSpacingRule {
             get {
                 if (_paragraphProperties != null && _paragraphProperties.SpacingBetweenLines != null) {
                     if (_paragraphProperties.SpacingBetweenLines.LineRule != null) {
-                        return _paragraphProperties.SpacingBetweenLines.LineRule;
-                    } else {
-                        return null;
+                        return _paragraphProperties.SpacingBetweenLines.LineRule.Value.ToOfficeEnum();
                     }
-                } else {
-                    return null;
                 }
+                return null;
             }
             set {
-                SpacingBetweenLines spacing;
-                if (_paragraphProperties.SpacingBetweenLines == null) {
-                    spacing = new SpacingBetweenLines();
-                } else {
-                    spacing = _paragraphProperties.SpacingBetweenLines;
-                }
-                spacing.LineRule = value;
-                _paragraphProperties.SpacingBetweenLines = spacing;
+                var props = _paragraph.ParagraphProperties ??= new ParagraphProperties();
+                var spacing = props.SpacingBetweenLines ?? new SpacingBetweenLines();
+                spacing.LineRule = value?.ToOpenXml();
+                props.SpacingBetweenLines = spacing;
             }
         }
-
+        /// <summary>
+        /// Gets or sets the line spacing for the paragraph in twips (1/20 of a point).
+        /// </summary>
         public int? LineSpacing {
-            // TODO: probably needs calculated values instead of just values
-            //https://startbigthinksmall.wordpress.com/2010/01/04/points-inches-and-emus-measuring-units-in-office-open-xml/
             get {
                 if (_paragraphProperties != null && _paragraphProperties.SpacingBetweenLines != null) {
-                    if (_paragraphProperties.SpacingBetweenLines.Line != "") {
-                        return int.Parse(_paragraphProperties.SpacingBetweenLines.Line);
-                    } else {
-                        return null;
+                    if (!string.IsNullOrEmpty(_paragraphProperties.SpacingBetweenLines.Line)) {
+                        if (int.TryParse(_paragraphProperties.SpacingBetweenLines.Line, out var line)) {
+                            return line;
+                        }
                     }
-                } else {
-                    return null;
                 }
+                return null;
             }
             set {
-                SpacingBetweenLines spacing;
-                if (_paragraphProperties.SpacingBetweenLines == null) {
-                    spacing = new SpacingBetweenLines();
-                } else {
-                    spacing = _paragraphProperties.SpacingBetweenLines;
-                }
-
-                spacing.Line = value.ToString();
-                _paragraphProperties.SpacingBetweenLines = spacing;
+                var props = _paragraph.ParagraphProperties ??= new ParagraphProperties();
+                var spacing = props.SpacingBetweenLines ?? new SpacingBetweenLines();
+                spacing.Line = value?.ToString();
+                props.SpacingBetweenLines = spacing;
             }
         }
 
+        /// <summary>
+        /// Gets or sets the line spacing in points.
+        /// </summary>
+        public double? LineSpacingPoints {
+            get {
+                if (LineSpacing != null) {
+                    return Helpers.ConvertTwipsToPoints(LineSpacing.Value);
+                }
+                return null;
+            }
+            set {
+                if (value != null) {
+                    LineSpacing = Helpers.ConvertPointsToTwips(value.Value);
+                }
+            }
+        }
+        /// <summary>
+        /// Gets or sets the spacing before the paragraph in twips (1/20 of a point).
+        /// </summary>
         public int? LineSpacingBefore {
-            // TODO: probably needs calculated values instead of just values
-            //https://startbigthinksmall.wordpress.com/2010/01/04/points-inches-and-emus-measuring-units-in-office-open-xml/
             get {
                 if (_paragraphProperties != null && _paragraphProperties.SpacingBetweenLines != null) {
-                    //new Indentation() { Left = "720", Right = "0", FirstLine = "0" };
-                    if (_paragraphProperties.SpacingBetweenLines.Before != "") {
-                        return int.Parse(_paragraphProperties.SpacingBetweenLines.Before);
-                    } else {
-                        return null;
+                    if (!string.IsNullOrEmpty(_paragraphProperties.SpacingBetweenLines.Before)) {
+                        if (int.TryParse(_paragraphProperties.SpacingBetweenLines.Before, out var before)) {
+                            return before;
+                        }
                     }
-                } else {
-                    return null;
                 }
+                return null;
             }
             set {
-                SpacingBetweenLines spacing;
-                if (_paragraphProperties.SpacingBetweenLines == null) {
-                    spacing = new SpacingBetweenLines();
-                } else {
-                    spacing = _paragraphProperties.SpacingBetweenLines;
-                }
-
-                spacing.Before = value.ToString();
-                _paragraphProperties.SpacingBetweenLines = spacing;
+                var props = _paragraph.ParagraphProperties ??= new ParagraphProperties();
+                var spacing = props.SpacingBetweenLines ?? new SpacingBetweenLines();
+                spacing.Before = value?.ToString();
+                props.SpacingBetweenLines = spacing;
             }
         }
 
-        public int? LineSpacingAfter {
-            // TODO: probably needs calculated values instead of just values
-            //https://startbigthinksmall.wordpress.com/2010/01/04/points-inches-and-emus-measuring-units-in-office-open-xml/
+        /// <summary>
+        /// Gets or sets the line spacing before in points.
+        /// </summary>
+        public double? LineSpacingBeforePoints {
             get {
-                if (_paragraphProperties != null && _paragraphProperties.SpacingBetweenLines != null) {
-                    if (_paragraphProperties.SpacingBetweenLines.After != "") {
-                        return int.Parse(_paragraphProperties.SpacingBetweenLines.After);
-                    } else {
-                        return null;
-                    }
-                } else {
-                    return null;
+                if (LineSpacingBefore != null) {
+                    return Helpers.ConvertTwipsToPoints(LineSpacingBefore.Value);
                 }
+                return null;
             }
             set {
-                SpacingBetweenLines spacing;
-                if (_paragraphProperties.SpacingBetweenLines == null) {
-                    spacing = new SpacingBetweenLines();
-                } else {
-                    spacing = _paragraphProperties.SpacingBetweenLines;
+                if (value != null) {
+                    LineSpacingBefore = Helpers.ConvertPointsToTwips(value.Value);
                 }
+            }
+        }
+        /// <summary>
+        /// Gets or sets the spacing after the paragraph in twips (1/20 of a point).
+        /// </summary>
+        public int? LineSpacingAfter {
+            get {
+                if (_paragraphProperties != null && _paragraphProperties.SpacingBetweenLines != null) {
+                    if (!string.IsNullOrEmpty(_paragraphProperties.SpacingBetweenLines.After)) {
+                        if (int.TryParse(_paragraphProperties.SpacingBetweenLines.After, out var after)) {
+                            return after;
+                        }
+                    }
+                }
+                return null;
+            }
+            set {
+                var props = _paragraph.ParagraphProperties ??= new ParagraphProperties();
+                var spacing = props.SpacingBetweenLines ?? new SpacingBetweenLines();
+                spacing.After = value?.ToString();
+                props.SpacingBetweenLines = spacing;
+            }
+        }
 
-                spacing.After = value.ToString();
-                _paragraphProperties.SpacingBetweenLines = spacing;
+        /// <summary>
+        /// Gets or sets the line spacing after in points.
+        /// </summary>
+        public double? LineSpacingAfterPoints {
+            get {
+                if (LineSpacingAfter != null) {
+                    return Helpers.ConvertTwipsToPoints(LineSpacingAfter.Value);
+                }
+                return null;
+            }
+            set {
+                if (value != null) {
+                    LineSpacingAfter = Helpers.ConvertPointsToTwips(value.Value);
+                }
             }
         }
 
         /// <summary>
         /// Gets or sets the vertical text alignment - the alignment of the text in the paragraph with respect to the line height.
         /// </summary>
-        public VerticalPositionValues? VerticalTextAlignment {
+        public WordVerticalTextPosition? VerticalTextAlignment {
             get {
-                if (_runProperties != null && _runProperties.VerticalTextAlignment != null) {
-                    return _runProperties.VerticalTextAlignment.Val;
+                RunProperties? runProperties = IsHyperLink ? Hyperlink?._runProperties : _runProperties;
+                if (runProperties?.VerticalTextAlignment != null) {
+                    return runProperties.VerticalTextAlignment.Val?.Value.ToOfficeEnum();
                 }
                 return null;
             }
             set {
-                _runProperties ??= new RunProperties();
+                RunProperties? runProperties = IsHyperLink ? Hyperlink?._runProperties : _runProperties;
                 if (value == null) {
-                    if (_runProperties.VerticalTextAlignment == null) {
+                    if (runProperties?.VerticalTextAlignment == null) {
                         return;
                     }
-                    _runProperties.VerticalTextAlignment = null;
+                    runProperties.VerticalTextAlignment = null;
                 } else {
-                    _runProperties.VerticalTextAlignment = new VerticalTextAlignment { Val = value };
+                    if (IsHyperLink) {
+                        WordHyperLink hyperlink = Hyperlink!;
+                        runProperties = VerifyRunProperties(
+                            hyperlink._hyperlink!,
+                            hyperlink._run!,
+                            hyperlink._runProperties);
+                    } else {
+                        runProperties = VerifyRunProperties();
+                    }
+                    runProperties.VerticalTextAlignment = new VerticalTextAlignment { Val = value.Value.ToOpenXml() };
                 }
             }
         }

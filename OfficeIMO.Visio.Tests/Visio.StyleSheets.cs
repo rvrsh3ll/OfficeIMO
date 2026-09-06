@@ -1,0 +1,61 @@
+using System;
+using System.IO;
+using System.IO.Packaging;
+using System.Linq;
+using System.Xml.Linq;
+using OfficeIMO.Visio;
+using Xunit;
+
+namespace OfficeIMO.Tests {
+    public class VisioStyleSheets {
+        [Fact]
+        public void DocumentDefinesAndReferencesStyles() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx");
+
+            VisioDocument document = VisioDocument.Create(filePath);
+            VisioPage page = document.AddPage("Page-1");
+            VisioShape start = new("1", 1, 1, 2, 1, "Start");
+            VisioShape end = new("2", 4, 1, 2, 1, "End");
+            page.Shapes.Add(start);
+            page.Shapes.Add(end);
+            page.Connectors.Add(new VisioConnector(start, end));
+            document.Save();
+
+            using Package package = Package.Open(filePath, FileMode.Open, FileAccess.Read);
+            PackagePart docPart = package.GetPart(new Uri("/visio/document.xml", UriKind.Relative));
+            XDocument docXml = XDocument.Load(docPart.GetStream());
+            XNamespace ns = "http://schemas.microsoft.com/office/visio/2012/main";
+            XElement styleSheets = docXml.Root!.Element(ns + "StyleSheets")!;
+
+            XElement baseStyle = styleSheets.Elements(ns + "StyleSheet").First(e => e.Attribute("ID")?.Value == "0");
+            Assert.Equal("No Style", baseStyle.Attribute("NameU")?.Value);
+            Assert.Equal("1", baseStyle.Elements(ns + "Cell").First(c => c.Attribute("N")?.Value == "EnableLineProps").Attribute("V")?.Value);
+            Assert.Equal("1", baseStyle.Elements(ns + "Cell").First(c => c.Attribute("N")?.Value == "EnableFillProps").Attribute("V")?.Value);
+            Assert.Equal("1", baseStyle.Elements(ns + "Cell").First(c => c.Attribute("N")?.Value == "EnableTextProps").Attribute("V")?.Value);
+
+            XElement normal = styleSheets.Elements(ns + "StyleSheet").First(e => e.Attribute("ID")?.Value == "1");
+            Assert.Equal("0", normal.Attribute("BasedOn")?.Value);
+            Assert.Equal("Normal", normal.Attribute("NameU")?.Value);
+            Assert.Equal("1", normal.Elements(ns + "Cell").First(c => c.Attribute("N")?.Value == "LinePattern").Attribute("V")?.Value);
+            Assert.Equal("#000000", normal.Elements(ns + "Cell").First(c => c.Attribute("N")?.Value == "LineColor").Attribute("V")?.Value);
+            Assert.Equal("1", normal.Elements(ns + "Cell").First(c => c.Attribute("N")?.Value == "FillPattern").Attribute("V")?.Value);
+            Assert.Equal("#FFFFFF", normal.Elements(ns + "Cell").First(c => c.Attribute("N")?.Value == "FillForegnd").Attribute("V")?.Value);
+
+            XElement connectorStyle = styleSheets.Elements(ns + "StyleSheet").First(e => e.Attribute("ID")?.Value == "2");
+            Assert.Equal("1", connectorStyle.Attribute("BasedOn")?.Value);
+            Assert.Equal("0", connectorStyle.Elements(ns + "Cell").First(c => c.Attribute("N")?.Value == "EndArrow").Attribute("V")?.Value);
+
+            PackagePart pagePart = package.GetPart(new Uri("/visio/pages/page1.xml", UriKind.Relative));
+            XDocument pageXml = XDocument.Load(pagePart.GetStream());
+            XElement shapesRoot = pageXml.Root!.Element(ns + "Shapes")!;
+            XElement shapeXml = shapesRoot.Elements(ns + "Shape").First(e => e.Attribute("ID")?.Value == "1");
+            Assert.Equal("0", shapeXml.Attribute("LineStyle")?.Value);
+            Assert.Equal("0", shapeXml.Attribute("FillStyle")?.Value);
+            Assert.Equal("0", shapeXml.Attribute("TextStyle")?.Value);
+            XElement connectorXml = shapesRoot.Elements(ns + "Shape").First(e => e.Attribute("NameU")?.Value == "Connector");
+            Assert.Equal("0", connectorXml.Attribute("LineStyle")?.Value);
+            Assert.Equal("0", connectorXml.Attribute("FillStyle")?.Value);
+            Assert.Equal("0", connectorXml.Attribute("TextStyle")?.Value);
+        }
+    }
+}

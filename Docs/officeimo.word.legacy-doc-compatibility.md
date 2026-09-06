@@ -1,0 +1,118 @@
+# DOC and DOCX compatibility
+
+OfficeIMO.Word provides first-party, dependency-free support for Office Open XML `.docx` and the supported Word 97-2003 binary `.doc` subset. Microsoft Word, COM automation, LibreOffice, and third-party conversion libraries are not used at runtime.
+
+This document is the current capability contract.
+
+## Normal API
+
+Use the same `WordDocument` surface for both formats:
+
+```csharp
+using OfficeIMO.Word;
+
+using WordDocument document = WordDocument.Load("input.doc");
+Console.WriteLine(document.SourceFormat); // WordFileFormat.Doc
+
+document.Save("output.docx");
+document.Save("copy.doc", new WordSaveOptions {
+    LossPolicy = OfficeConversionLossPolicy.Allow
+});
+
+byte[] docx = document.ToBytes();
+byte[] doc = document.ToBytes(WordFileFormat.Doc);
+```
+
+For an independent copy that does not change the current document association, use `SaveCopy`. For a writable stream, call `Save(stream, WordFileFormat.Docx)` or `Save(stream, WordFileFormat.Doc)`.
+
+For a file-to-file conversion with a structured result:
+
+```csharp
+WordDocumentConversionResult result = WordDocument.Convert(
+    "input.doc",
+    "output.docx",
+    new WordDocumentConversionOptions {
+        FileConflictPolicy = OfficeConversionFileConflictPolicy.FailIfExists,
+        LossPolicy = OfficeConversionLossPolicy.Block
+    });
+
+foreach (OfficeConversionDiagnostic diagnostic in result.Diagnostics) {
+    Console.WriteLine($"{diagnostic.Code}: {diagnostic.Message}");
+}
+```
+
+The defaults are intentionally conservative:
+
+- content, not only the extension, determines the source format;
+- same-format conversion is rejected;
+- an existing destination is not replaced unless `Replace` is selected, and a read-only destination is never replaced;
+- known conversion loss blocks conversion and normal saves;
+- output is staged and committed atomically, so a failed save does not expose a partial file;
+- cross-family OLE input, such as XLS passed to Word, is rejected with a format-specific error.
+
+Set `LossPolicy = OfficeConversionLossPolicy.Allow` only after reviewing the reported legacy features. The policy is available on both `WordDocumentConversionOptions` and `WordSaveOptions`.
+
+## DOC import capability
+
+The DOC reader projects supported content into the normal OfficeIMO Word model. Current covered families include:
+
+| Family | DOC to DOCX behavior |
+|---|---|
+| Paragraphs, runs, tabs, line/page/column breaks | Projected |
+| Common character and paragraph formatting | Projected |
+| Built-in and custom paragraph styles | Projected |
+| Simple and supported nested tables | Projected |
+| Sections, page setup, headers, and footers | Projected |
+| Bookmarks and supported internal/external hyperlinks | Projected |
+| Static and supported field display results | Projected |
+| Footnotes and endnotes, including supported formatting | Projected |
+| Comments with readable comment tables | Projected |
+| Revision-tracking settings | Projected |
+| Scalar core, application, and custom properties | Projected |
+| Pictures, drawings, text boxes, and richer visual payloads | Diagnosed as preserve-only unless a supported projection exists |
+| VBA, ActiveX, embedded packages, and OLE objects | Diagnosed as preserve-only |
+| Damaged, encrypted, or unsupported binary structures | Rejected or diagnosed before output |
+
+A readable feature is not automatically writable to DOC. DOCX can represent a broader model than the native DOC writer.
+
+## Native DOC write capability
+
+The native writer covers the tested binary subset, including paragraphs and runs, common formatting, styles, sections and page setup, supported headers and footers, simple tables and supported nesting, bookmarks, supported hyperlinks and static fields, footnotes and endnotes, and scalar document properties.
+
+The writer preflights the complete document before committing output. Unsupported destination features—such as comments, tracked revision markup, images, drawings, embedded objects, unsupported content-control shapes, or richer table/story structures—raise `NotSupportedException` and leave an existing destination intact.
+
+When an application needs a non-throwing gate before selecting a destination, run the real encoder without committing a file:
+
+```csharp
+LegacyDocWriteAssessment assessment = document.AssessLegacyDocWrite();
+if (assessment.IsSupported) {
+    document.Save("output.doc");
+} else {
+    Console.WriteLine($"{assessment.DiagnosticCode}: {assessment.Message}");
+}
+```
+
+`AssessLegacyDocWrite()` intentionally executes the same native encoder as `Save`/`ToBytes`, so its answer cannot drift from a second hand-maintained feature checklist. It allocates the candidate DOC bytes and reports their encoded size, but does not commit an artifact.
+
+This is practical feature parity, not a claim that arbitrary DOCX packages can be represented in the older DOC format.
+
+## Detailed import assessment
+
+Normal application code can use a cached compact summary:
+
+```csharp
+using OfficeIMO.Word.LegacyDoc;
+
+using LegacyDocLoadResult load = WordDocument.LoadLegacyDocWithReport("input.doc");
+LegacyDocImportSummary summary = load.Summary;
+
+if (summary.HasConversionLoss) {
+    load.EnsureNoConversionLoss();
+}
+```
+
+For corpus analysis or forensic detail, use `load.AdvancedDocument` and `load.CreateAdvancedImportReport()`. Import options use the common names `MaxInputBytes` and `ReportUnsupportedContent`. File conversion always enables unsupported-content discovery—even when a supplied import option disables reporting—because `LossPolicy.Block` must never be bypassed silently. Import options are selected from detected physical content, so format-specific limits still apply when a legacy file has a misleading extension.
+
+## Validation
+
+The normal automated test lane is dependency-free. Optional desktop Word validation is explicitly skipped unless `OFFICEIMO_RUN_LEGACY_DOC_COM_VALIDATION` is enabled. When enabled, missing Windows, Word, or required corpus inputs fail the lane instead of producing a false pass.

@@ -1,0 +1,546 @@
+using DocumentFormat.OpenXml.Spreadsheet;
+
+namespace OfficeIMO.Excel {
+    public partial class ExcelDocument {
+        /// <summary>Maximum length supported by an Excel workbook defined name.</summary>
+        public const int MaximumDefinedNameLength = 255;
+
+        private static string EscapeSheetName(string name) {
+            return (name ?? string.Empty).Replace("'", "''");
+        }
+        private static string StripSheetPrefixIfMatches(string text, ExcelSheet scope) {
+            if (string.IsNullOrEmpty(text)) return text;
+            string quoted = "'" + EscapeSheetName(scope.Name) + "'!";
+            if (text.StartsWith(quoted, System.StringComparison.Ordinal)) {
+                return text.Substring(quoted.Length);
+            }
+            string unquoted = scope.Name + "!";
+            if (text.StartsWith(unquoted, System.StringComparison.Ordinal)) {
+                return text.Substring(unquoted.Length);
+            }
+            return text;
+        }
+        /// <summary>
+        /// Creates or updates a defined name pointing to an A1 range. When <paramref name="scope"/> is provided,
+        /// the name is local to that sheet; otherwise it is workbook‑global.
+        /// </summary>
+        /// <param name="name">Defined name to create or update.</param>
+        /// <param name="range">A1 range (e.g. "A1:B10"). Can include a sheet prefix.</param>
+        /// <param name="scope">Optional sheet scope for a local name.</param>
+        /// <param name="save">When true, saves the workbook after the change.</param>
+        /// <param name="hidden">When true, marks the defined name as hidden.</param>
+        /// <param name="validationMode">Controls how the name and range are validated: Sanitize (default) clamps/adjusts; Strict throws on invalid input.</param>
+        public void SetNamedRange(string name, string range, ExcelSheet? scope = null, bool save = true, bool hidden = false, ExcelDefinedNameValidationMode validationMode = ExcelDefinedNameValidationMode.Sanitize) {
+#if NET8_0_OR_GREATER
+            ArgumentNullException.ThrowIfNullOrWhiteSpace(name);
+            ArgumentNullException.ThrowIfNullOrWhiteSpace(range);
+#else
+            if (string.IsNullOrWhiteSpace(name)) {
+                throw new ArgumentException("Name cannot be null or whitespace.", nameof(name));
+            }
+            if (string.IsNullOrWhiteSpace(range)) {
+                throw new ArgumentException("Range cannot be null or whitespace.", nameof(range));
+            }
+#endif
+
+            var workbook = WorkbookRoot;
+            var definedNames = workbook.DefinedNames ??= new DefinedNames();
+
+            // Validate or sanitize the defined name
+            name = NormalizeDefinedName(name, validationMode);
+
+            if (scope == null) {
+                string reference = NormalizeRange(range, validationMode); // may already contain a sheet prefix
+                // Workbook-global name: remove any existing global with same name
+                foreach (var dn in definedNames.Elements<DefinedName>().Where(d => d.Name == name && d.LocalSheetId == null).ToList())
+                    dn.Remove();
+                var dnNew = new DefinedName { Name = name, Text = reference, Hidden = hidden ? true : (bool?)null };
+                definedNames.Append(dnNew);
+            } else {
+                // Sheet-local name: remove existing with same name for this sheet
+                ushort sheetPos = GetSheetPositionIndex(scope);
+                string localRef = NormalizeLocalNamedRange(scope, range, validationMode);
+                foreach (var dn in definedNames.Elements<DefinedName>().Where(d => d.Name == name && d.LocalSheetId != null && d.LocalSheetId.Value == sheetPos).ToList())
+                    dn.Remove();
+                var dnNew = new DefinedName { Name = name, Text = localRef, LocalSheetId = sheetPos, Hidden = hidden ? true : (bool?)null };
+                definedNames.Append(dnNew);
+            }
+            MarkPackageDirty();
+            SaveWorkbookScopedChange(save);
+        }
+
+        /// <summary>
+        /// Sets the print area for a given sheet by creating a sheet-local defined name _xlnm.Print_Area.
+        /// </summary>
+        public void SetPrintArea(ExcelSheet sheet, string range, bool save = true) {
+            if (sheet == null) throw new ArgumentNullException(nameof(sheet));
+            if (string.IsNullOrWhiteSpace(range)) throw new ArgumentException("Range cannot be null or whitespace.", nameof(range));
+
+            var workbook = WorkbookRoot;
+            var definedNames = workbook.DefinedNames ??= new DefinedNames();
+
+            // Remove existing sheet-local Print_Area for this sheet
+            ushort sheetPos = GetSheetPositionIndex(sheet);
+            foreach (var dn in definedNames.Elements<DefinedName>().Where(d => d.Name == "_xlnm.Print_Area").ToList()) {
+                if (dn.LocalSheetId != null && dn.LocalSheetId.Value == sheetPos)
+                    dn.Remove();
+            }
+
+            string normalized = NormalizeRange($"'{EscapeSheetName(sheet.Name)}'!{range}");
+            var printArea = new DefinedName { Name = "_xlnm.Print_Area", LocalSheetId = sheetPos, Text = normalized };
+            definedNames.Append(printArea);
+            MarkPackageDirty();
+            SaveWorkbookScopedChange(save);
+        }
+
+        /// <summary>
+        /// Returns the A1 range for a defined name. If <paramref name="scope"/> is supplied, searches a sheet‑local name first.
+        /// </summary>
+        /// <param name="name">Defined name to resolve.</param>
+        /// <param name="scope">Optional sheet scope to resolve a local name.</param>
+        /// <returns>A1 range string or null if not found.</returns>
+        public string? GetNamedRange(string name, ExcelSheet? scope = null) {
+#if NET8_0_OR_GREATER
+            ArgumentNullException.ThrowIfNullOrWhiteSpace(name);
+#else
+            if (string.IsNullOrWhiteSpace(name)) {
+                throw new ArgumentException("Name cannot be null or whitespace.", nameof(name));
+            }
+#endif
+            var definedNames = WorkbookRoot.DefinedNames;
+            if (definedNames == null) return null;
+
+            if (scope != null) {
+                ushort pos = GetSheetPositionIndex(scope);
+                var dnLocal = definedNames.Elements<DefinedName>().FirstOrDefault(d => d.Name == name && d.LocalSheetId != null && d.LocalSheetId.Value == pos);
+                var text = dnLocal?.Text;
+                if (!string.IsNullOrEmpty(text)) {
+                    return StripSheetPrefixIfMatches(text!, scope);
+                }
+
+                var dnGlobal = definedNames.Elements<DefinedName>().FirstOrDefault(d => d.Name == name && d.LocalSheetId == null);
+                return dnGlobal?.Text;
+            } else {
+                var dnGlobal = definedNames.Elements<DefinedName>().FirstOrDefault(d => d.Name == name && d.LocalSheetId == null);
+                return dnGlobal?.Text;
+            }
+        }
+
+        /// <summary>
+        /// Returns all defined names with their A1 ranges, optionally limited to a sheet scope.
+        /// </summary>
+        public IReadOnlyDictionary<string, string> GetAllNamedRanges(ExcelSheet? scope = null) {
+            var definedNames = WorkbookRoot.DefinedNames;
+            var result = new System.Collections.Generic.Dictionary<string, string>();
+            if (definedNames == null) return result;
+
+            if (scope != null) {
+                ushort pos = GetSheetPositionIndex(scope);
+                foreach (var dn in definedNames.Elements<DefinedName>()) {
+                    if (dn.LocalSheetId != null && dn.LocalSheetId.Value == pos) {
+                        var text = dn.Text ?? string.Empty;
+                        result[dn.Name!] = StripSheetPrefixIfMatches(text, scope);
+                    }
+                }
+            } else {
+                foreach (var dn in definedNames.Elements<DefinedName>()) {
+                    if (dn.LocalSheetId == null)
+                        result[dn.Name!] = dn.Text ?? string.Empty;
+                }
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Removes a defined name. If <paramref name="scope"/> is provided, removes the sheet‑local name; otherwise the global name.
+        /// </summary>
+        /// <param name="name">Defined name to remove.</param>
+        /// <param name="scope">Optional sheet scope.</param>
+        /// <param name="save">When true, saves the workbook after removal.</param>
+        /// <returns>True if the name existed and was removed; otherwise false.</returns>
+        public bool RemoveNamedRange(string name, ExcelSheet? scope = null, bool save = true) {
+#if NET8_0_OR_GREATER
+            ArgumentNullException.ThrowIfNullOrWhiteSpace(name);
+#else
+            if (string.IsNullOrWhiteSpace(name)) {
+                throw new ArgumentException("Name cannot be null or whitespace.", nameof(name));
+            }
+#endif
+            var definedNames = WorkbookRoot.DefinedNames;
+            if (definedNames == null) return false;
+
+            DefinedName? target = null;
+            if (scope != null) {
+                ushort pos = GetSheetPositionIndex(scope);
+                target = definedNames.Elements<DefinedName>().FirstOrDefault(d => d.Name == name && d.LocalSheetId != null && d.LocalSheetId.Value == pos);
+            } else {
+                target = definedNames.Elements<DefinedName>().FirstOrDefault(d => d.Name == name && d.LocalSheetId == null);
+            }
+            if (target == null) return false;
+            target.Remove();
+            if (!definedNames.Elements<DefinedName>().Any()) {
+                WorkbookRoot.DefinedNames = null;
+            }
+            MarkPackageDirty();
+            SaveWorkbookScopedChange(save);
+            return true;
+        }
+
+        private uint GetSheetIndex(ExcelSheet sheet) {
+            var sheets = WorkbookRoot.Sheets?.OfType<Sheet>().ToList() ?? new();
+            for (int i = 0; i < sheets.Count; i++) {
+                if (sheets[i].Name == sheet.Name) {
+                    var id = sheets[i].SheetId;
+                    if (id == null) {
+                        throw new ArgumentException("Worksheet is missing a SheetId.", nameof(sheet));
+                    }
+                    return id.Value;
+                }
+            }
+            throw new ArgumentException("Worksheet not found in workbook.", nameof(sheet));
+        }
+
+        private ushort GetSheetPositionIndex(ExcelSheet sheet) {
+            var sheets = WorkbookRoot.Sheets?.OfType<Sheet>().ToList() ?? new();
+            for (ushort i = 0; i < sheets.Count; i++) {
+                if (sheets[i].Name == sheet.Name) return i; // 0-based position
+            }
+            throw new ArgumentException("Worksheet not found in workbook.", nameof(sheet));
+        }
+
+        /// <summary>
+        /// Sets rows/columns to repeat at top/left when printing a specific sheet by creating a sheet-local
+        /// defined name _xlnm.Print_Titles. Pass nulls to clear existing print titles.
+        /// </summary>
+        /// <param name="sheet">Target sheet.</param>
+        /// <param name="firstRow">First row to repeat (1-based), or null.</param>
+        /// <param name="lastRow">Last row to repeat (1-based), or null.</param>
+        /// <param name="firstCol">First column to repeat (1-based), or null.</param>
+        /// <param name="lastCol">Last column to repeat (1-based), or null.</param>
+        /// <param name="save">Whether to save the workbook after the change.</param>
+        public void SetPrintTitles(ExcelSheet sheet, int? firstRow, int? lastRow, int? firstCol, int? lastCol, bool save = true) {
+            if (sheet == null) throw new ArgumentNullException(nameof(sheet));
+
+            var workbook = WorkbookRoot;
+            var definedNames = workbook.DefinedNames ??= new DefinedNames();
+
+            // Remove existing sheet-local Print_Titles for this sheet
+            ushort sheetPos = GetSheetPositionIndex(sheet);
+            foreach (var dn in definedNames.Elements<DefinedName>().Where(d => d.Name == "_xlnm.Print_Titles").ToList()) {
+                if (dn.LocalSheetId != null && dn.LocalSheetId.Value == sheetPos) {
+                    dn.Remove();
+                    MarkPackageDirty();
+                }
+            }
+
+            // Nothing to set? stop here (clears existing titles)
+            bool hasRows = firstRow.HasValue && lastRow.HasValue && firstRow.Value > 0 && lastRow.Value >= firstRow.Value;
+            bool hasCols = firstCol.HasValue && lastCol.HasValue && firstCol.Value > 0 && lastCol.Value >= firstCol.Value;
+            if (!hasRows && !hasCols) {
+                SaveWorkbookScopedChange(save);
+                return;
+            }
+
+            string? rowsPart = null, colsPart = null;
+            if (hasRows) {
+                rowsPart = $"'{EscapeSheetName(sheet.Name)}'!${firstRow.GetValueOrDefault()}:${lastRow.GetValueOrDefault()}";
+            }
+            if (hasCols) {
+                string c1 = A1.ColumnIndexToLetters(firstCol.GetValueOrDefault());
+                string c2 = A1.ColumnIndexToLetters(lastCol.GetValueOrDefault());
+                colsPart = $"'{EscapeSheetName(sheet.Name)}'!${c1}:${c2}";
+            }
+
+            string text = hasRows && hasCols ? string.Concat(rowsPart, ",", colsPart) : (rowsPart ?? colsPart)!;
+            var dnNew = new DefinedName { Name = "_xlnm.Print_Titles", LocalSheetId = sheetPos, Text = text };
+            definedNames.Append(dnNew);
+            MarkPackageDirty();
+            SaveWorkbookScopedChange(save);
+        }
+
+        private void SaveWorkbookScopedChange(bool save) {
+            if (!save) {
+                return;
+            }
+
+            WorkbookRoot.Save();
+        }
+
+        /// <summary>
+        /// Repairs common issues with defined names that can trigger Excel's file repair, such as
+        /// duplicates within the same scope, invalid LocalSheetId after sheet reordering/removal,
+        /// or references containing #REF!.
+        /// </summary>
+        internal void RepairDefinedNames(bool save = true) {
+            CleanupDefinedNameArtifacts(includeAggressiveRepairs: true, save: save);
+        }
+
+        internal void CleanupDefinedNameArtifacts(bool includeAggressiveRepairs, bool save = true) {
+            var wb = WorkbookRoot;
+            var definedNames = wb.DefinedNames;
+            if (definedNames == null) return;
+
+            var sheets = wb.Sheets?.OfType<Sheet>().ToList() ?? new();
+            int sheetCount = sheets.Count;
+
+            var toRemove = new System.Collections.Generic.HashSet<DocumentFormat.OpenXml.Spreadsheet.DefinedName>();
+            var seen = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var dn in definedNames.Elements<DocumentFormat.OpenXml.Spreadsheet.DefinedName>()) {
+                string? name = dn.Name;
+                if (string.IsNullOrWhiteSpace(name)) { toRemove.Add(dn); continue; }
+
+                string text = dn.Text ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(text)) { toRemove.Add(dn); continue; }
+
+                uint? local = dn.LocalSheetId?.Value;
+                if (local.HasValue && (local.Value >= (uint)sheetCount)) { toRemove.Add(dn); continue; }
+
+                if (IsSheetScopedBuiltInDefinedName(name!)) {
+                    if (!local.HasValue) { toRemove.Add(dn); continue; }
+
+                    string expectedSheetName = sheets[(int)local.Value].Name?.Value ?? string.Empty;
+                    if (!DefinedNameReferencesExpectedSheet(text, expectedSheetName)) {
+                        toRemove.Add(dn);
+                        continue;
+                    }
+                }
+
+                if (includeAggressiveRepairs) {
+                    string key = (local.HasValue ? local.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : "G") + "|" + name;
+                    if (!seen.Add(key)) { toRemove.Add(dn); continue; }
+
+                    if (text.IndexOf("#REF!", StringComparison.OrdinalIgnoreCase) >= 0) { toRemove.Add(dn); continue; }
+                }
+            }
+
+            if (toRemove.Count > 0) {
+                foreach (var dn in toRemove) dn.Remove();
+                if (!definedNames.Elements<DocumentFormat.OpenXml.Spreadsheet.DefinedName>().Any()) {
+                    wb.DefinedNames = null;
+                }
+                if (save) wb.Save();
+            }
+        }
+
+        private static bool IsSheetScopedBuiltInDefinedName(string name) {
+            return string.Equals(name, "_xlnm.Print_Area", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(name, "_xlnm.Print_Titles", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool DefinedNameReferencesExpectedSheet(string text, string expectedSheetName) {
+            foreach (string part in SplitDefinedNameReferenceList(text)) {
+                if (!SheetNameLookup.TryParseSheetQualifiedReference(part, out string actualSheetName, out _, allowExternalWorkbookReferences: false)) {
+                    return false;
+                }
+
+                if (!SheetNameLookup.Matches(expectedSheetName, actualSheetName)) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static IReadOnlyList<string> SplitDefinedNameReferenceList(string text) {
+            var parts = new List<string>();
+            var current = new System.Text.StringBuilder(text.Length);
+            bool inQuote = false;
+
+            for (int i = 0; i < text.Length; i++) {
+                char ch = text[i];
+                if (ch == '\'') {
+                    current.Append(ch);
+                    if (inQuote && i + 1 < text.Length && text[i + 1] == '\'') {
+                        current.Append(text[++i]);
+                    } else {
+                        inQuote = !inQuote;
+                    }
+                    continue;
+                }
+
+                if (ch == ',' && !inQuote) {
+                    string part = current.ToString().Trim();
+                    if (part.Length > 0) {
+                        parts.Add(part);
+                    }
+                    current.Clear();
+                    continue;
+                }
+
+                current.Append(ch);
+            }
+
+            string finalPart = current.ToString().Trim();
+            if (finalPart.Length > 0) {
+                parts.Add(finalPart);
+            }
+
+            return parts;
+        }
+
+        /// <summary>
+        /// Normalizes an A1-style range, ensuring absolute references and validating format.
+        /// Accepts an optional sheet prefix (e.g. '<c>'Sheet1'!A1:B2</c>').
+        /// Throws <see cref="ArgumentException"/> if the input is not a valid A1 range or cell reference.
+        /// </summary>
+        private string NormalizeRange(string range) {
+            return NormalizeRange(range, ExcelDefinedNameValidationMode.Sanitize);
+        }
+
+        private string NormalizeRange(string range, ExcelDefinedNameValidationMode validationMode) {
+            string? sheetPrefix = null;
+            string a1 = range;
+            if (SheetNameLookup.TryParseSheetQualifiedReference(range, out string parsedSheet, out string parsedReference)) {
+                sheetPrefix = NormalizeSheetPrefix(parsedSheet, validationMode);
+                a1 = parsedReference;
+            }
+            a1 = a1.Replace("$", string.Empty);
+
+            int r1, c1, r2, c2;
+            if (!A1.TryParseRangeCoordinates(a1,
+                    out r1, out c1, out r2, out c2)) {
+                bool containsColon = a1.IndexOf(':') >= 0;
+                if (!A1.TryParseCellReferenceCoordinates(a1,
+                        out int cellRow, out int cellColumn)) {
+                    string message = containsColon
+                        ? "Range must be a valid A1 reference such as 'A1:B2'."
+                        : "Range must be a valid A1 reference such as 'A1' or 'A1:B2'.";
+                    throw new ArgumentException(message, nameof(range));
+                }
+                r1 = r2 = cellRow;
+                c1 = c2 = cellColumn;
+            }
+
+            // Bounds check: Excel supports 1..1,048,576 rows and 1..16,384 columns (XFD)
+            bool outOfBounds = (r1 < 1 || c1 < 1 || r2 > A1.MaxRows || c2 > A1.MaxColumns || c1 > A1.MaxColumns || r1 > A1.MaxRows);
+            if (outOfBounds && validationMode == ExcelDefinedNameValidationMode.Strict)
+                throw new ArgumentOutOfRangeException(nameof(range), "A1 range exceeds Excel bounds (rows ≤ 1,048,576; cols ≤ 16,384). Use Sanitize to clamp.");
+            // Sanitize: clamp into valid range
+            r1 = Math.Max(1, Math.Min(A1.MaxRows, r1));
+            r2 = Math.Max(1, Math.Min(A1.MaxRows, r2));
+            c1 = Math.Max(1, Math.Min(A1.MaxColumns, c1));
+            c2 = Math.Max(1, Math.Min(A1.MaxColumns, c2));
+
+            string start = A1.AbsoluteCellReference(r1, c1);
+            string end = A1.AbsoluteCellReference(r2, c2);
+
+            string normalized = start;
+            if (start != end) {
+                normalized += ":" + end;
+            }
+            return (sheetPrefix != null ? sheetPrefix + "!" : string.Empty) + normalized;
+        }
+
+        private string NormalizeLocalNamedRange(ExcelSheet scope, string range, ExcelDefinedNameValidationMode validationMode) {
+            if (SheetNameLookup.TryParseSheetQualifiedReference(range, out _, out _)) {
+                return NormalizeRange(range, validationMode);
+            }
+
+            string sheetQuoted = $"'{EscapeSheetName(scope.Name)}'!";
+            return NormalizeRange(sheetQuoted + range, validationMode);
+        }
+        private string NormalizeSheetPrefix(string sheetToken, ExcelDefinedNameValidationMode validationMode) {
+            if (string.IsNullOrWhiteSpace(sheetToken)) {
+                return sheetToken;
+            }
+
+            string trimmedToken = sheetToken.Trim();
+            string requestedSheetName = UnquoteSheetName(trimmedToken);
+            if (requestedSheetName.Length == 0) {
+                return trimmedToken;
+            }
+
+            string effectiveSheetName = validationMode == ExcelDefinedNameValidationMode.Sanitize
+                ? SheetNameLookup.ResolveExistingOrRequested(Sheets, requestedSheetName)
+                : requestedSheetName;
+
+            return $"'{EscapeSheetName(effectiveSheetName)}'";
+        }
+
+        private static string UnquoteSheetName(string sheetToken) {
+            string trimmedToken = sheetToken.Trim();
+            if (trimmedToken.Length >= 2 && trimmedToken[0] == '\'' && trimmedToken[trimmedToken.Length - 1] == '\'') {
+                return trimmedToken.Substring(1, trimmedToken.Length - 2).Replace("''", "'");
+            }
+
+            return trimmedToken;
+        }
+
+        /// <summary>
+        /// Ensures a defined name complies with Excel rules. In Sanitize mode, returns a corrected name.
+        /// Throws in Strict mode when input is invalid.
+        /// Rules:
+        /// - 1..255 characters
+        /// - First char must be a letter, underscore, or backslash
+        /// - Allowed characters: letters, digits, underscore, period, backslash
+        /// - Cannot look like a cell reference (e.g., A1, AA10) or an R1C1 reference
+        /// - Cannot be TRUE or FALSE (case-insensitive)
+        /// </summary>
+        /// <param name="name">Authored workbook defined name.</param>
+        /// <param name="mode">Whether invalid names are sanitized or rejected.</param>
+        /// <returns>The exact defined name that can be emitted to the workbook.</returns>
+        public static string NormalizeDefinedName(string name, ExcelDefinedNameValidationMode mode = ExcelDefinedNameValidationMode.Sanitize) {
+            if (string.IsNullOrWhiteSpace(name)) {
+                if (mode == ExcelDefinedNameValidationMode.Strict) throw new System.ArgumentException($"Defined name '{name}' cannot be null or whitespace.", nameof(name));
+                name = "_";
+            }
+
+            bool LooksLikeA1(string value) {
+                var parsed = OfficeIMO.Excel.A1.ParseCellRef(value);
+                return parsed.Row > 0 && parsed.Col > 0;
+            }
+            bool LooksLikeR1C1(string value) {
+                if (value.Length < 3 || (value[0] != 'R' && value[0] != 'r')) return false;
+                int index = 1;
+                while (index < value.Length && char.IsDigit(value[index])) index++;
+                if (index == 1 || index >= value.Length || (value[index] != 'C' && value[index] != 'c')) return false;
+                index++;
+                int digitStart = index;
+                while (index < value.Length && char.IsDigit(value[index])) index++;
+                return index > digitStart && index == value.Length;
+            }
+
+            if (mode == ExcelDefinedNameValidationMode.Strict) {
+                if (name.Length > MaximumDefinedNameLength)
+                    throw new System.ArgumentException($"Defined name '{name}' exceeds maximum length of {MaximumDefinedNameLength} characters (actual {name.Length}).", nameof(name));
+                if (!char.IsLetter(name[0]) && name[0] != '_' && name[0] != '\\')
+                    throw new System.ArgumentException($"Defined name '{name}' must start with a letter, underscore, or backslash.", nameof(name));
+                if (name.Any(ch => !char.IsLetterOrDigit(ch) && ch != '_' && ch != '.' && ch != '\\'))
+                    throw new System.ArgumentException($"Defined name '{name}' contains characters that Excel does not allow.", nameof(name));
+                if (string.Equals(name, "TRUE", System.StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(name, "FALSE", System.StringComparison.OrdinalIgnoreCase))
+                    throw new System.ArgumentException($"Defined name '{name}' cannot be TRUE or FALSE.", nameof(name));
+                if (LooksLikeA1(name) || LooksLikeR1C1(name))
+                    throw new System.ArgumentException($"Defined name '{name}' cannot be a cell address or R1C1 reference.", nameof(name));
+                return name;
+            }
+
+            // Trim spaces and replace invalid chars
+            var sb = new System.Text.StringBuilder(name.Length);
+            foreach (char ch in name.Trim()) {
+                if (char.IsLetterOrDigit(ch) || ch == '_' || ch == '.' || ch == '\\') sb.Append(ch);
+                else { sb.Append('_'); }
+            }
+            if (sb.Length == 0) { sb.Append('_'); }
+            if (!char.IsLetter(sb[0]) && sb[0] != '_' && sb[0] != '\\') { sb.Insert(0, '_'); }
+
+            // Disallow TRUE/FALSE exactly (case-insensitive)
+            var normalized = sb.ToString();
+            if (string.Equals(normalized, "TRUE", System.StringComparison.OrdinalIgnoreCase) || string.Equals(normalized, "FALSE", System.StringComparison.OrdinalIgnoreCase)) {
+                if (mode == ExcelDefinedNameValidationMode.Strict) throw new System.ArgumentException($"Defined name '{name}' cannot be TRUE or FALSE.", nameof(name));
+                normalized = "_" + normalized;
+            }
+
+            if (LooksLikeA1(normalized) || LooksLikeR1C1(normalized)) {
+                normalized = "_" + normalized;
+            }
+
+            if (normalized.Length > MaximumDefinedNameLength) {
+                normalized = normalized.Substring(0, MaximumDefinedNameLength);
+            }
+
+            return normalized;
+        }
+    }
+}

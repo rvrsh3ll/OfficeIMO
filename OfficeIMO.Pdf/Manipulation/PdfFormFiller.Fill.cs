@@ -1,0 +1,148 @@
+namespace OfficeIMO.Pdf;
+
+internal static partial class PdfFormFiller {
+    private static void FillField(
+        Dictionary<int, PdfIndirectObject> objects,
+        PdfObject fieldObject,
+        string? parentName,
+        string? inheritedFieldType,
+        int inheritedFlags,
+        int? inheritedQuadding,
+        int? inheritedMaxLength,
+        PdfDictionary? inheritedDefaultResources,
+        string? inheritedDefaultAppearance,
+        PdfArray? inheritedChoiceOptions,
+        IReadOnlyDictionary<string, PdfFormFieldValue> fieldValues,
+        PdfFormFillerOptions? options,
+        HashSet<string> remaining,
+        HashSet<int> visited,
+        ref int nextObjectNumber) {
+        if (fieldObject is PdfReference reference && !visited.Add(reference.ObjectNumber)) {
+            return;
+        }
+
+        if (ResolveObject(objects, fieldObject) is not PdfDictionary field) {
+            return;
+        }
+
+        string? partialName = TryReadText(objects, field, "T");
+        string? fullName = CombineFieldName(parentName, partialName);
+        string? fieldType = TryReadName(objects, field, "FT") ?? inheritedFieldType;
+        int fieldFlags = ReadFieldFlags(objects, field, inheritedFlags);
+        int? fieldQuadding = ReadFieldQuadding(objects, field, inheritedQuadding);
+        int? fieldMaxLength = ReadFieldMaxLength(objects, field, inheritedMaxLength);
+        PdfDictionary? defaultResources = TryReadDefaultResources(objects, field) ?? inheritedDefaultResources;
+        string? defaultAppearance = TryReadText(objects, field, "DA") ?? inheritedDefaultAppearance;
+        PdfArray? choiceOptions = TryReadChoiceOptions(objects, field) ?? inheritedChoiceOptions;
+        if (fullName is not null && remaining.Contains(fullName) && fieldValues.TryGetValue(fullName, out PdfFormFieldValue? value)) {
+            SetFieldValue(objects, field, fullName, fieldType, fieldFlags, fieldQuadding, fieldMaxLength, defaultResources, defaultAppearance, choiceOptions, value, options, ref nextObjectNumber);
+            remaining.Remove(fullName);
+        }
+
+        if (!field.Items.TryGetValue("Kids", out var kidsObject) ||
+            ResolveObject(objects, kidsObject) is not PdfArray kids) {
+            return;
+        }
+
+        for (int i = 0; i < kids.Items.Count; i++) {
+            FillField(objects, kids.Items[i], fullName, fieldType, fieldFlags, fieldQuadding, fieldMaxLength, defaultResources, defaultAppearance, choiceOptions, fieldValues, options, remaining, visited, ref nextObjectNumber);
+        }
+    }
+
+    private static void SetFieldValue(Dictionary<int, PdfIndirectObject> objects, PdfDictionary field, string fieldName, string? fieldType, int fieldFlags, int? inheritedQuadding, int? inheritedMaxLength, PdfDictionary? inheritedDefaultResources, string? inheritedDefaultAppearance, PdfArray? choiceOptions, PdfFormFieldValue value, PdfFormFillerOptions? options, ref int nextObjectNumber) {
+        IReadOnlyList<string> values = value.Values;
+        string firstValue = values[0];
+        if (string.Equals(fieldType, "Btn", StringComparison.Ordinal)) {
+            if ((fieldFlags & PushButtonFlag) != 0) {
+                throw new ArgumentException("PDF Push-button fields do not have fillable values.", nameof(value));
+            }
+            bool isRadioButtonGroup = (fieldFlags & RadioButtonFlag) != 0;
+            if (values.Count > 1) {
+                throw new ArgumentException("PDF button field cannot be filled with multiple values.", nameof(value));
+            }
+            HashSet<string> availableStates = CollectButtonNormalAppearanceStates(objects, field, new HashSet<int>());
+            string name = PdfButtonFieldValueResolver.Resolve(objects, field, choiceOptions, availableStates, isRadioButtonGroup, firstValue);
+
+            field.Items["V"] = new PdfName(name);
+            field.Items["AS"] = new PdfName(name);
+            SetWidgetAppearanceStates(objects, field, name, isRadioButtonGroup, new HashSet<int>(), ref nextObjectNumber);
+            return;
+        }
+
+        if (string.Equals(fieldType, "Ch", StringComparison.Ordinal)) {
+            bool isMultiSelectChoice = (fieldFlags & MultiSelectChoiceFlag) != 0;
+            if (values.Count > 1 && !isMultiSelectChoice) {
+                throw new ArgumentException("PDF scalar choice field cannot be filled with multiple values.", nameof(value));
+            }
+
+            ChoiceFillValue explicitEmptyChoice = default;
+            bool selectsExplicitEmptyOption = values.Count == 1 &&
+                values[0].Length == 0 &&
+                TryResolveChoiceOption(objects, choiceOptions, values[0], out explicitEmptyChoice);
+            if (values.Count == 1 && values[0].Length == 0 && !selectsExplicitEmptyOption) {
+                field.Items["V"] = isMultiSelectChoice ? new PdfArray() : new PdfStringObj(string.Empty, useTextStringEncoding: true);
+                field.Items.Remove("I");
+                SetTextWidgetAppearances(objects, field, string.Empty, fieldName, fieldFlags, inheritedQuadding, inheritedMaxLength, inheritedDefaultResources, inheritedDefaultAppearance, isMultiSelectChoice, options, new HashSet<int>(), ref nextObjectNumber);
+                return;
+            }
+
+            IReadOnlyList<ChoiceFillValue> choiceValues = selectsExplicitEmptyOption
+                ? new[] { explicitEmptyChoice }
+                : ResolveChoiceFillValues(objects, choiceOptions, (fieldFlags & EditableChoiceFlag) != 0, values);
+            if (isMultiSelectChoice && choiceValues.All(item => item.OptionIndex.HasValue)) {
+                choiceValues = choiceValues
+                    .GroupBy(item => item.OptionIndex!.Value)
+                    .OrderBy(group => group.Key)
+                    .Select(group => group.First())
+                    .ToArray();
+            }
+            SetChoiceSelectionIndices(field, fieldFlags, choiceValues);
+            if (isMultiSelectChoice) {
+                field.Items["V"] = CreateStringArray(choiceValues.Select(item => item.ExportValue));
+                SetTextWidgetAppearances(objects, field, string.Join("\n", choiceValues.Select(item => item.DisplayValue)), fieldName, fieldFlags, inheritedQuadding, inheritedMaxLength, inheritedDefaultResources, inheritedDefaultAppearance, true, options, new HashSet<int>(), ref nextObjectNumber);
+                return;
+            }
+
+            ChoiceFillValue choiceValue = choiceValues[0];
+            field.Items["V"] = new PdfStringObj(choiceValue.ExportValue, useTextStringEncoding: true);
+            SetTextWidgetAppearances(objects, field, choiceValue.DisplayValue, fieldName, fieldFlags, inheritedQuadding, inheritedMaxLength, inheritedDefaultResources, inheritedDefaultAppearance, false, options, new HashSet<int>(), ref nextObjectNumber);
+            return;
+        }
+
+        field.Items["V"] = new PdfStringObj(firstValue, useTextStringEncoding: true);
+        SetTextWidgetAppearances(objects, field, firstValue, fieldName, fieldFlags, inheritedQuadding, inheritedMaxLength, inheritedDefaultResources, inheritedDefaultAppearance, false, options, new HashSet<int>(), ref nextObjectNumber);
+    }
+
+    private static void SetChoiceSelectionIndices(PdfDictionary field, int fieldFlags, IReadOnlyList<ChoiceFillValue> values) {
+        if ((fieldFlags & ComboChoiceFlag) != 0 || values.Count == 0 || values.Any(value => !value.OptionIndex.HasValue)) {
+            field.Items.Remove("I");
+            field.Items.Remove("TI");
+            return;
+        }
+
+        var indices = new PdfArray();
+        for (int i = 0; i < values.Count; i++) {
+            indices.Items.Add(new PdfNumber(values[i].OptionIndex!.Value));
+        }
+
+        field.Items["I"] = indices;
+        field.Items["TI"] = new PdfNumber(values[0].OptionIndex!.Value);
+    }
+
+    private static int ReadFieldFlags(Dictionary<int, PdfIndirectObject> objects, PdfDictionary field, int inheritedFlags) {
+        if (!field.Items.TryGetValue("Ff", out PdfObject? flagsObject) ||
+            ResolveObject(objects, flagsObject) is not PdfNumber flagsNumber) {
+            return inheritedFlags;
+        }
+
+        return (int)flagsNumber.Value;
+    }
+
+    private static PdfArray? TryReadChoiceOptions(Dictionary<int, PdfIndirectObject> objects, PdfDictionary field) {
+        if (!field.Items.TryGetValue("Opt", out PdfObject? optionsObject)) {
+            return null;
+        }
+
+        return ResolveObject(objects, optionsObject) as PdfArray;
+    }
+}

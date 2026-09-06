@@ -1,0 +1,102 @@
+using OfficeIMO.Examples.Utils;
+using OfficeIMO.Word.Pdf;
+using OfficeIMO.Pdf;
+using OfficeIMO.Word;
+using System;
+using System.IO;
+using W = DocumentFormat.OpenXml.Wordprocessing;
+
+namespace OfficeIMO.Examples.Word {
+    internal static partial class Pdf {
+        // TODO: Add more example methods as needed
+        public static void Example_PdfInterface(string folderPath, bool openWord) {
+            // Placeholder for PDF interface example
+            Example_SaveAsPdf(folderPath, openWord);
+        }
+        
+        public static void Example_SaveAsPdf(string folderPath, bool openWord) {
+            Console.WriteLine("[*] Creating document and exporting to PDF");
+            string docPath = Path.Combine(folderPath, "ExportToPdf.docx");
+            string pdfPath = Path.Combine(folderPath, "ExportToPdf.pdf");
+            string imagePath = Path.Combine(Directory.GetCurrentDirectory(), "Images", "EvotecLogo.png");
+
+            using (WordDocument document = WordDocument.Create(docPath)) {
+                var defaultHeader = document.HeaderDefaultOrCreate;
+                defaultHeader.AddParagraph("Example Header");
+                WordTable headerTable = defaultHeader.AddTable(1, 1);
+                headerTable.Rows[0].Cells[0].Paragraphs[0].Text = "H1";
+                var defaultFooter = document.FooterDefaultOrCreate;
+                defaultFooter.AddParagraph("Example Footer");
+                WordTable footerTable = defaultFooter.AddTable(1, 1);
+                footerTable.Rows[0].Cells[0].Paragraphs[0].Text = "F1";
+
+                WordParagraph heading = document.AddParagraph("Sample Heading");
+                heading.Style = WordParagraphStyles.Heading1;
+
+                WordParagraph formatted = document.AddParagraph("Bold Italic Underlined Centered");
+                formatted.Bold = true;
+                formatted.Italic = true;
+                formatted.Underline = WordUnderlineStyle.Single;
+                formatted.ParagraphAlignment = WordParagraphAlignment.Center;
+
+                WordList list = document.AddList(WordListStyle.ArticleSections);
+                list.AddItem("First Item");
+                list.AddItem("Second Item");
+
+                WordTable table = document.AddTable(2, 2);
+                table.Rows[0].Cells[0].Paragraphs[0].Text = "A1";
+                table.Rows[0].Cells[1].Paragraphs[0].Text = "B1";
+                table.Rows[1].Cells[0].Paragraphs[0].Text = "A2";
+                table.Rows[1].Cells[1].Paragraphs[0].Text = "B2";
+                WordTable nested = table.Rows[0].Cells[0].AddTable(1, 1);
+                nested.Rows[0].Cells[0].Paragraphs[0].Text = "N1";
+
+                document.AddParagraph().AddImage(imagePath, 50, 50);
+                document.AddHyperLink("OfficeIMO", new Uri("https://evotec.xyz"), addStyle: true);
+
+                document.Save();
+                document.SaveAsPdf(pdfPath, new WordToPdfOptions {
+                    PageSize = OfficeIMO.Pdf.PageSizes.A4,
+                    Orientation = OfficePageOrientation.Landscape,
+                    Margins = OfficeIMO.Pdf.PageMargins.FromCentimeters(
+                        left: 2,
+                        top: 2,
+                        right: 2,
+                        bottom: 1)
+                });
+            }
+        }
+
+        public static void Example_SaveAsPdfInMemory(string folderPath, bool openWord) {
+            Console.WriteLine("[*] Creating document and exporting to in-memory PDF");
+            string docPath = Path.Combine(folderPath, "ExportToPdfInMemory.docx");
+            string pdfPath = Path.Combine(folderPath, "ExportToPdfInMemory.pdf");
+
+            using (WordDocument document = WordDocument.Create(docPath)) {
+                document.AddParagraph("Hello World");
+                document.Save();
+
+                using (MemoryStream pdfStream = new MemoryStream()) {
+                    document.SaveAsPdf(pdfStream, new WordToPdfOptions {
+                        PageSize = new OfficeIMO.Pdf.PageSize(300, 500)
+                    });
+                    File.WriteAllBytes(pdfPath, pdfStream.ToArray());
+                }
+            }
+        }
+
+        public static void Example_ToPdfByteArray(string folderPath, bool openWord) {
+            Console.WriteLine("[*] Creating document and exporting to PDF byte array");
+            string docPath = Path.Combine(folderPath, "ExportToPdfBytes.docx");
+            string pdfPath = Path.Combine(folderPath, "ExportToPdfBytes.pdf");
+
+            using (WordDocument document = WordDocument.Create(docPath)) {
+                document.AddParagraph("Hello World");
+                document.Save();
+
+                byte[] pdfBytes = document.ToPdfBytes();
+                File.WriteAllBytes(pdfPath, pdfBytes);
+            }
+        }
+    }
+}

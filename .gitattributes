@@ -3,6 +3,18 @@
 ###############################################################################
 * text=auto
 
+# RTF interoperability fixtures are byte-level evidence. Do not normalize their
+# producer line endings, because corpus SHA-256 checks must match on every OS.
+OfficeIMO.Rtf.Tests/Documents/RtfCorpus/**/*.rtf -text -diff
+
+# Public showcase downloads are generated binary evidence. Preserve exact bytes
+# so the committed manifest hashes remain stable across platforms and checkouts.
+Website/static/downloads/showcase/** -text -diff
+
+# Published benchmark payloads are integrity-checked byte-for-byte against the
+# catalog. Keep their committed line endings unchanged on every platform.
+Website/static/data/benchmarks/library-comparisons/*.json text eol=lf -diff
+
 ###############################################################################
 # Set default behavior for command prompt diff.
 #

@@ -1,0 +1,175 @@
+using DocumentFormat.OpenXml.Spreadsheet;
+using System.Globalization;
+
+namespace OfficeIMO.Excel;
+
+internal static class CoerceValueHelper {
+    private const int SharedStringCharacterLimit = 32_767;
+
+    private static readonly CellValue EmptyStringTemplate = new(string.Empty);
+    private static readonly CellValue TrueTemplate = new("1");
+    private static readonly CellValue FalseTemplate = new("0");
+    // By default, treat DateTimeOffset values using LocalDateTime so that serial values
+    // follow the same semantics as Excel when writing local timestamps.
+    private static readonly Func<DateTimeOffset, DateTime> DefaultDateTimeOffsetStrategy = static dto => dto.LocalDateTime;
+    // Excel cannot represent serial dates earlier than 1900-01-01; 0 = 1899-12-30 and 2 = 1900-01-01.
+    private const double ExcelMinimumSupportedSerial = 2d;
+    private static readonly DateTime ExcelMinimumSupportedDate = DateTime.FromOADate(ExcelMinimumSupportedSerial);
+
+    /// <summary>
+    /// Converts an arbitrary CLR value into the <see cref="CellValue" /> and <see cref="CellValues" /> tuple used by Excel.
+    /// </summary>
+    /// <param name="value">The value to be represented in a worksheet cell.</param>
+    /// <param name="sharedStringHandler">Delegate that materialises a <see cref="CellValue" /> entry for shared strings.</param>
+    /// <param name="dateTimeOffsetStrategy">
+    /// Optional delegate used to convert <see cref="DateTimeOffset"/> instances into <see cref="DateTime"/> values before
+    /// calculating the Excel serial number. When omitted, <see cref="DateTimeOffset.LocalDateTime"/> is used. The provided
+    /// strategy only influences the numeric serial value that is written; cell formatting must still be applied separately.
+    /// </param>
+    /// <param name="dateSystem">Workbook date system used when serializing <see cref="DateTime"/> and <see cref="DateTimeOffset"/> values.</param>
+    /// <returns>The OpenXML representation of the supplied value.</returns>
+    /// <remarks>
+    /// Integer values with an absolute magnitude above ±9,007,199,254,740,992 are written using their string form to prevent
+    /// double precision loss while keeping the cell typed as <see cref="CellValues.Number" />.
+    /// </remarks>
+    /// <exception cref="ArgumentException">Thrown when the resulting shared-string payload exceeds Excel's 32,767 character limit.</exception>
+    internal static (CellValue cellValue, CellValues type) Coerce(
+        object? value,
+        Func<string, CellValue> sharedStringHandler,
+        Func<DateTimeOffset, DateTime>? dateTimeOffsetStrategy = null,
+        ExcelDateSystem dateSystem = ExcelDateSystem.NineteenHundred) {
+        if (sharedStringHandler is null) {
+            throw new ArgumentNullException(nameof(sharedStringHandler));
+        }
+
+        dateTimeOffsetStrategy ??= DefaultDateTimeOffsetStrategy;
+
+        return value switch {
+            null => HandleEmptyString(),
+            System.DBNull => HandleEmptyString(),
+            string s => HandleSharedString(s, sharedStringHandler, nameof(value)),
+            double d => HandleNumber(d),
+            float f => HandleNumber((double)f),
+            decimal dec => HandleDecimal(dec),
+            int i => HandleSignedInteger(i),
+            long l => HandleSignedInteger(l),
+            DateTime dt => HandleNumber(ExcelDateSystemConverter.ToSerial(dt, dateSystem)),
+            DateTimeOffset dto => HandleDateTimeOffset(dto, sharedStringHandler, dateTimeOffsetStrategy, dateSystem, nameof(value)),
+#if NET6_0_OR_GREATER
+            DateOnly dateOnly => HandleNumber(ExcelDateSystemConverter.ToSerial(dateOnly.ToDateTime(TimeOnly.MinValue), dateSystem)),
+            TimeOnly timeOnly => HandleNumber(timeOnly.ToTimeSpan().TotalDays),
+#endif
+            TimeSpan ts => HandleNumber(ts.TotalDays),
+            bool b => HandleBoolean(b),
+            uint ui => HandleUnsignedInteger(ui),
+            ulong ul => HandleUnsignedInteger(ul),
+            ushort us => HandleUnsignedInteger(us),
+            byte by => HandleUnsignedInteger(by),
+            sbyte sb => HandleSignedInteger(sb),
+            short sh => HandleSignedInteger(sh),
+            Guid guid => HandleSharedString(guid.ToString(), sharedStringHandler, nameof(value)),
+            Enum e => HandleSharedString(e.ToString(), sharedStringHandler, nameof(value)),
+            char ch => HandleSharedString(ch.ToString(), sharedStringHandler, nameof(value)),
+            Uri uri => HandleSharedString(uri.ToString(), sharedStringHandler, nameof(value)),
+            _ => HandleSharedString(value.ToString() ?? string.Empty, sharedStringHandler, nameof(value))
+        };
+    }
+
+    internal static (CellValue, CellValues) HandleNumber(double number) =>
+        (CreateNumberCellValue(number), CellValues.Number);
+
+    internal static (CellValue, CellValues) HandleDecimal(decimal value) =>
+        (CreateTextCellValue(value.ToString(CultureInfo.InvariantCulture)), CellValues.Number);
+
+    internal static (CellValue, CellValues) HandleSignedInteger(long integer) =>
+        (CreateTextCellValue(InvariantNumberText.Get(integer)), CellValues.Number);
+
+    internal static (CellValue, CellValues) HandleUnsignedInteger(ulong integer) =>
+        (CreateTextCellValue(InvariantNumberText.Get(integer)), CellValues.Number);
+
+    internal static (CellValue, CellValues) HandleDateTimeOffset(
+        DateTimeOffset value,
+        Func<string, CellValue> sharedStringHandler,
+        Func<DateTimeOffset, DateTime> dateTimeOffsetStrategy,
+        ExcelDateSystem dateSystem,
+        string? paramName) {
+        if (sharedStringHandler is null) {
+            throw new ArgumentNullException(nameof(sharedStringHandler));
+        }
+
+        if (dateTimeOffsetStrategy is null) {
+            throw new ArgumentNullException(nameof(dateTimeOffsetStrategy));
+        }
+
+        return TryConvertDateTimeOffset(
+                value,
+                dateTimeOffsetStrategy,
+                dateSystem,
+                out _,
+                out double serial)
+            ? HandleNumber(serial)
+            : HandleDateTimeOffsetFallback(value, sharedStringHandler, paramName);
+    }
+
+    internal static bool TryConvertDateTimeOffset(
+        DateTimeOffset value,
+        Func<DateTimeOffset, DateTime> dateTimeOffsetStrategy,
+        ExcelDateSystem dateSystem,
+        out DateTime converted,
+        out double serial) {
+        try {
+            converted = dateTimeOffsetStrategy(value);
+        } catch (Exception ex) {
+            throw new InvalidOperationException("The configured DateTimeOffset write strategy threw an exception.", ex);
+        }
+
+        if (value.UtcDateTime < ExcelMinimumSupportedDate) {
+            serial = 0D;
+            return false;
+        }
+        try {
+            serial = ExcelDateSystemConverter.ToSerial(converted, dateSystem);
+            return true;
+        } catch (ArgumentException) {
+            serial = 0D;
+            return false;
+        } catch (OverflowException) {
+            serial = 0D;
+            return false;
+        }
+    }
+
+    private static (CellValue, CellValues) HandleDateTimeOffsetFallback(
+        DateTimeOffset value,
+        Func<string, CellValue> sharedStringHandler,
+        string? paramName) =>
+        HandleSharedString(value.ToString("o", CultureInfo.InvariantCulture), sharedStringHandler, paramName ?? nameof(value));
+
+    internal static (CellValue, CellValues) HandleBoolean(bool value) =>
+        (CloneCellValue(value ? TrueTemplate : FalseTemplate), CellValues.Boolean);
+
+    internal static (CellValue, CellValues) HandleEmptyString() =>
+        (CloneCellValue(EmptyStringTemplate), CellValues.String);
+
+    internal static (CellValue, CellValues) HandleSharedString(string text, Func<string, CellValue> sharedStringHandler, string? paramName = null) {
+        if (sharedStringHandler is null) {
+            throw new ArgumentNullException(nameof(sharedStringHandler));
+        }
+
+        ValidateSharedStringLength(text, paramName ?? nameof(text));
+        return (sharedStringHandler(text), CellValues.SharedString);
+    }
+
+    internal static void ValidateSharedStringLength(string text, string paramName) {
+        if (text.Length > SharedStringCharacterLimit) {
+            throw new ArgumentException("String exceeds Excel's limit of 32,767 characters.", paramName);
+        }
+    }
+
+    private static CellValue CreateNumberCellValue(double number) =>
+        new(InvariantNumberText.Get(number));
+
+    private static CellValue CreateTextCellValue(string text) => new(text);
+
+    private static CellValue CloneCellValue(CellValue template) => new(template.Text);
+}

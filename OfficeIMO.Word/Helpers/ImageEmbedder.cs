@@ -1,0 +1,136 @@
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Wordprocessing;
+using WordDrawing = DocumentFormat.OpenXml.Wordprocessing.Drawing;
+using OfficeIMO.Drawing;
+using A = DocumentFormat.OpenXml.Drawing;
+using DW = DocumentFormat.OpenXml.Drawing.Wordprocessing;
+using PIC = DocumentFormat.OpenXml.Drawing.Pictures;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace OfficeIMO.Word {
+    /// <summary>
+    /// Provides methods for embedding images into Wordprocessing documents.
+    /// </summary>
+    internal static class ImageEmbedder {
+        /// <summary>
+        /// Creates a run element containing an image loaded from the specified source.
+        /// </summary>
+        /// <param name="mainPart">Main document part where the image will be stored.</param>
+        /// <param name="src">Path, URI or data URI representing the image.</param>
+        /// <returns>A <see cref="Run"/> containing the embedded image.</returns>
+        public static Run CreateImageRun(MainDocumentPart mainPart, string src) {
+            byte[] bytes = ResolveImageSource(src);
+            return CreateImageRun(mainPart, bytes);
+        }
+
+        /// <summary>
+        /// Creates a run element containing an image. HTTP and HTTPS sources are retrieved asynchronously;
+        /// local files and data URIs are resolved without network I/O.
+        /// </summary>
+        public static async Task<Run> CreateImageRunAsync(
+            MainDocumentPart mainPart,
+            string src,
+            CancellationToken cancellationToken = default) {
+            return await CreateImageRunCoreAsync(mainPart, src, null, cancellationToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Creates an image run using an explicit policy for HTTP and HTTPS sources.
+        /// </summary>
+        public static Task<Run> CreateImageRunAsync(
+            MainDocumentPart mainPart,
+            string src,
+            OfficeRemoteImageLoadOptions remoteImageOptions,
+            CancellationToken cancellationToken = default) {
+            if (remoteImageOptions == null) throw new ArgumentNullException(nameof(remoteImageOptions));
+            return CreateImageRunCoreAsync(mainPart, src, remoteImageOptions, cancellationToken);
+        }
+
+        private static async Task<Run> CreateImageRunCoreAsync(
+            MainDocumentPart mainPart,
+            string src,
+            OfficeRemoteImageLoadOptions? remoteImageOptions,
+            CancellationToken cancellationToken) {
+            if (Uri.TryCreate(src, UriKind.Absolute, out Uri? uri)
+                && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)) {
+                OfficeRemoteImage image = await OfficeRemoteImageLoader.LoadAsync(src, remoteImageOptions, cancellationToken).ConfigureAwait(false);
+                return CreateImageRun(mainPart, image.ToBytes());
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            return CreateImageRun(mainPart, ResolveImageSource(src));
+        }
+
+        private static Run CreateImageRun(MainDocumentPart mainPart, byte[] bytes) {
+            OfficeImageInfo image = OfficeImageReader.Identify(bytes);
+            long cx = (long)(image.Width * 9525L);
+            long cy = (long)(image.Height * 9525L);
+            string contentType = image.MimeType;
+
+            ImagePart imagePart = mainPart.AddImagePart(contentType);
+            using (MemoryStream ms = new MemoryStream(bytes)) {
+                imagePart.FeedData(ms);
+            }
+            string relationshipId = mainPart.GetIdOfPart(imagePart);
+            uint firstDrawingId = WordDrawingIdAllocator.Reserve(mainPart, 2U);
+
+            var inline = new DW.Inline(
+                new DW.Extent { Cx = cx, Cy = cy },
+                new DW.EffectExtent { LeftEdge = 0L, TopEdge = 0L, RightEdge = 0L, BottomEdge = 0L },
+                new DW.DocProperties { Id = firstDrawingId, Name = "Picture" },
+                new DW.NonVisualGraphicFrameDrawingProperties(new A.GraphicFrameLocks { NoChangeAspect = true }),
+                new A.Graphic(
+                    new A.GraphicData(
+                        new PIC.Picture(
+                            new PIC.NonVisualPictureProperties(
+                                new PIC.NonVisualDrawingProperties { Id = firstDrawingId + 1U, Name = "Image" },
+                                new PIC.NonVisualPictureDrawingProperties()),
+                            new PIC.BlipFill(
+                                new A.Blip { Embed = relationshipId },
+                                new A.Stretch(new A.FillRectangle())),
+                            new PIC.ShapeProperties(
+                                new A.Transform2D(new A.Offset { X = 0L, Y = 0L }, new A.Extents { Cx = cx, Cy = cy }),
+                                new A.PresetGeometry(new A.AdjustValueList()) { Preset = A.ShapeTypeValues.Rectangle }))) { Uri = "http://schemas.openxmlformats.org/drawingml/2006/picture" })
+            ) { DistanceFromTop = 0U, DistanceFromBottom = 0U, DistanceFromLeft = 0U, DistanceFromRight = 0U };
+
+            var drawing = new WordDrawing(inline);
+            return new Run(drawing);
+        }
+
+        /// <summary>
+        /// Retrieves raw bytes from a <see cref="WordImage"/> instance.
+        /// </summary>
+        /// <param name="image">Image to extract bytes from.</param>
+        /// <returns>Binary data representing the image.</returns>
+        public static byte[] GetImageBytes(WordImage image) {
+            return image.ToBytes();
+        }
+
+        private static byte[] ResolveImageSource(string src) {
+            if (src.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) {
+                int commaIndex = src.IndexOf(',');
+                string base64Data = src.Substring(commaIndex + 1);
+                return Convert.FromBase64String(base64Data);
+            }
+
+            if (Uri.TryCreate(src, UriKind.Absolute, out var uri)) {
+                if (uri != null) {
+                    if (uri.Scheme == Uri.UriSchemeFile) {
+                        return File.ReadAllBytes(uri.LocalPath);
+                    }
+                    if (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps) {
+                        throw new InvalidOperationException(
+                            "HTTP image sources require CreateImageRunAsync so network I/O is explicit and cancellable.");
+                    }
+                }
+            }
+
+            if (File.Exists(src)) {
+                return File.ReadAllBytes(src);
+            }
+
+            throw new InvalidOperationException("Unable to resolve image source: " + src);
+        }
+    }
+}

@@ -1,0 +1,64 @@
+# OfficeIMO.Latex
+
+`OfficeIMO.Latex` is a dependency-free, source-preserving LaTeX2e interoperability engine. It implements the bounded `OfficeIMO` document profile; it is not a TeX compiler and never executes commands, loads packages, or invokes an external runtime.
+
+The native parser retains every input character, exposes tokens, groups, commands, environments, math, comments, and common document semantics, and writes unchanged input exactly.
+
+```csharp
+using OfficeIMO.Latex;
+
+LatexDocument document = LatexDocument.Parse(source);
+LatexParseResult result = LatexDocument.ParseResult(source);
+
+LatexHeading first = document.Headings[0];
+first.Command.GetRequiredArgument(0)!.Content = "Updated section";
+
+string updated = document.ToLatex();
+```
+
+Named profiles make semantic assumptions explicit and testable:
+
+```csharp
+LatexDocument semantic = LatexDocument.Parse(
+    source,
+    LatexParseOptions.CreateProfile(LatexDocumentProfile.OfficeIMO));
+
+LatexDocument preserved = LatexDocument.Parse(
+    source,
+    LatexParseOptions.CreateProfile(LatexDocumentProfile.PreserveOnly));
+```
+
+`OfficeIMO` binds the typed document semantics described below. `PreserveOnly` retains the structural syntax tree without profile-specific headings, paragraphs, lists, figures, tables, citations, references, labels, theorems, or macro-definition projections. Both profiles remain lossless and non-executing.
+
+The profile recognizes article/report/book structure, paragraphs, lists, figures, tabular data, labels/references, citations, theorem-like environments, and inline/display math. Unknown commands and environments remain source-backed instead of disappearing.
+
+`\verb` and verbatim-like environments are opaque tokenizer nodes: braces, percent signs, commands, and environment-looking text inside them are never reparsed as LaTeX structure. The default set includes `verbatim`, `Verbatim`, `lstlisting`, `minted`, and `comment`; add producer-specific names through `LatexParseOptions.VerbatimEnvironmentNames`. Unterminated opaque constructs produce structural diagnostics.
+
+Stream and file loading is bounded by `MaximumInputBytes` and `MaximumInputLength`; token count and nesting depth are bounded separately. Async load/save APIs accept cancellation tokens. UTF-8 output is emitted without an unexpected byte-order mark.
+
+Simple document-local macros can be expanded only when explicitly enabled:
+
+```csharp
+LatexDocument document = LatexDocument.Parse(
+    source,
+    new LatexParseOptions {
+        MacroExpansion = LatexMacroExpansion.SafeSimpleDefinitions
+    });
+
+LatexMacroExpansionResult expansion = document.ExpandSimpleMacros(@"\project{OfficeIMO}");
+```
+
+This is deliberately not general TeX expansion. Replacement control words must be another transitively safe document-local simple macro or an explicitly allow-listed formatting/reference command; file I/O, packages, shell escape, dynamic control sequences, category-code changes, bibliography tools, and TeX typesetting remain outside the product. The operation is bounded string substitution, not a sanitizer: invocation arguments and expanded output must still be treated as untrusted if another system will compile the TeX.
+
+Macro expansion has independent input and output budgets. Configure `MaximumExpansionInputLength` for the invocation source and `MaximumExpansionLength` for the produced text; a long invocation that contracts to a short value is not rejected merely because the output limit is small.
+
+See the [LaTeX support matrix](https://github.com/EvotecIT/OfficeIMO/blob/master/Docs/officeimo.latex-support-matrix.md) for the exact boundary.
+
+Targets: `netstandard2.0`, `net8.0`, `net10.0`, and `net472` on Windows.
+
+## Dependency footprint
+
+- **External:** None; no TeX runtime, compiler, or parser package.
+- **OfficeIMO:** `OfficeIMO.Core`. Parsing, source preservation, bounded macro expansion, and writing are first-party.
+
+See the [complete OfficeIMO package map](../README.md) for related formats and conversion paths.

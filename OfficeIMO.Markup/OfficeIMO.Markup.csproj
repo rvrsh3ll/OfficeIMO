@@ -1,0 +1,68 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <Description>Unified Markdown-inspired OfficeIMO authoring layer with a semantic AST and C#/PowerShell emitters.</Description>
+        <AssemblyName>OfficeIMO.Markup</AssemblyName>
+        <AssemblyTitle>OfficeIMO.Markup</AssemblyTitle>
+        <VersionPrefix>3.3.0</VersionPrefix>
+        <TargetFrameworks>netstandard2.0;net8.0;net10.0</TargetFrameworks>
+        <TargetFrameworks Condition=" '$([MSBuild]::IsOsPlatform(`Windows`))' ">$(TargetFrameworks);net472</TargetFrameworks>
+        <GeneratePackageOnBuild>False</GeneratePackageOnBuild>
+        <IsPackable>False</IsPackable>
+        <Company>Evotec</Company>
+        <Authors>Przemyslaw Klys</Authors>
+        <PackageId>OfficeIMO.Markup</PackageId>
+        <PackageTags>officeimo;markup;markdown;docx;xlsx;pptx;powershell;csharp</PackageTags>
+        <PackageProjectUrl>https://github.com/EvotecIT/OfficeIMO</PackageProjectUrl>
+        <PackageLicenseExpression>MIT</PackageLicenseExpression>
+        <RepositoryUrl>https://github.com/EvotecIT/OfficeIMO</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+        <PackageIcon>OfficeIMO.png</PackageIcon>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <DebugType>portable</DebugType>
+        <ProduceReferenceAssembly>False</ProduceReferenceAssembly>
+        <IsPublishable>False</IsPublishable>
+        <SignAssembly>False</SignAssembly>
+        <GenerateDocumentationFile>True</GenerateDocumentationFile>
+        <NoWarn>$(NoWarn);1591</NoWarn>
+        <LangVersion>Latest</LangVersion>
+        <Nullable>enable</Nullable>
+        <EnableTrimmingPolyfills>false</EnableTrimmingPolyfills>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="..\Assets\OfficeIMO.png">
+            <Pack>True</Pack>
+            <PackagePath>\</PackagePath>
+        </None>
+        <None Include="README.md">
+            <Pack>True</Pack>
+            <PackagePath>README.md</PackagePath>
+        </None>
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\OfficeIMO.Core\OfficeIMO.Core.csproj" />
+        <ProjectReference Include="..\OfficeIMO.Markdown\OfficeIMO.Markdown.csproj" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(TargetFramework)' == 'net472'">
+        <Reference Include="System.Net.Http" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <Using Include="System" />
+        <Using Include="System.Text" />
+        <Using Include="System.Collections.Generic" />
+        <Using Include="System.Linq" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <InternalsVisibleTo Include="OfficeIMO.Markup.Tests" />
+        <InternalsVisibleTo Include="OfficeIMO.Tool" />
+        <InternalsVisibleTo Include="OfficeIMO.Markup.Excel" />
+        <InternalsVisibleTo Include="OfficeIMO.Markup.PowerPoint" />
+        <InternalsVisibleTo Include="OfficeIMO.Markup.Word" />
+    </ItemGroup>
+
+</Project>

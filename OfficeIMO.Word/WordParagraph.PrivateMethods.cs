@@ -1,39 +1,33 @@
-using System;
-using System.Collections.Generic;
 using DocumentFormat.OpenXml.Wordprocessing;
-using System.Linq;
-using DocumentFormat.OpenXml;
 
 namespace OfficeIMO.Word {
+    /// <summary>
+    /// Contains private helper methods for WordParagraph.
+    /// </summary>
     public partial class WordParagraph {
         /// <summary>
-        /// Checks where the paragraph is located. If it is located in the header, footer or main document.
-        /// This is required for the image processing to work properly for header and footers
+        /// Checks which document story owns the paragraph.
+        /// This is required for image processing because each story owns its own image relationships
         /// as the location of the image matters to be able to display it properly.
         /// </summary>
         /// <returns></returns>
         internal OpenXmlElement Location() {
-            // i'm assuming the depth shouldn't be more than 10 to get a parent of paragraph
-            int count = 0;
             var parent = this._paragraph.Parent;
 
-            do {
-                if (parent != null) {
-                    if (parent.GetType() == typeof(Header)) {
-                        return parent;
-                    } else if (parent.GetType() == typeof(Footer)) {
-                        return parent;
-                    } else if (parent.GetType() == typeof(Document)) {
-                        return parent;
-                    }
-
-                    parent = parent.Parent;
+            while (parent != null) {
+                if (parent is Header
+                    or Footer
+                    or Document
+                    or Footnotes
+                    or Endnotes
+                    or Comments) {
+                    return parent;
                 }
 
-                count++;
-            } while (count < 10 || parent != null);
+                parent = parent.Parent;
+            }
 
-            return null;
+            throw new InvalidOperationException("Unable to determine the paragraph's document story.");
         }
 
         /// <summary>
@@ -67,20 +61,16 @@ namespace OfficeIMO.Word {
             return run;
         }
 
-        private RunProperties VerifyRunProperties(Hyperlink hyperlink, Run run, RunProperties runProperties) {
-            VerifyRun(hyperlink, run);
+        private RunProperties VerifyRunProperties(Hyperlink hyperlink, Run run, RunProperties? runProperties) {
+            run = VerifyRun(hyperlink, run);
             if (run != null) {
+                runProperties = run.GetFirstChild<RunProperties>();
                 if (runProperties == null) {
-                    var text = run.ChildElements.OfType<Text>().FirstOrDefault();
-                    if (text != null) {
-                        text.InsertBeforeSelf(new RunProperties());
-                    } else {
-                        run.Append(new RunProperties());
-                    }
+                    runProperties = run.PrependChild(new RunProperties());
                 }
             }
 
-            return runProperties;
+            return runProperties!;
         }
 
         /// <summary>
@@ -89,18 +79,16 @@ namespace OfficeIMO.Word {
         /// <returns></returns>
         private RunProperties VerifyRunProperties() {
             VerifyRun();
-            if (this._run != null) {
-                if (this._runProperties == null) {
-                    var text = _run.ChildElements.OfType<Text>().FirstOrDefault();
-                    if (text != null) {
-                        text.InsertBeforeSelf(new RunProperties());
-                    } else {
-                        this._run.Append(new RunProperties());
-                    }
-                }
+            if (_run == null) {
+                throw new InvalidOperationException("Run is not initialized.");
             }
 
-            return this._runProperties;
+            var runProperties = _run.GetFirstChild<RunProperties>();
+            if (runProperties == null) {
+                runProperties = _run.PrependChild(new RunProperties());
+            }
+
+            return runProperties;
         }
 
         /// <summary>
@@ -110,12 +98,11 @@ namespace OfficeIMO.Word {
         private Text VerifyText() {
             if (_text == null) {
                 var run = VerifyRun();
-
-                var text = new Text { Space = SpaceProcessingModeValues.Preserve }; // this ensures spaces are preserved between runs
-                this._run.Append(text);
+                var text = new Text { Space = SpaceProcessingModeValues.Preserve };
+                run.Append(text);
+                return text;
             }
-
-            return this._text;
+            return this._text!;
         }
 
         //private void LoadListToDocument(WordDocument document, WordParagraph wordParagraph) {
@@ -139,41 +126,6 @@ namespace OfficeIMO.Word {
         //        }
         //    }
         //}
-
-        /// <summary>
-        /// Combines the identical runs.
-        /// </summary>
-        /// <param name="body"></param>
-        ///
-        ///
-        /// https://stackoverflow.com/questions/31056953/when-using-mergefield-fieldcodes-in-openxml-sdk-in-c-sharp-why-do-field-codes-di
-        public static void CombineIdenticalRuns(Body body) {
-
-            List<Run> runsToRemove = new List<Run>();
-
-            foreach (Paragraph para in body.Descendants<Paragraph>()) {
-                List<Run> runs = para.Elements<Run>().ToList();
-                for (int i = runs.Count - 2; i >= 0; i--) {
-                    Text text1 = runs[i].GetFirstChild<Text>();
-                    Text text2 = runs[i + 1].GetFirstChild<Text>();
-                    if (text1 != null && text2 != null) {
-                        string rPr1 = "";
-                        string rPr2 = "";
-                        if (runs[i].RunProperties != null) rPr1 = runs[i].RunProperties.OuterXml;
-                        if (runs[i + 1].RunProperties != null) rPr2 = runs[i + 1].RunProperties.OuterXml;
-                        if (rPr1 == rPr2) {
-                            text1.Text += text2.Text;
-                            runsToRemove.Add(runs[i + 1]);
-                        }
-                    }
-                }
-            }
-
-            foreach (Run run in runsToRemove) {
-                run.Remove();
-            }
-        }
-
         private List<string> ConvertStringToList(string text) {
             string[] splitStrings = { Environment.NewLine, "\r\n", "\n" };
             string[] textSplit = text.Split(splitStrings, StringSplitOptions.RemoveEmptyEntries);
@@ -181,11 +133,11 @@ namespace OfficeIMO.Word {
             for (int i = 0; i < textSplit.Length; i++) {
                 // check if there's new line at the beginning of the text
                 // if there is add empty string to the list
-                if (i == 0 && text.StartsWith(Environment.NewLine)) {
+                if (i == 0 && text.StartsWith(Environment.NewLine, StringComparison.Ordinal)) {
                     list.Add("");
-                } else if (i == 0 && text.StartsWith("\r\n")) {
+                } else if (i == 0 && text.StartsWith("\r\n", StringComparison.Ordinal)) {
                     list.Add("");
-                } else if (i == 0 && text.StartsWith("\n")) {
+                } else if (i == 0 && text.StartsWith("\n", StringComparison.Ordinal)) {
                     list.Add("");
                 }
                 // add splitted text to the list
@@ -212,7 +164,7 @@ namespace OfficeIMO.Word {
         private WordParagraph ConvertToTextWithBreaks(string text) {
             string[] splitStrings = { Environment.NewLine, "\r\n", "\n" };
 
-            WordParagraph wordParagraph = null;
+            WordParagraph? wordParagraph = null;
 
             // check if there's a new line in the text
             if (splitStrings.Any(text.Contains)) {
@@ -223,18 +175,18 @@ namespace OfficeIMO.Word {
                     if (line == "") {
                         wordParagraph = AddBreak();
                     } else {
-                        wordParagraph = new WordParagraph(this._document, this._paragraph, new Run());
+                        wordParagraph = new WordParagraph(this._document, this._paragraph, new Run(), Parent);
                         wordParagraph.Text = line;
-                        this._paragraph.Append(wordParagraph._run);
+                        this._paragraph.Append(wordParagraph._run!);
                     }
                 }
             } else {
-                wordParagraph = new WordParagraph(this._document, this._paragraph, new Run());
+                wordParagraph = new WordParagraph(this._document, this._paragraph, new Run(), Parent);
                 wordParagraph.Text = text;
-                this._paragraph.Append(wordParagraph._run);
+                this._paragraph.Append(wordParagraph._run!);
             }
 
-            return wordParagraph;
+            return wordParagraph!;
         }
     }
 }

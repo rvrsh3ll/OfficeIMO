@@ -1,0 +1,30 @@
+using System.IO;
+using DocumentFormat.OpenXml.Wordprocessing;
+using OfficeIMO.Word;
+using Xunit;
+using Color = OfficeIMO.Drawing.OfficeColor;
+
+namespace OfficeIMO.Tests {
+    public partial class Word {
+        [Fact]
+        public void Test_ParagraphBordersAndShading() {
+            string filePath = Path.Combine(_directoryWithFiles, "ParagraphBordersAndShading.docx");
+            using (var document = WordDocument.Create(filePath)) {
+                var paragraph = document.AddParagraph("Border and shading");
+                paragraph.Borders.LeftStyle = WordBorderStyle.Thick;
+                paragraph.Borders.LeftColor = Color.Red;
+                paragraph.Borders.LeftSize = 24;
+                paragraph.ShadingFillColor = Color.LightGray;
+                document.Save();
+            }
+
+            using (var document = WordDocument.Load(filePath)) {
+                var paragraph = document.Paragraphs[0];
+                Assert.Equal(WordBorderStyle.Thick, paragraph.Borders.LeftStyle);
+                Assert.Equal(Color.Red.ToRgbHex(), paragraph.Borders.LeftColor!.Value.ToRgbHex());
+                Assert.Equal(24U, paragraph.Borders.LeftSize);
+                Assert.Equal(Color.LightGray.ToRgbHex(), paragraph.ShadingFillColorHex);
+            }
+        }
+    }
+}

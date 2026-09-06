@@ -18,7 +18,7 @@ namespace OfficeIMO.Examples.Word {
                 Console.WriteLine("Paragraph count (expected 2): " + document.Paragraphs.Count);
 
                 var paragraph3 = document.AddParagraph("This is a start \t\t And more");
-                paragraph3.Underline = UnderlineValues.DashLong;
+                paragraph3.Underline = WordUnderlineStyle.DashLong;
 
                 Console.WriteLine("Paragraph count (expected 3): " + document.Paragraphs.Count);
 
@@ -51,7 +51,8 @@ namespace OfficeIMO.Examples.Word {
 
                 Console.WriteLine("Paragraph count (expected 28): " + document.Paragraphs.Count);
 
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
     }

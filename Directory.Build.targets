@@ -1,0 +1,65 @@
+<Project>
+  <!-- Production projects inherit TreatWarningsAsErrors=true from Directory.Build.props.
+       Tests and benchmarks still show warnings, but warnings do not block local or CI validation. -->
+  <PropertyGroup Condition="
+      '$(IsTestProject)' == 'true'
+      Or '$(MSBuildProjectName)' == 'OfficeIMO.Word.Tests'
+      Or '$(MSBuildProjectName)' == 'OfficeIMO.CSV.Tests'
+      Or '$(MSBuildProjectName)' == 'OfficeIMO.VerifyTests'
+      Or '$(MSBuildProjectName)' == 'OfficeIMO.MarkdownRenderer.Wpf.Tests'
+      Or $([System.String]::Copy('$(MSBuildProjectName)').Contains('.Benchmarks'))">
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <!-- Examples are executable documentation. Keep nullable enabled so annotated samples do not emit CS8632 noise. -->
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'OfficeIMO.Examples'">
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <!-- Older target frameworks need the compiler marker for records and init-only properties.
+       Compile an internal marker into each assembly instead of exposing one package's shim as public API. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)Build/Compatibility/IsExternalInit.cs"
+             Link="System.Runtime.CompilerServices/IsExternalInit.cs" />
+  </ItemGroup>
+
+  <!-- Validate every newly produced public package across compatible frameworks. -->
+  <PropertyGroup Condition="
+      '$(PackageId)' != ''
+      And '$(IsPackable)' != 'false'
+      And '$(IsTestProject)' != 'true'
+      And !$([System.String]::Copy('$(MSBuildProjectName)').Contains('.Benchmarks'))">
+    <EnablePackageValidation>true</EnablePackageValidation>
+  </PropertyGroup>
+
+  <!-- OfficeIMO 3.4 intentionally redesigns the 3.3 document, conversion, and PDF surfaces.
+       Keep reviewed breaks in explicit suppression files so any additional public API regression
+       fails package validation. -->
+  <PropertyGroup Condition="
+      '$(PackageId)' == 'OfficeIMO.Pdf'
+      Or '$(PackageId)' == 'OfficeIMO.ChartForgeX'
+      Or '$(PackageId)' == 'OfficeIMO.Reader.Pdf'
+      Or '$(PackageId)' == 'OfficeIMO.Word.Pdf'
+      Or '$(PackageId)' == 'OfficeIMO.Excel.Pdf'
+      Or '$(PackageId)' == 'OfficeIMO.PowerPoint.Pdf'
+      Or '$(PackageId)' == 'OfficeIMO.Rtf.Pdf'
+      Or '$(PackageId)' == 'OfficeIMO.Html.Pdf'
+      Or '$(PackageId)' == 'OfficeIMO.Html.Pdf.Browser'
+      Or '$(PackageId)' == 'OfficeIMO.Markdown.Pdf'
+      Or '$(PackageId)' == 'OfficeIMO.Mhtml.Pdf'
+      Or '$(PackageId)' == 'OfficeIMO.OneNote.Pdf'
+      Or '$(PackageId)' == 'OfficeIMO.AsciiDoc.Pdf'
+      Or '$(PackageId)' == 'OfficeIMO.Latex.Pdf'
+      Or '$(PackageId)' == 'OfficeIMO.OpenDocument.Odt.Pdf'
+      Or '$(PackageId)' == 'OfficeIMO.OpenDocument.Ods.Pdf'
+      Or '$(PackageId)' == 'OfficeIMO.OpenDocument.Odp.Pdf'
+      Or '$(PackageId)' == 'OfficeIMO.Visio.Pdf'
+      Or '$(PackageId)' == 'OfficeIMO.AsciiDoc'
+      Or '$(PackageId)' == 'OfficeIMO.Latex'
+      Or '$(PackageId)' == 'OfficeIMO.Rtf'">
+    <PackageValidationBaselineVersion>3.3.0</PackageValidationBaselineVersion>
+    <CompatibilitySuppressionFilePath>$(MSBuildProjectDirectory)/CompatibilitySuppressions.xml</CompatibilitySuppressionFilePath>
+  </PropertyGroup>
+
+</Project>

@@ -1,8 +1,3 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Wordprocessing;
 
 namespace OfficeIMO.Word {
@@ -54,6 +49,27 @@ namespace OfficeIMO.Word {
         B5
     }
 
+    /// <summary>Dimensions and Word paper code for a built-in page-size preset.</summary>
+    public sealed class WordPageSizeDefinition {
+        internal WordPageSizeDefinition(uint widthTwips, uint heightTwips, ushort paperCode) {
+            WidthTwips = widthTwips;
+            HeightTwips = heightTwips;
+            PaperCode = paperCode;
+        }
+
+        /// <summary>Gets the page width in twips.</summary>
+        public uint WidthTwips { get; }
+
+        /// <summary>Gets the page height in twips.</summary>
+        public uint HeightTwips { get; }
+
+        /// <summary>Gets the Word paper-size code.</summary>
+        public ushort PaperCode { get; }
+    }
+
+    /// <summary>
+    /// Provides helpers for manipulating Word page size and orientation.
+    /// </summary>
     public class WordPageSizes {
         private readonly WordSection _section;
         private readonly WordDocument _document;
@@ -63,21 +79,24 @@ namespace OfficeIMO.Word {
         /// </summary>
         public WordPageSize? PageSize {
             get {
-                var pageSize = _section._sectionProperties.ChildElements.OfType<PageSize>().FirstOrDefault();
+                var pageSize = _section._sectionProperties.GetFirstChild<PageSize>();
                 if (pageSize != null) {
-                    foreach (WordPageSize wordPageSize in Enum.GetValues(typeof(WordPageSize))) {
+                    foreach (WordPageSize wordPageSize in global::OfficeIMO.Internal.EnumCompat.GetValues<WordPageSize>()) {
                         if (wordPageSize == WordPageSize.Unknown) {
                             continue;
                         }
 
                         var pageSizeBuiltin = GetDefault(wordPageSize);
-                        if ((pageSizeBuiltin.Width == null && pageSize.Height == null) &&
+                        if (pageSizeBuiltin == null) {
+                            continue;
+                        }
+
+                        if ((pageSizeBuiltin.Width == null && pageSize.Width == null) &&
                             (pageSizeBuiltin.Height == null && pageSize.Height == null) &&
                             (pageSizeBuiltin.Code == null && pageSize.Code == null)) {
                             return wordPageSize;
                         }
 
-                        // lets check for standard size
                         if (pageSizeBuiltin.Width != null && pageSize.Width != null &&
                             pageSizeBuiltin.Height != null && pageSize.Height != null &&
                             pageSizeBuiltin.Code != null && pageSize.Code != null &&
@@ -87,7 +106,6 @@ namespace OfficeIMO.Word {
                             return wordPageSize;
                         }
 
-                        // lets check for standard size, but with changed orientation
                         if (pageSizeBuiltin.Width != null && pageSize.Width != null &&
                             pageSizeBuiltin.Height != null && pageSize.Height != null &&
                             pageSizeBuiltin.Code != null && pageSize.Code != null &&
@@ -97,10 +115,8 @@ namespace OfficeIMO.Word {
                             return wordPageSize;
                         }
                     }
-                    // page size is set but we don't know what it is
                     return WordPageSize.Unknown;
                 } else {
-                    // not set page size
                     return null;
                 }
             }
@@ -108,113 +124,87 @@ namespace OfficeIMO.Word {
         }
 
         private void SetPageSize(WordPageSize? wordPageSize) {
-            if (wordPageSize == null) {
-                var pageSize = _section._sectionProperties.ChildElements.OfType<PageSize>().FirstOrDefault();
-                if (pageSize != null) {
-                    pageSize.Remove();
-                }
-            } else {
-                var pageSizeSettings = GetDefault(wordPageSize);
-                if (pageSizeSettings == null) {
-                    var pageSize = _section._sectionProperties.ChildElements.OfType<PageSize>().FirstOrDefault();
-                    if (pageSize != null) {
-                        pageSize.Remove();
-                    }
-                } else {
-                    var pageSize = _section._sectionProperties.GetFirstChild<PageSize>();
-                    if (pageSize == null) {
-                        _section._sectionProperties.Append(pageSizeSettings);
-                    } else {
-                        // page size already exists, we will be overwriting it, but before we do, we need to make sure to fix page orientation
-                        // since it may be already set
-                        bool requiresPageOrient = false;
-                        PageOrientationValues pageOrientation = PageOrientationValues.Portrait;
-                        if (pageSize.Orient != null && pageSize.Orient.Value != PageOrientationValues.Portrait) {
-                            pageOrientation = pageSize.Orient;
-                            requiresPageOrient = true;
-                        }
-                        // remove page size (faster than reassign all properties).
-                        pageSize.Remove();
-                        _section._sectionProperties.Append(pageSizeSettings);
+            var pageSize = _section._sectionProperties.GetFirstChild<PageSize>();
 
-                        // we now need to set page orientation back if it was set
-                        if (requiresPageOrient) {
-                            SetOrientation(_section._sectionProperties, pageOrientation);
-                        }
-                    }
-                }
+            if (wordPageSize == null) {
+                pageSize?.Remove();
+                return;
             }
+
+            var pageSizeSettings = GetDefault(wordPageSize);
+            if (pageSizeSettings == null) {
+                pageSize?.Remove();
+                return;
+            }
+
+            if (pageSize == null) {
+                _section._sectionProperties.Append(pageSizeSettings);
+                return;
+            }
+
+            bool requiresPageOrient = false;
+            PageOrientationValues pageOrientation = PageOrientationValues.Portrait;
+            if (pageSize.Orient != null && pageSize.Orient.Value != PageOrientationValues.Portrait) {
+                pageOrientation = pageSize.Orient.Value;
+                requiresPageOrient = true;
+            }
+
+            pageSize.Remove();
+            _section._sectionProperties.Append(pageSizeSettings);
+
+            if (requiresPageOrient) {
+                SetOrientation(_section._sectionProperties, pageOrientation);
+            }
+        }
+
+        private PageSize EnsurePageSize() {
+            var pageSize = _section._sectionProperties.GetFirstChild<PageSize>();
+            if (pageSize == null) {
+                pageSize = new PageSize();
+                _section._sectionProperties.Append(pageSize);
+            }
+            return pageSize;
         }
 
         /// <summary>
         /// Get or Set section/page Width
         /// </summary>
-        public UInt32Value Width {
+        public uint? Width {
             get {
-                var pageSize = _section._sectionProperties.ChildElements.OfType<PageSize>().FirstOrDefault();
-                if (pageSize != null) {
-                    return pageSize.Width.Value;
-                }
-
-                return null;
+                var pageSize = _section._sectionProperties.GetFirstChild<PageSize>();
+                return pageSize?.Width?.Value;
             }
             set {
-                if (_section._sectionProperties != null) {
-                    var pageSize = _section._sectionProperties.ChildElements.OfType<PageSize>().FirstOrDefault();
-                    if (pageSize == null) {
-                        pageSize = new PageSize();
-                    }
-
-                    pageSize.Width = value;
-                }
+                var pageSize = EnsurePageSize();
+                pageSize.Width = value;
             }
         }
 
         /// <summary>
         /// Get or Set section/page Height
         /// </summary>
-        public UInt32Value Height {
+        public uint? Height {
             get {
-                var pageSize = _section._sectionProperties.ChildElements.OfType<PageSize>().FirstOrDefault();
-                if (pageSize != null) {
-                    return pageSize.Height.Value;
-                }
-
-                return null;
+                var pageSize = _section._sectionProperties.GetFirstChild<PageSize>();
+                return pageSize?.Height?.Value;
             }
             set {
-                if (_section._sectionProperties != null) {
-                    var pageSize = _section._sectionProperties.ChildElements.OfType<PageSize>().FirstOrDefault();
-                    if (pageSize == null) {
-                        pageSize = new PageSize();
-                    }
-
-                    pageSize.Height = value;
-                }
+                var pageSize = EnsurePageSize();
+                pageSize.Height = value;
             }
         }
 
         /// <summary>
         /// Get or Set section/page Code
         /// </summary>
-        public UInt16Value Code {
+        public ushort? Code {
             get {
-                var pageSize = _section._sectionProperties.ChildElements.OfType<PageSize>().FirstOrDefault();
-                if (pageSize != null) {
-                    return pageSize.Code;
-                }
-
-                return null;
+                var pageSize = _section._sectionProperties.GetFirstChild<PageSize>();
+                return pageSize?.Code?.Value;
             }
             set {
-                if (_section._sectionProperties != null) {
-                    var pageSize = _section._sectionProperties.ChildElements.OfType<PageSize>().FirstOrDefault();
-                    if (pageSize == null) {
-                        pageSize = new PageSize();
-                    }
-
-                    pageSize.Code = value;
-                }
+                var pageSize = EnsurePageSize();
+                pageSize.Code = value;
             }
         }
 
@@ -235,7 +225,7 @@ namespace OfficeIMO.Word {
             var pageSize = sectionProperties.Descendants<PageSize>().FirstOrDefault();
             if (pageSize == null) {
                 // we need to setup default values for A4 
-                pageSize = WordPageSizes.A4;
+                pageSize = ToOpenXmlPageSize(WordPageSizes.A4);
                 pageSize.Orient = PageOrientationValues.Portrait;
                 sectionProperties.Append(pageSize);
             }
@@ -256,9 +246,9 @@ namespace OfficeIMO.Word {
         /// <summary>
         /// Get or Set section/page Orientation
         /// </summary>
-        public PageOrientationValues Orientation {
-            get => GetOrientation(_section._sectionProperties);
-            set => SetOrientation(_section._sectionProperties, value);
+        public OfficePageOrientation Orientation {
+            get => GetOrientation(_section._sectionProperties).ToOfficeEnum();
+            set => SetOrientation(_section._sectionProperties, value.ToOpenXml());
         }
 
         /// <summary>
@@ -271,64 +261,73 @@ namespace OfficeIMO.Word {
             _document = wordDocument;
         }
 
-        private static PageSize GetDefault(WordPageSize? pageSize) {
+        private static PageSize? GetDefault(WordPageSize? pageSize) {
+            if (pageSize == null) {
+                return null;
+            }
+
             switch (pageSize) {
-                case WordPageSize.A3: return A3;
-                case WordPageSize.A4: return A4;
-                case WordPageSize.A5: return A5;
-                case WordPageSize.Executive: return Executive;
+                case WordPageSize.A3: return ToOpenXmlPageSize(A3);
+                case WordPageSize.A4: return ToOpenXmlPageSize(A4);
+                case WordPageSize.A5: return ToOpenXmlPageSize(A5);
+                case WordPageSize.Executive: return ToOpenXmlPageSize(Executive);
                 case WordPageSize.Unknown: return null;
-                case WordPageSize.A6: return A6;
-                case WordPageSize.B5: return B5;
-                case WordPageSize.Letter: return Letter;
-                case WordPageSize.Statement: return Statement;
-                case WordPageSize.Legal: return Legal;
+                case WordPageSize.A6: return ToOpenXmlPageSize(A6);
+                case WordPageSize.B5: return ToOpenXmlPageSize(B5);
+                case WordPageSize.Letter: return ToOpenXmlPageSize(Letter);
+                case WordPageSize.Statement: return ToOpenXmlPageSize(Statement);
+                case WordPageSize.Legal: return ToOpenXmlPageSize(Legal);
             }
 
             throw new ArgumentOutOfRangeException(nameof(pageSize));
         }
 
-        public static PageSize A3 {
-            get {
-                return new PageSize() {
-                    Width = (UInt32Value)16838U,
-                    Height = (UInt32Value)23811U,
-                    Code = (UInt16Value)8U
-                };
-            }
-        }
+        /// <summary>
+        /// Gets the default A3 page size.
+        /// </summary>
+        public static WordPageSizeDefinition A3 { get; } = new WordPageSizeDefinition(16838U, 23811U, 8);
 
-        public static PageSize A4 {
-            get {
-                return new PageSize() {
-                    Width = (UInt32Value)11906U,
-                    Height = (UInt32Value)16838U,
-                    Code = (UInt16Value)9U
-                };
-            }
-        }
+        /// <summary>
+        /// Gets the default A4 page size.
+        /// </summary>
+        public static WordPageSizeDefinition A4 { get; } = new WordPageSizeDefinition(11906U, 16838U, 9);
 
-        public static PageSize A5 {
-            get {
-                return new PageSize() {
-                    Width = (UInt32Value)8391U,
-                    Height = (UInt32Value)11906U,
-                    Code = (UInt16Value)11U
-                };
-            }
-        }
+        /// <summary>
+        /// Gets the default A5 page size.
+        /// </summary>
+        public static WordPageSizeDefinition A5 { get; } = new WordPageSizeDefinition(8391U, 11906U, 11);
 
-        public static PageSize Executive =>
-            new PageSize() {
-                Width = (UInt32Value)10440U,
-                Height = (UInt32Value)15120U,
-                Code = (UInt16Value)7U
+        /// <summary>
+        /// Gets the default Executive page size.
+        /// </summary>
+        public static WordPageSizeDefinition Executive { get; } = new WordPageSizeDefinition(10440U, 15120U, 7);
+
+        /// <summary>
+        /// Gets the default A6 page size.
+        /// </summary>
+        public static WordPageSizeDefinition A6 { get; } = new WordPageSizeDefinition(5953U, 8391U, 70);
+        /// <summary>
+        /// Gets the default B5 page size.
+        /// </summary>
+        public static WordPageSizeDefinition B5 { get; } = new WordPageSizeDefinition(10318U, 14570U, 13);
+        /// <summary>
+        /// Gets the default Statement page size.
+        /// </summary>
+        public static WordPageSizeDefinition Statement { get; } = new WordPageSizeDefinition(7920U, 12240U, 6);
+        /// <summary>
+        /// Gets the default Legal page size.
+        /// </summary>
+        public static WordPageSizeDefinition Legal { get; } = new WordPageSizeDefinition(12240U, 20160U, 5);
+        /// <summary>
+        /// Gets the default Letter page size.
+        /// </summary>
+        public static WordPageSizeDefinition Letter { get; } = new WordPageSizeDefinition(12240U, 15840U, 1);
+
+        private static PageSize ToOpenXmlPageSize(WordPageSizeDefinition definition) =>
+            new PageSize {
+                Width = definition.WidthTwips,
+                Height = definition.HeightTwips,
+                Code = definition.PaperCode
             };
-
-        public static PageSize A6 => new PageSize() { Width = (UInt32Value)5953U, Height = (UInt32Value)8391U, Code = (UInt16Value)70U };
-        public static PageSize B5 => new PageSize() { Width = (UInt32Value)10318U, Height = (UInt32Value)14570U, Code = (UInt16Value)13U };
-        public static PageSize Statement => new PageSize() { Width = (UInt32Value)7920U, Height = (UInt32Value)12240U, Code = (UInt16Value)6U };
-        public static PageSize Legal => new PageSize() { Width = (UInt32Value)12240U, Height = (UInt32Value)20160U, Code = (UInt16Value)5U };
-        public static PageSize Letter => new PageSize() { Width = (UInt32Value)12240U, Height = (UInt32Value)15840U, Code = (UInt16Value)1U };
     }
 }

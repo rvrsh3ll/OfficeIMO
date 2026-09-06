@@ -1,0 +1,187 @@
+using System;
+using System.IO;
+
+namespace OfficeIMO.Drawing;
+
+/// <summary>
+/// Shared dependency-free decoder for raster image bytes that can be painted by <see cref="OfficeRasterCanvas"/>.
+/// </summary>
+/// <remarks>
+/// Decoding produces channel values, not a color-managed sRGB conversion. Embedded ICC profiles
+/// and PNG gamma/chromaticity metadata are validated as container metadata but are not applied
+/// to pixels. Normalize color-managed source images before decoding when matching a managed
+/// display or print pipeline is required.
+/// </remarks>
+public static class OfficeRasterImageDecoder {
+    /// <summary>
+    /// Human-readable summary of raster formats currently decoded by the managed renderer.
+    /// </summary>
+    public const string SupportedFormatDescription = "PNG and APNG frames, JPEG, bounded classic TIFF pages, uncompressed BMP, explicitly selected GIF frames, and lossless VP8L WebP image bytes";
+
+    /// <summary>
+    /// Attempts to decode image bytes into an RGBA raster buffer supported by dependency-free export.
+    /// </summary>
+    public static bool TryDecode(byte[]? bytes, out OfficeRasterImage? image) =>
+        TryDecode(bytes, options: null, out image, out _);
+
+    /// <summary>
+    /// Attempts to decode a bounded raster stream and leaves a seekable stream at its original position.
+    /// </summary>
+    public static bool TryDecode(Stream stream, out OfficeRasterImage? image) =>
+        TryDecode(stream, options: null, out image, out _);
+
+    /// <summary>
+    /// Attempts to decode a bounded raster stream using explicit selection, loss, resource, and cancellation policy.
+    /// </summary>
+    public static bool TryDecode(
+        Stream stream,
+        OfficeRasterDecodeOptions? options,
+        out OfficeRasterImage? image,
+        out OfficeRasterDecodeInfo info) {
+        if (stream == null) throw new ArgumentNullException(nameof(stream));
+        OfficeRasterDecodeOptions effective = options ?? new OfficeRasterDecodeOptions();
+        effective.Validate();
+        long originalPosition = stream.CanSeek ? stream.Position : 0L;
+        try {
+            if (!OfficeBoundedStreamReader.TryRead(
+                    stream, effective.MaximumEncodedBytes, effective.CancellationToken,
+                    out byte[] bytes, out long retainedManagedBytes)) {
+                image = null;
+                info = new OfficeRasterDecodeInfo(OfficeImageFormat.Unknown, 0, effective.FrameIndex, false,
+                    "The raster stream is empty or exceeds the configured encoded-size limit.");
+                return false;
+            }
+            return TryDecode(
+                bytes,
+                effective.WithAdditionalRetainedManagedBytes(retainedManagedBytes),
+                out image,
+                out info);
+        } finally {
+            if (stream.CanSeek) stream.Position = originalPosition;
+        }
+    }
+
+    internal static bool TryDecode(
+        byte[]? bytes,
+        long maximumRasterPixels,
+        System.Threading.CancellationToken cancellationToken,
+        out OfficeRasterImage? image) {
+        if (maximumRasterPixels <= 0L) throw new System.ArgumentOutOfRangeException(nameof(maximumRasterPixels));
+        var options = new OfficeRasterDecodeOptions {
+            MaximumDecodedPixels = Math.Min(maximumRasterPixels, OfficeRasterGuards.MaximumPixels),
+            CancellationToken = cancellationToken
+        };
+        return TryDecode(bytes, options, out image, out _);
+    }
+
+    internal static bool IsWithinPixelLimit(int width, int height, long maximumRasterPixels) =>
+        width > 0 && height > 0 && width <= maximumRasterPixels && height <= maximumRasterPixels / width;
+
+    /// <summary>
+    /// Attempts to decode image bytes using explicit frame and animation-loss policy.
+    /// </summary>
+    public static bool TryDecode(
+        byte[]? bytes,
+        OfficeRasterDecodeOptions? options,
+        out OfficeRasterImage? image,
+        out OfficeRasterDecodeInfo info) {
+        image = null;
+        var effective = options ?? new OfficeRasterDecodeOptions();
+        effective.Validate();
+        effective.CancellationToken.ThrowIfCancellationRequested();
+        if (bytes == null || bytes.Length == 0 || bytes.Length > effective.MaximumEncodedBytes) {
+            info = new OfficeRasterDecodeInfo(OfficeImageFormat.Unknown, 0, effective.FrameIndex, succeeded: false,
+                diagnostic: "Raster image bytes are empty or exceed the configured encoded-size limit.");
+            return false;
+        }
+        if (!OfficeRasterContainerInspector.TryInspectForDecode(
+                bytes, effective, out OfficeRasterContainerInfo? container,
+                out OfficeImageFormat detectedFormat) || container == null) {
+            info = new OfficeRasterDecodeInfo(detectedFormat, 0, effective.FrameIndex, succeeded: false,
+                diagnostic: "The raster container is malformed, unsupported, or outside the configured limits.");
+            return false;
+        }
+        OfficeImageFormat format = container.Format;
+        int frameCount = container.Count;
+        if (effective.FrameIndex >= frameCount) {
+            info = new OfficeRasterDecodeInfo(format, frameCount, effective.FrameIndex, false,
+                "The requested frame or page index is outside the container.", container);
+            return false;
+        }
+        bool carriesAnimationSemantics = frameCount > 1 || container.IsAnimated;
+        if (carriesAnimationSemantics &&
+            effective.FrameLossPolicy == OfficeRasterFrameLossPolicy.RejectMultipleFrames) {
+            info = new OfficeRasterDecodeInfo(format, frameCount, effective.FrameIndex, false,
+                container.IsMultiPage
+                    ? "Multi-page TIFF input was rejected by the configured frame-loss policy."
+                    : "Animated input was rejected by the configured frame-loss policy.",
+                container);
+            return false;
+        }
+
+        if (format == OfficeImageFormat.Gif) {
+            bool decoded = OfficeGifReader.TryDecodeFrame(
+                bytes, effective.FrameIndex, effective.CancellationToken, effective.RetainedManagedBytes,
+                out image, out int decodedFrameCount);
+            string? diagnostic = decoded && container.IsAnimated
+                ? "The selected GIF frame was decoded; GIF playback semantics were not retained in the static raster result."
+                : decoded ? null : "The requested GIF frame could not be decoded.";
+            bool withinLimit = decoded && decodedFrameCount == frameCount && IsDecodedImageWithinLimit(image, effective.MaximumDecodedPixels);
+            if (!withinLimit) image = null;
+            info = new OfficeRasterDecodeInfo(format, frameCount, effective.FrameIndex, withinLimit,
+                withinLimit ? diagnostic : "The requested GIF frame could not be decoded within the configured limits.", container);
+            return withinLimit;
+        }
+
+        if (format == OfficeImageFormat.Png) {
+            if (container.IsAnimated) {
+                bool decoded = OfficeApngDecoder.TryDecodeFrame(bytes, container, effective.FrameIndex,
+                    effective.MaximumDecodedPixels, effective.CancellationToken,
+                    effective.RetainedManagedBytes, out image);
+                if (!decoded) image = null;
+                info = new OfficeRasterDecodeInfo(format, frameCount, effective.FrameIndex, decoded,
+                    decoded
+                        ? "The selected APNG frame was composed; APNG playback semantics were not retained in the static raster result."
+                        : "The selected APNG frame could not be decoded within the configured limits.", container);
+                return decoded;
+            }
+        }
+
+        if (format == OfficeImageFormat.Tiff) {
+            bool decoded = OfficeTiffCodec.TryDecodePage(bytes, effective.FrameIndex, effective, out image);
+            string? diagnostic = decoded && frameCount > 1
+                ? "The selected TIFF page was decoded; remaining pages were not retained in the static raster result."
+                : decoded ? null : "The requested TIFF page could not be decoded.";
+            info = new OfficeRasterDecodeInfo(format, frameCount, effective.FrameIndex, decoded, diagnostic, container);
+            return decoded;
+        }
+
+        if (format == OfficeImageFormat.Webp && container.IsAnimated) {
+            info = new OfficeRasterDecodeInfo(format, frameCount, effective.FrameIndex, false,
+                "Animated WebP pixel decoding remains an explicit caller-codec boundary.", container);
+            return false;
+        }
+
+        effective.CancellationToken.ThrowIfCancellationRequested();
+        bool success = format switch {
+            OfficeImageFormat.Png => OfficePngReader.TryDecode(
+                bytes, effective.CancellationToken, effective.RetainedManagedBytes, out image),
+            OfficeImageFormat.Jpeg => OfficeJpegCodec.TryDecode(
+                bytes, effective.CancellationToken, effective.RetainedManagedBytes, out image),
+            OfficeImageFormat.Bmp => OfficeBmpReader.TryDecode(
+                bytes, effective.CancellationToken, effective.RetainedManagedBytes, out image),
+            OfficeImageFormat.Webp => OfficeWebpCodec.TryDecode(
+                bytes, effective.CancellationToken, effective.RetainedManagedBytes, out image),
+            _ => false
+        };
+        success = success && IsDecodedImageWithinLimit(image, effective.MaximumDecodedPixels);
+        if (!success) image = null;
+        info = new OfficeRasterDecodeInfo(format, frameCount, effective.FrameIndex, success,
+            success ? null : "Raster bytes are not supported by the managed decoder subset or exceed configured limits.", container);
+        return success;
+    }
+
+    private static bool IsDecodedImageWithinLimit(OfficeRasterImage? image, long maximumPixels) =>
+        image != null && IsWithinPixelLimit(image.Width, image.Height, maximumPixels);
+
+}

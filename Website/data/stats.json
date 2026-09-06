@@ -1,0 +1,20 @@
+{
+  "items": [
+    {
+      "value": "118",
+      "label": "Production components"
+    },
+    {
+      "value": "478",
+      "label": "PowerShell commands"
+    },
+    {
+      "value": "137",
+      "label": "Tracked format behaviors"
+    },
+    {
+      "value": "28",
+      "label": "Word, Excel, and PowerPoint variants"
+    }
+  ]
+}

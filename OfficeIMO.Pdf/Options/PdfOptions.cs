@@ -1,0 +1,144 @@
+using OfficeIMO.Drawing;
+
+namespace OfficeIMO.Pdf;
+
+/// <summary>
+/// Options controlling page geometry and default typography for a PDF document.
+/// </summary>
+public sealed partial class PdfOptions {
+    private PdfAlign _headerAlign = PdfAlign.Center;
+    private PdfAlign _footerAlign = PdfAlign.Center;
+    private System.Collections.Generic.List<FooterSegment>? _headerSegments;
+    private System.Collections.Generic.List<FooterSegment>? _firstPageHeaderSegments;
+    private System.Collections.Generic.List<FooterSegment>? _evenPageHeaderSegments;
+    private System.Collections.Generic.List<FooterSegment>? _footerSegments;
+    private System.Collections.Generic.List<FooterSegment>? _firstPageFooterSegments;
+    private System.Collections.Generic.List<FooterSegment>? _evenPageFooterSegments;
+    private string? _headerLeftFormat;
+    private string? _headerCenterFormat;
+    private string? _headerRightFormat;
+    private string? _firstPageHeaderLeftFormat;
+    private string? _firstPageHeaderCenterFormat;
+    private string? _firstPageHeaderRightFormat;
+    private string? _evenPageHeaderLeftFormat;
+    private string? _evenPageHeaderCenterFormat;
+    private string? _evenPageHeaderRightFormat;
+    private string? _footerLeftFormat;
+    private string? _footerCenterFormat;
+    private string? _footerRightFormat;
+    private string? _firstPageFooterLeftFormat;
+    private string? _firstPageFooterCenterFormat;
+    private string? _firstPageFooterRightFormat;
+    private string? _evenPageFooterLeftFormat;
+    private string? _evenPageFooterCenterFormat;
+    private string? _evenPageFooterRightFormat;
+    private System.Collections.Generic.List<PdfHeaderFooterImage>? _headerImages;
+    private System.Collections.Generic.List<PdfHeaderFooterImage>? _firstPageHeaderImages;
+    private System.Collections.Generic.List<PdfHeaderFooterImage>? _evenPageHeaderImages;
+    private System.Collections.Generic.List<PdfHeaderFooterImage>? _footerImages;
+    private System.Collections.Generic.List<PdfHeaderFooterImage>? _firstPageFooterImages;
+    private System.Collections.Generic.List<PdfHeaderFooterImage>? _evenPageFooterImages;
+    private System.Collections.Generic.List<PdfHeaderFooterShape>? _headerShapes;
+    private System.Collections.Generic.List<PdfHeaderFooterShape>? _firstPageHeaderShapes;
+    private System.Collections.Generic.List<PdfHeaderFooterShape>? _evenPageHeaderShapes;
+    private System.Collections.Generic.List<PdfHeaderFooterShape>? _footerShapes;
+    private System.Collections.Generic.List<PdfHeaderFooterShape>? _firstPageFooterShapes;
+    private System.Collections.Generic.List<PdfHeaderFooterShape>? _evenPageFooterShapes;
+    private PdfStandardFont _defaultFont = PdfStandardFont.Helvetica;
+    private PdfStandardFont _headerFont = PdfStandardFont.Helvetica;
+    private PdfStandardFont _footerFont = PdfStandardFont.Helvetica;
+    private double _defaultFontSize = 11;
+    private double _headerFontSize = 9;
+    private double _footerFontSize = 9;
+    private string? _headerFontFamily;
+    private string? _footerFontFamily;
+    private bool _hasExplicitDefaultFont;
+    private bool _hasExplicitHeaderFont;
+    private bool _hasExplicitFooterFont;
+    private long _fontConfigurationAssignmentVersion;
+    private long _defaultFontSizeAssignmentVersion;
+    private int _pageNumberStart = 1;
+    private bool _hasExplicitPageNumberStart;
+    private PdfPageNumberStyle _pageNumberStyle = PdfPageNumberStyle.Arabic;
+    private string? _pageLabelPrefix;
+    private System.Collections.Generic.List<PdfPageLabelRange>? _pageLabelRanges;
+    private PdfParagraphStyle? _defaultParagraphStyle;
+    private PdfTableStyle? _defaultTableStyle = TableStyles.Light();
+    private bool _hasExplicitDefaultTableStyle;
+    private PdfHeadingStyles? _defaultHeadingStyles;
+    private PdfListStyle? _defaultListStyle;
+    private PdfPanelStyle? _defaultPanelStyle;
+    private PdfHorizontalRuleStyle? _defaultHorizontalRuleStyle;
+    private PdfImageStyle? _defaultImageStyle;
+    private PdfDrawingStyle? _defaultDrawingStyle;
+    private PdfRowStyle? _defaultRowStyle;
+    private PdfFileVersion _fileVersion = PdfFileVersion.Pdf14;
+    private PdfComplianceProfile _complianceProfile;
+    private PdfAIdentification? _pdfAIdentification;
+    private PdfUaIdentification? _pdfUaIdentification;
+    private PdfXIdentification? _pdfXIdentification;
+    private PdfXProductionMetadata? _pdfXProductionMetadata;
+    private bool _useAutomaticPdfXProductionMetadata;
+    private PdfElectronicInvoiceMetadata? _electronicInvoiceMetadata;
+    private PdfOutputIntent? _outputIntent;
+    private PdfTrappingStatus? _trappingStatus;
+    private PdfTaggedStructureMode _taggedStructureMode;
+    private string? _language;
+    private PdfCatalogPageMode? _catalogPageMode;
+    private PdfCatalogPageLayout? _catalogPageLayout;
+    private PdfOpenActionOptions? _openAction;
+    private PdfViewerPreferencesOptions? _viewerPreferences;
+    private string? _catalogUriBase;
+    private PdfStandardEncryptionOptions? _encryption;
+    private int _outlineExpansionLevel = int.MaxValue;
+    private PdfFormFieldTextAlignment? _acroFormDefaultTextAlignment;
+    private PdfTextWatermark? _textWatermark;
+    private PdfTextWatermark? _firstPageTextWatermark;
+    private PdfTextWatermark? _evenPageTextWatermark;
+    private bool _suppressFirstPageTextWatermark;
+    private bool _suppressEvenPageTextWatermark;
+    private PdfImageWatermark? _imageWatermark;
+    private PdfImageWatermark? _firstPageImageWatermark;
+    private PdfImageWatermark? _evenPageImageWatermark;
+    private bool _suppressFirstPageImageWatermark;
+    private bool _suppressEvenPageImageWatermark;
+    private PdfPageBorder? _pageBorder;
+    private PdfPageBackgroundImage? _pageBackgroundImage;
+    private System.Collections.Generic.List<PdfPageBackgroundShape>? _pageBackgroundShapes;
+    private System.Collections.Generic.Dictionary<PdfStandardFont, PdfEmbeddedFont>? _embeddedFonts;
+    private System.Collections.Generic.Dictionary<PdfStandardFont, PdfTrueTypeFontProgram>? _embeddedFontPrograms;
+    private System.Collections.Generic.Dictionary<PdfStandardFont, PdfOpenTypeCffFontProgram>? _embeddedOpenTypeCffFontPrograms;
+    private System.Collections.Generic.Dictionary<string, PdfEmbeddedFontFamily>? _namedFontFamilies;
+    private System.Collections.Generic.Dictionary<PdfNamedFontFace, PdfTrueTypeFontProgram>? _namedFontPrograms;
+    private System.Collections.Generic.Dictionary<PdfNamedFontFace, PdfOpenTypeCffFontProgram>? _namedOpenTypeCffFontPrograms;
+    private System.Collections.Generic.HashSet<PdfNamedFontFace>? _namedFontProgramFailures;
+    private System.Collections.Generic.HashSet<PdfStandardFont>? _usedEmbeddedFallbackFontSlots;
+    private System.Collections.Generic.HashSet<PdfStandardFont>? _embeddedFontProgramFailures;
+    private System.Collections.Generic.HashSet<string>? _reportedEmbeddedFontProgramFailures;
+    private System.Collections.Generic.HashSet<string>? _reportedTextShapingDiagnostics;
+    private System.Collections.Generic.HashSet<string>? _reportedLayoutDiagnostics;
+    private System.Collections.Generic.HashSet<string>? _providerShapedTextRuns;
+    private Func<string, IReadOnlyList<int>>? _textLineBreakCallback;
+    private PdfTextHyphenationCallback? _textHyphenationCallback;
+    private PdfTextShapingMode _textShapingMode;
+    private IOfficeTextShapingProvider? _textShapingProvider;
+    private PdfConversionReport? _diagnosticsReport;
+    private string _diagnosticsConverter = "OfficeIMO.Pdf";
+    private System.Collections.Generic.List<PdfEmbeddedFile>? _embeddedFiles;
+    private PdfPortfolioOptions? _portfolio;
+
+    internal long FontConfigurationAssignmentVersion => _fontConfigurationAssignmentVersion;
+    internal long DefaultFontSizeAssignmentVersion => _defaultFontSizeAssignmentVersion;
+
+    private void MarkFontConfigurationAssigned() {
+        unchecked {
+            _fontConfigurationAssignmentVersion++;
+        }
+    }
+
+    private void MarkDefaultFontSizeAssigned() {
+        unchecked {
+            _defaultFontSizeAssignmentVersion++;
+        }
+    }
+}

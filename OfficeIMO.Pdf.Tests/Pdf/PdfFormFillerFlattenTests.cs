@@ -1,0 +1,263 @@
+using System.Text;
+using OfficeIMO.Pdf;
+using Xunit;
+
+namespace OfficeIMO.Tests.Pdf;
+
+public partial class PdfFormFillerTests {
+    [Fact]
+    public void FlattenFields_PaintsTextWidgetAndRemovesFormAnnotations() {
+        byte[] filled = PdfFormFiller.FillFields(BuildTextWidgetFormPdf(), new Dictionary<string, string> {
+            ["Name"] = "Flattened value"
+        });
+
+        byte[] flattened = PdfFormFiller.FlattenFields(filled);
+
+        string output = Encoding.ASCII.GetString(flattened);
+        PdfDocumentInfo info = PdfInspector.Inspect(flattened);
+
+        Assert.False(info.HasForms);
+        Assert.False(info.HasReadableFormFields);
+        Assert.DoesNotContain("/AcroForm", output);
+        Assert.DoesNotContain("/Subtype /Widget", output);
+        Assert.DoesNotContain("/Annots", output);
+        Assert.Contains("/OfficeIMOForm1", output);
+        Assert.Contains("/OfficeIMOForm1 Do", output);
+        Assert.Contains("<466C617474656E65642076616C7565> Tj", output);
+    }
+
+    [Fact]
+    public void FlattenFields_RemovesIndirectObjectReferenceKidsForDeletedWidgets() {
+        byte[] flattened = PdfFormFiller.FlattenFields(BuildTaggedTextWidgetWithIndirectObjectReferencePdf());
+        var (objects, _) = PdfSyntax.ParseObjects(flattened);
+
+        Assert.DoesNotContain(objects.Values, indirect =>
+            indirect.Value is PdfDictionary dictionary && dictionary.Get<PdfName>("Type")?.Name == "OBJR");
+        Assert.DoesNotContain(objects.Values, indirect =>
+            indirect.Value is PdfDictionary dictionary &&
+            dictionary.Items.TryGetValue("Obj", out PdfObject? value) &&
+            value is PdfReference reference && reference.ObjectNumber == 7);
+    }
+
+    [Fact]
+    public void FlattenFields_PrunesIndirectParentTreeArraysForDeletedWidgets() {
+        byte[] flattened = PdfFormFiller.FlattenFields(BuildTaggedTextWidgetWithIndirectParentTreeArraysPdf());
+        var (objects, _) = PdfSyntax.ParseObjects(flattened);
+
+        Assert.DoesNotContain(objects.Values, indirect =>
+            indirect.Value is PdfDictionary dictionary &&
+            dictionary.Get<PdfName>("Type")?.Name == "StructElem" &&
+            dictionary.Get<PdfName>("S")?.Name == "Form");
+        PdfTaggedContentInfo tagged = Assert.IsType<PdfTaggedContentInfo>(PdfInspector.Inspect(flattened).TaggedContent);
+        Assert.Empty(tagged.ParentTreeStructParentIndexes);
+    }
+
+    [Fact]
+    public void FlattenFields_RebuildsNestedParentTreeLimitsAndPrunesEmptyKids() {
+        byte[] flattened = PdfFormFiller.FlattenFields(BuildTaggedTextWidgetWithNestedParentTreeLimitsPdf());
+        var (objects, _) = PdfSyntax.ParseObjects(flattened);
+        PdfDictionary root = Assert.IsType<PdfDictionary>(objects.Values.Single(indirect =>
+            indirect.Value is PdfDictionary dictionary && dictionary.Get<PdfName>("Type")?.Name == "StructTreeRoot").Value);
+        PdfDictionary parentTree = Assert.IsType<PdfDictionary>(PdfObjectLookup.Resolve(objects, root.Items["ParentTree"]));
+        PdfArray rootKids = Assert.IsType<PdfArray>(PdfObjectLookup.Resolve(objects, parentTree.Items["Kids"]));
+        PdfDictionary leaf = Assert.IsType<PdfDictionary>(PdfObjectLookup.Resolve(objects, Assert.Single(rootKids.Items)));
+        PdfArray nums = Assert.IsType<PdfArray>(PdfObjectLookup.Resolve(objects, leaf.Items["Nums"]));
+
+        Assert.Equal(5D, Assert.IsType<PdfNumber>(nums.Items[0]).Value);
+        Assert.Equal("P", Assert.IsType<PdfDictionary>(PdfObjectLookup.Resolve(objects, nums.Items[1])).Get<PdfName>("S")?.Name);
+        foreach (PdfDictionary node in new[] { parentTree, leaf }) {
+            PdfArray limits = Assert.IsType<PdfArray>(node.Items["Limits"]);
+            Assert.All(limits.Items, item => Assert.Equal(5D, Assert.IsType<PdfNumber>(item).Value));
+        }
+    }
+
+    [Fact]
+    public void FlattenFields_PrunesIndirectStructureKidArraysForDeletedWidgets() {
+        byte[] flattened = PdfFormFiller.FlattenFields(BuildTaggedTextWidgetWithIndirectStructureKidArraysPdf());
+        var (objects, _) = PdfSyntax.ParseObjects(flattened);
+
+        Assert.DoesNotContain(objects.Values, indirect =>
+            indirect.Value is PdfDictionary dictionary &&
+            dictionary.Get<PdfName>("Type")?.Name == "StructElem");
+        PdfTaggedContentInfo tagged = Assert.IsType<PdfTaggedContentInfo>(PdfInspector.Inspect(flattened).TaggedContent);
+        Assert.Empty(tagged.ParentTreeStructParentIndexes);
+    }
+
+    [Fact]
+    public void FlattenFields_PrunesIdTreeEntriesForDeletedStructureElements() {
+        byte[] flattened = PdfFormFiller.FlattenFields(BuildTaggedTextWidgetWithIdTreePdf());
+        var (objects, _) = PdfSyntax.ParseObjects(flattened);
+
+        Assert.DoesNotContain(objects.Values, indirect =>
+            indirect.Value is PdfDictionary dictionary &&
+            dictionary.Get<PdfName>("Type")?.Name == "StructElem" &&
+            dictionary.Get<PdfName>("S")?.Name == "Form");
+        PdfDictionary root = Assert.IsType<PdfDictionary>(objects.Values.Single(indirect =>
+            indirect.Value is PdfDictionary dictionary &&
+            dictionary.Get<PdfName>("Type")?.Name == "StructTreeRoot").Value);
+        PdfDictionary idTree = Assert.IsType<PdfDictionary>(PdfObjectLookup.Resolve(objects, root.Items["IDTree"]));
+        PdfArray rootKids = Assert.IsType<PdfArray>(PdfObjectLookup.Resolve(objects, idTree.Items["Kids"]));
+        PdfDictionary leaf = Assert.IsType<PdfDictionary>(PdfObjectLookup.Resolve(objects, Assert.Single(rootKids.Items)));
+        PdfArray names = Assert.IsType<PdfArray>(PdfObjectLookup.Resolve(objects, leaf.Items["Names"]));
+        Assert.Equal(2, names.Items.Count);
+        Assert.Equal("document-id", Assert.IsType<PdfStringObj>(names.Items[0]).Value);
+        PdfReference retainedReference = Assert.IsType<PdfReference>(names.Items[1]);
+        PdfDictionary retainedElement = Assert.IsType<PdfDictionary>(objects[retainedReference.ObjectNumber].Value);
+        Assert.Equal("Document", retainedElement.Get<PdfName>("S")?.Name);
+        Assert.Equal("document-id", retainedElement.Get<PdfStringObj>("ID")?.Value);
+        PdfArray limits = Assert.IsType<PdfArray>(leaf.Items["Limits"]);
+        Assert.All(limits.Items, item => Assert.Equal("document-id", Assert.IsType<PdfStringObj>(item).Value));
+    }
+
+    [Fact]
+    public void FlattenFields_SynthesizesMaskedPasswordTextAppearanceWhenMissing() {
+        byte[] flattened = PdfFormFiller.FlattenFields(BuildPasswordTextWidgetWithoutAppearancePdf());
+
+        string output = Encoding.ASCII.GetString(flattened);
+        string appearance = GetFlattenedAppearanceStreamText(flattened);
+
+        Assert.False(PdfInspector.Inspect(flattened).HasForms);
+        Assert.DoesNotContain("/AcroForm", output);
+        Assert.DoesNotContain("/Subtype /Widget", output);
+        Assert.Contains("/OfficeIMOForm1 Do", output);
+        Assert.Contains("<2A2A2A2A2A2A2A2A> Tj", appearance);
+        Assert.DoesNotContain("<5365637265743432> Tj", appearance);
+    }
+
+    [Fact]
+    public void FlattenFields_FlattensReferencedContentArraysBeforeAppendingAppearanceStream() {
+        byte[] filled = PdfFormFiller.FillFields(BuildTextWidgetFormPdfWithReferencedContentArray(), new Dictionary<string, string> {
+            ["Name"] = "Flattened value"
+        });
+
+        byte[] flattened = PdfFormFiller.FlattenFields(filled);
+
+        var (objects, _) = PdfSyntax.ParseObjects(flattened);
+        var page = Assert.IsType<PdfDictionary>(objects.Values.First(indirect =>
+            indirect.Value is PdfDictionary dictionary &&
+            dictionary.Get<PdfName>("Type")?.Name == "Page").Value);
+        var contents = Assert.IsType<PdfArray>(page.Items["Contents"]);
+
+        Assert.True(contents.Items.Count >= 2);
+        foreach (var item in contents.Items) {
+            var reference = Assert.IsType<PdfReference>(item);
+            Assert.IsType<PdfStream>(objects[reference.ObjectNumber].Value);
+        }
+    }
+
+    [Fact]
+    public void FlattenFields_MaterializesInheritedPageResourcesBeforeAddingAppearanceXObject() {
+        byte[] flattened = PdfFormFiller.FlattenFields(BuildTextWidgetFormPdfWithInheritedPageResources());
+        string output = Encoding.ASCII.GetString(flattened);
+        var (objects, _) = PdfSyntax.ParseObjects(flattened);
+        var page = Assert.IsType<PdfDictionary>(objects.Values.First(indirect =>
+            indirect.Value is PdfDictionary dictionary &&
+            dictionary.Get<PdfName>("Type")?.Name == "Page").Value);
+        PdfDictionary resources = Assert.IsType<PdfDictionary>(page.Items["Resources"]);
+        PdfDictionary fonts = Assert.IsType<PdfDictionary>(resources.Items["Font"]);
+        PdfDictionary xObjects = Assert.IsType<PdfDictionary>(resources.Items["XObject"]);
+
+        Assert.False(PdfInspector.Inspect(flattened).HasForms);
+        Assert.DoesNotContain("/AcroForm", output);
+        Assert.DoesNotContain("/Subtype /Widget", output);
+        Assert.Contains("Inherited form page text", output);
+        Assert.True(fonts.Items.ContainsKey("F1"));
+        Assert.True(xObjects.Items.ContainsKey("OfficeIMOForm1"));
+        Assert.Contains("/OfficeIMOForm1 Do", output);
+    }
+
+    [Fact]
+    public void FillAndFlattenFields_UpdatesValueAndFlattensInOneCall() {
+        byte[] flattened = PdfFormFiller.FillAndFlattenFields(BuildTextWidgetFormPdf(), new Dictionary<string, string> {
+            ["Name"] = "Single pass"
+        });
+
+        string output = Encoding.ASCII.GetString(flattened);
+        PdfDocumentInfo info = PdfInspector.Inspect(flattened);
+
+        Assert.False(info.HasForms);
+        Assert.DoesNotContain("/AcroForm", output);
+        Assert.Contains("<53696E676C652070617373> Tj", output);
+        Assert.Contains("/OfficeIMOForm1 Do", output);
+    }
+
+    [Fact]
+    public void FlattenFields_PaintsSelectedButtonWidgetAppearance() {
+        byte[] flattened = PdfFormFiller.FlattenFields(BuildCheckboxWidgetFormPdf());
+
+        string output = Encoding.ASCII.GetString(flattened);
+        PdfDocumentInfo info = PdfInspector.Inspect(flattened);
+
+        Assert.False(info.HasForms);
+        Assert.DoesNotContain("/AcroForm", output);
+        Assert.DoesNotContain("/Subtype /Widget", output);
+        Assert.DoesNotContain("/Annots", output);
+        Assert.Contains("/OfficeIMOForm1 Do", output);
+        Assert.Contains("Checked appearance", GetFlattenedAppearanceStreamText(flattened));
+    }
+
+    [Fact]
+    public void FillAndFlattenFields_UpdatesButtonStateBeforeFlattening() {
+        byte[] flattened = PdfFormFiller.FillAndFlattenFields(BuildCheckboxWidgetFormPdf(), new Dictionary<string, string> {
+            ["AcceptTerms"] = "Off"
+        });
+
+        string output = Encoding.ASCII.GetString(flattened);
+        PdfDocumentInfo info = PdfInspector.Inspect(flattened);
+
+        Assert.False(info.HasForms);
+        Assert.DoesNotContain("/AcroForm", output);
+        Assert.Contains("/OfficeIMOForm1 Do", output);
+        Assert.Contains("Unchecked appearance", GetFlattenedAppearanceStreamText(flattened));
+    }
+
+    [Fact]
+    public void FillAndFlattenFields_GeneratesMissingButtonAppearanceBeforeFlattening() {
+        byte[] flattened = PdfFormFiller.FillAndFlattenFields(BuildCheckboxWidgetWithoutAppearancePdf(), new Dictionary<string, string> {
+            ["AcceptTerms"] = "Yes"
+        });
+
+        string output = Encoding.ASCII.GetString(flattened);
+        string appearance = GetFlattenedAppearanceStreamText(flattened);
+
+        Assert.False(PdfInspector.Inspect(flattened).HasForms);
+        Assert.DoesNotContain("/AcroForm", output);
+        Assert.DoesNotContain("/Subtype /Widget", output);
+        Assert.Contains("/OfficeIMOForm1 Do", output);
+        Assert.Contains("1.25 w", appearance);
+        Assert.Contains(" l S", appearance);
+    }
+
+    [Fact]
+    public void FillAndFlattenFields_FlattensOnlySelectedRadioWidget() {
+        byte[] flattened = PdfFormFiller.FillAndFlattenFields(BuildRadioWidgetGroupWithoutOffAppearancePdf(), new Dictionary<string, string> {
+            ["Payment.Method"] = "Wire"
+        });
+
+        string output = Encoding.ASCII.GetString(flattened);
+        string appearances = string.Concat(GetFlattenedAppearanceStreamTexts(flattened));
+
+        Assert.False(PdfInspector.Inspect(flattened).HasForms);
+        Assert.DoesNotContain("/AcroForm", output);
+        Assert.DoesNotContain("/Subtype /Widget", output);
+        Assert.Contains("Wire selected", appearances);
+        Assert.DoesNotContain("Card selected", appearances);
+        Assert.DoesNotContain("Cash selected", appearances);
+        Assert.DoesNotContain("1.25 w", appearances);
+    }
+
+    [Fact]
+    public void FlattenFields_GeneratesMissingButtonAppearanceFromExistingState() {
+        byte[] flattened = PdfFormFiller.FlattenFields(BuildCheckboxWidgetWithoutAppearancePdf("Yes"));
+
+        string output = Encoding.ASCII.GetString(flattened);
+        string appearance = GetFlattenedAppearanceStreamText(flattened);
+
+        Assert.False(PdfInspector.Inspect(flattened).HasForms);
+        Assert.DoesNotContain("/AcroForm", output);
+        Assert.DoesNotContain("/Subtype /Widget", output);
+        Assert.Contains("/OfficeIMOForm1 Do", output);
+        Assert.Contains("1.25 w", appearance);
+        Assert.Contains(" l S", appearance);
+    }
+}

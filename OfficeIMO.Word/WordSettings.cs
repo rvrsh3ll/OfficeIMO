@@ -1,53 +1,68 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Text;
-using System.Xml.Linq;
-using DocumentFormat.OpenXml;
-using DocumentFormat.OpenXml.Office2010.Word;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
+using System.Globalization;
 
 namespace OfficeIMO.Word {
+    /// <summary>
+    /// Provides typed access to document-level settings such as protection,
+    /// fonts and view options.
+    /// </summary>
     public class WordSettings {
-        private WordDocument _document;
+        private readonly WordDocument _document;
 
         /// <summary>
         /// Remove protection from document (if it's set).
         /// </summary>
         public void RemoveProtection() {
-            if (this.ProtectionType != null) {
-                DocumentProtection documentProtection = this._document._wordprocessingDocument.MainDocumentPart.DocumentSettingsPart.Settings.OfType<DocumentProtection>().FirstOrDefault();
-                documentProtection.Remove();
+            if (ProtectionType != null) {
+                DocumentProtection? documentProtection = _document._wordprocessingDocument.MainDocumentPart?
+                    .DocumentSettingsPart?.Settings?
+                    .OfType<DocumentProtection>().FirstOrDefault();
+                documentProtection?.Remove();
             }
         }
 
         /// <summary>
         /// Get or set Protection Type for the document
         /// </summary>
-        public DocumentProtectionValues? ProtectionType {
+        public WordDocumentProtectionType? ProtectionType {
             get {
-                if (this._document._wordprocessingDocument.MainDocumentPart.DocumentSettingsPart.Settings != null) {
-                    DocumentProtection documentProtection = this._document._wordprocessingDocument.MainDocumentPart.DocumentSettingsPart.Settings.OfType<DocumentProtection>().FirstOrDefault();
+                var settings = _document._wordprocessingDocument.MainDocumentPart?
+                    .DocumentSettingsPart?.Settings;
+                if (settings != null) {
+                    DocumentProtection? documentProtection = settings
+                        .OfType<DocumentProtection>()
+                        .FirstOrDefault();
                     if (documentProtection != null) {
-                        return documentProtection.Edit;
+                        return documentProtection.Edit?.Value.ToOfficeEnum();
                     }
                 }
 
                 return null;
             }
             set {
-                if (this._document._wordprocessingDocument.MainDocumentPart.DocumentSettingsPart.Settings == null) {
-                    this._document._wordprocessingDocument.MainDocumentPart.DocumentSettingsPart.Settings = new Settings();
+                var settingsPart = _document._wordprocessingDocument.MainDocumentPart?.DocumentSettingsPart;
+                if (settingsPart == null) {
+                    return;
                 }
-                DocumentProtection documentProtection = this._document._wordprocessingDocument.MainDocumentPart.DocumentSettingsPart.Settings.OfType<DocumentProtection>().FirstOrDefault();
+                if (settingsPart.Settings == null) {
+                    settingsPart.Settings = new Settings();
+                }
+                DocumentProtection? documentProtection = settingsPart.Settings
+                    .OfType<DocumentProtection>()
+                    .FirstOrDefault();
                 if (documentProtection != null) {
-                    documentProtection.Edit = value;
+                    documentProtection.Edit = value?.ToOpenXml();
                 } else {
                     throw new InvalidOperationException("Please first set password using 'ProtectionPassword' property before setting up encryption type.");
                 }
             }
+        }
+
+        /// <summary>Sets document protection using an OfficeIMO-owned value.</summary>
+        public WordSettings SetProtectionType(WordDocumentProtectionType protectionType) {
+            ProtectionType = protectionType;
+            return this;
         }
 
         /// <summary>
@@ -55,57 +70,67 @@ namespace OfficeIMO.Word {
         /// </summary>
         public string ProtectionPassword {
             set {
-                Security.ProtectWordDoc(this._document._wordprocessingDocument, value);
+                Security.ProtectWordDoc(_document._wordprocessingDocument, value);
             }
         }
 
         /// <summary>
         /// Get or set Zoom Preset for the document
         /// </summary>
-        public PresetZoomValues? ZoomPreset {
+        public WordZoomPreset? ZoomPreset {
             get {
-                var settings = _document._wordprocessingDocument.MainDocumentPart.DocumentSettingsPart.Settings;
-                if (settings.Zoom == null) {
+                var settings = _document._wordprocessingDocument.MainDocumentPart?
+                    .DocumentSettingsPart?.Settings;
+                if (settings?.Zoom?.Val == null) {
                     return null;
                 }
-
-                if (settings.Zoom.Val == null) {
-                    return null;
-                }
-                return settings.Zoom.Val;
+                return settings.Zoom.Val.Value.ToOfficeEnum();
 
             }
             set {
-                var settings = _document._wordprocessingDocument.MainDocumentPart.DocumentSettingsPart.Settings;
+                var settings = _document._wordprocessingDocument.MainDocumentPart?
+                    .DocumentSettingsPart?.Settings;
+                if (settings == null) {
+                    return;
+                }
                 if (settings.Zoom == null) {
                     settings.Zoom = new Zoom();
                 }
-                settings.Zoom.Val = value;
+                settings.Zoom.Val = value?.ToOpenXml();
             }
         }
 
         /// <summary>
         /// Get or set Character Spacing Control
         /// </summary>
-        public CharacterSpacingValues? CharacterSpacingControl {
+        public WordCharacterSpacing? CharacterSpacingControl {
             get {
-                var settings = _document._wordprocessingDocument.MainDocumentPart.DocumentSettingsPart.Settings;
-                var characterSpacingControl = settings.OfType<CharacterSpacingControl>().FirstOrDefault();
+                var settings = _document._wordprocessingDocument.MainDocumentPart?
+                    .DocumentSettingsPart?.Settings;
+                var characterSpacingControl = settings?
+                    .OfType<CharacterSpacingControl>()
+                    .FirstOrDefault();
                 if (characterSpacingControl == null) {
                     return null;
                 }
 
-                return characterSpacingControl.Val;
+                return characterSpacingControl.Val?.Value.ToOfficeEnum();
 
             }
             set {
-                var settings = _document._wordprocessingDocument.MainDocumentPart.DocumentSettingsPart.Settings;
-                var characterSpacingControl = settings.OfType<CharacterSpacingControl>().FirstOrDefault();
+                var settings = _document._wordprocessingDocument.MainDocumentPart?
+                    .DocumentSettingsPart?.Settings;
+                if (settings == null) {
+                    return;
+                }
+                var characterSpacingControl = settings
+                    .OfType<CharacterSpacingControl>()
+                    .FirstOrDefault();
                 if (characterSpacingControl == null) {
                     characterSpacingControl = new CharacterSpacingControl();
                     settings.Append(characterSpacingControl);
                 }
-                characterSpacingControl.Val = value;
+                characterSpacingControl.Val = value?.ToOpenXml();
             }
         }
 
@@ -115,20 +140,26 @@ namespace OfficeIMO.Word {
         /// </summary>
         public int DefaultTabStop {
             get {
-                var settings = _document._wordprocessingDocument.MainDocumentPart.DocumentSettingsPart.Settings;
-                var defaultStop = settings.OfType<DefaultTabStop>().FirstOrDefault();
-                if (defaultStop == null) {
-                    return 0;
-                }
-                if (defaultStop.Val == null) {
+                var settings = _document._wordprocessingDocument.MainDocumentPart?
+                    .DocumentSettingsPart?.Settings;
+                var defaultStop = settings?
+                    .OfType<DefaultTabStop>()
+                    .FirstOrDefault();
+                if (defaultStop?.Val == null) {
                     return 0;
                 }
                 return defaultStop.Val;
 
             }
             set {
-                var settings = _document._wordprocessingDocument.MainDocumentPart.DocumentSettingsPart.Settings;
-                var defaultStop = settings.OfType<DefaultTabStop>().FirstOrDefault();
+                var settings = _document._wordprocessingDocument.MainDocumentPart?
+                    .DocumentSettingsPart?.Settings;
+                if (settings == null) {
+                    return;
+                }
+                var defaultStop = settings
+                    .OfType<DefaultTabStop>()
+                    .FirstOrDefault();
                 if (defaultStop == null) {
                     defaultStop = new DefaultTabStop();
                     settings.Append(defaultStop);
@@ -142,21 +173,24 @@ namespace OfficeIMO.Word {
         /// </summary>
         public int? ZoomPercentage {
             get {
-                var settings = _document._wordprocessingDocument.MainDocumentPart.DocumentSettingsPart.Settings;
-                if (settings.Zoom == null) {
+                var settings = _document._wordprocessingDocument.MainDocumentPart?
+                    .DocumentSettingsPart?.Settings;
+                var percent = settings?.Zoom?.Percent;
+                if (percent == null) {
                     return null;
                 }
-                if (settings.Zoom.Percent == null) {
-                    return null;
-                }
-                return int.Parse(settings.Zoom.Percent);
+                return int.Parse(percent!, CultureInfo.InvariantCulture);
             }
             set {
-                var settings = _document._wordprocessingDocument.MainDocumentPart.DocumentSettingsPart.Settings;
+                var settings = _document._wordprocessingDocument.MainDocumentPart?
+                    .DocumentSettingsPart?.Settings;
+                if (settings == null) {
+                    return;
+                }
                 if (settings.Zoom == null) {
                     settings.Zoom = new Zoom();
                 }
-                settings.Zoom.Percent = value.ToString();
+                settings.Zoom.Percent = value.HasValue ? value.Value.ToString(CultureInfo.InvariantCulture) : null;
             }
         }
 
@@ -166,32 +200,49 @@ namespace OfficeIMO.Word {
         /// </summary>
         public bool UpdateFieldsOnOpen {
             get {
-                var settings = _document._wordprocessingDocument.MainDocumentPart.DocumentSettingsPart.Settings;
-                var updateFieldsOnOpen = settings.GetFirstChild<UpdateFieldsOnOpen>();
+                var settings = _document._wordprocessingDocument.MainDocumentPart?
+                    .DocumentSettingsPart?.Settings;
+                var updateFieldsOnOpen = settings?
+                    .GetFirstChild<UpdateFieldsOnOpen>();
                 if (updateFieldsOnOpen == null) {
                     return false;
                 }
-                return updateFieldsOnOpen.Val;
+                return updateFieldsOnOpen.Val?.Value ?? false;
             }
             set {
-                var settings = _document._wordprocessingDocument.MainDocumentPart.DocumentSettingsPart.Settings;
+                var settings = _document._wordprocessingDocument.MainDocumentPart?
+                    .DocumentSettingsPart?.Settings;
+                if (settings == null) {
+                    return;
+                }
                 var updateFieldsOnOpen = settings.GetFirstChild<UpdateFieldsOnOpen>();
                 if (updateFieldsOnOpen == null) {
                     updateFieldsOnOpen = new UpdateFieldsOnOpen();
-                    settings.PrependChild<UpdateFieldsOnOpen>(updateFieldsOnOpen);
+                    settings.AddChild(updateFieldsOnOpen, true);
                 }
                 updateFieldsOnOpen.Val = value;
             }
         }
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="WordSettings"/> class for the specified document.
+        /// </summary>
+        /// <param name="document">Document whose settings are managed.</param>
         public WordSettings(WordDocument document) {
+            if (document == null) {
+                throw new ArgumentNullException(nameof(document));
+            }
             if (document.FileOpenAccess != FileAccess.Read) {
-                var documentSettingsPart = document._wordprocessingDocument.MainDocumentPart.DocumentSettingsPart;
+                var mainPart = document._wordprocessingDocument.MainDocumentPart;
+                if (mainPart == null) {
+                    throw new InvalidOperationException("MainDocumentPart is missing.");
+                }
+                var documentSettingsPart = mainPart.DocumentSettingsPart;
                 if (documentSettingsPart == null) {
-                    documentSettingsPart = document._wordprocessingDocument.MainDocumentPart.AddNewPart<DocumentSettingsPart>();
+                    documentSettingsPart = mainPart.AddNewPart<DocumentSettingsPart>();
                 }
 
-                var settings = document._wordprocessingDocument.MainDocumentPart.DocumentSettingsPart.Settings;
+                var settings = documentSettingsPart.Settings;
                 if (settings == null) {
                     settings = new Settings();
                     settings.Save(documentSettingsPart);
@@ -201,39 +252,33 @@ namespace OfficeIMO.Word {
             document.Settings = this;
         }
 
-        private RunPropertiesBaseStyle GetDefaultStyleProperties() {
-            if (this._document._wordprocessingDocument.MainDocumentPart.StyleDefinitionsPart.Styles != null) {
-                if (this._document._wordprocessingDocument.MainDocumentPart.StyleDefinitionsPart.Styles.DocDefaults != null) {
-                    if (this._document._wordprocessingDocument.MainDocumentPart.StyleDefinitionsPart.Styles.DocDefaults.RunPropertiesDefault != null) {
-                        if (this._document._wordprocessingDocument.MainDocumentPart.StyleDefinitionsPart.Styles.DocDefaults.RunPropertiesDefault.RunPropertiesBaseStyle != null) {
-                            if (this._document._wordprocessingDocument.MainDocumentPart.StyleDefinitionsPart.Styles.DocDefaults.RunPropertiesDefault.RunPropertiesBaseStyle != null) {
-                                return this._document._wordprocessingDocument.MainDocumentPart.StyleDefinitionsPart.Styles.DocDefaults.RunPropertiesDefault.RunPropertiesBaseStyle;
-                            }
-                        }
-                    }
-                }
-            }
-            return null;
+        private RunPropertiesBaseStyle? GetDefaultStyleProperties() {
+            return _document._wordprocessingDocument.MainDocumentPart?
+                .StyleDefinitionsPart?.Styles?
+                .DocDefaults?.RunPropertiesDefault?.RunPropertiesBaseStyle;
         }
 
-        private RunPropertiesBaseStyle SetDefaultStyleProperties() {
-            if (this._document._wordprocessingDocument.MainDocumentPart.StyleDefinitionsPart.Styles != null) {
-                if (this._document._wordprocessingDocument.MainDocumentPart.StyleDefinitionsPart.Styles.DocDefaults == null) {
-                    this._document._wordprocessingDocument.MainDocumentPart.StyleDefinitionsPart.Styles.DocDefaults = new DocDefaults();
-                }
-
-                if (this._document._wordprocessingDocument.MainDocumentPart.StyleDefinitionsPart.Styles.DocDefaults.RunPropertiesDefault == null) {
-                    this._document._wordprocessingDocument.MainDocumentPart.StyleDefinitionsPart.Styles.DocDefaults.RunPropertiesDefault = new RunPropertiesDefault();
-                }
-
-                if (this._document._wordprocessingDocument.MainDocumentPart.StyleDefinitionsPart.Styles.DocDefaults.RunPropertiesDefault.RunPropertiesBaseStyle == null) {
-                    this._document._wordprocessingDocument.MainDocumentPart.StyleDefinitionsPart.Styles.DocDefaults.RunPropertiesDefault.RunPropertiesBaseStyle = new RunPropertiesBaseStyle();
-                }
-
-                return this._document._wordprocessingDocument.MainDocumentPart.StyleDefinitionsPart.Styles.DocDefaults.RunPropertiesDefault.RunPropertiesBaseStyle;
+        private RunPropertiesBaseStyle? SetDefaultStyleProperties() {
+            _document.EnsureStyleDefinitionsInitialized();
+            var styles = _document._wordprocessingDocument.MainDocumentPart?
+                .StyleDefinitionsPart?.Styles;
+            if (styles == null) {
+                return null;
             }
 
-            return null;
+            if (styles.DocDefaults == null) {
+                styles.DocDefaults = new DocDefaults();
+            }
+
+            if (styles.DocDefaults.RunPropertiesDefault == null) {
+                styles.DocDefaults.RunPropertiesDefault = new RunPropertiesDefault();
+            }
+
+            if (styles.DocDefaults.RunPropertiesDefault.RunPropertiesBaseStyle == null) {
+                styles.DocDefaults.RunPropertiesDefault.RunPropertiesBaseStyle = new RunPropertiesBaseStyle();
+            }
+
+            return styles.DocDefaults.RunPropertiesDefault.RunPropertiesBaseStyle;
         }
 
         /// <summary>
@@ -243,9 +288,9 @@ namespace OfficeIMO.Word {
             get {
                 var runPropertiesBaseStyle = GetDefaultStyleProperties();
                 if (runPropertiesBaseStyle != null) {
-                    if (runPropertiesBaseStyle.FontSize != null) {
-                        var fontSize = runPropertiesBaseStyle.FontSize.Val;
-                        return int.Parse(fontSize) / 2;
+                    var fontSize = runPropertiesBaseStyle.FontSize?.Val;
+                    if (fontSize != null) {
+                        return int.Parse(fontSize!, CultureInfo.InvariantCulture) / 2;
                     }
                 }
                 return null;
@@ -256,9 +301,9 @@ namespace OfficeIMO.Word {
                     if (runPropertiesBaseStyle.FontSize == null) {
                         runPropertiesBaseStyle.FontSize = new FontSize();
                     }
-                    runPropertiesBaseStyle.FontSize.Val = (value * 2).ToString();
+                    runPropertiesBaseStyle.FontSize.Val = value.HasValue ? (value.Value * 2).ToString(CultureInfo.InvariantCulture) : null;
                 } else {
-                    throw new Exception("Could not set font size. Styles not found.");
+                    throw new InvalidOperationException("Could not set font size. Styles not found.");
                 }
             }
         }
@@ -270,9 +315,9 @@ namespace OfficeIMO.Word {
             get {
                 var runPropertiesBaseStyle = GetDefaultStyleProperties();
                 if (runPropertiesBaseStyle != null) {
-                    if (runPropertiesBaseStyle.FontSizeComplexScript != null) {
-                        var fontSize = runPropertiesBaseStyle.FontSizeComplexScript.Val;
-                        return int.Parse(fontSize) / 2;
+                    var fontSize = runPropertiesBaseStyle.FontSizeComplexScript?.Val;
+                    if (fontSize != null) {
+                        return int.Parse(fontSize!, CultureInfo.InvariantCulture) / 2;
                     }
                 }
                 return null;
@@ -283,9 +328,9 @@ namespace OfficeIMO.Word {
                     if (runPropertiesBaseStyle.FontSizeComplexScript == null) {
                         runPropertiesBaseStyle.FontSizeComplexScript = new FontSizeComplexScript();
                     }
-                    runPropertiesBaseStyle.FontSizeComplexScript.Val = (value * 2).ToString();
+                    runPropertiesBaseStyle.FontSizeComplexScript.Val = value.HasValue ? (value.Value * 2).ToString(CultureInfo.InvariantCulture) : null;
                 } else {
-                    throw new Exception("Could not set font size complex script. Styles not found.");
+                    throw new InvalidOperationException("Could not set font size complex script. Styles not found.");
                 }
             }
         }
@@ -294,38 +339,27 @@ namespace OfficeIMO.Word {
         /// Gets or Sets default font family for the whole document.
         /// </summary>
         /// <seealso href="http://officeopenxml.com/WPtextFonts.php">WordProcessingText Fonts </seealso>
-        public string FontFamily {
+        public string? FontFamily {
             get {
                 var runPropertiesBaseStyle = GetDefaultStyleProperties();
-                if (runPropertiesBaseStyle != null) {
-                    if (runPropertiesBaseStyle.RunFonts != null) {
-                        var fontFamily = runPropertiesBaseStyle.RunFonts.Ascii;
-                        return fontFamily;
-                    }
-                }
-                return null;
+                return runPropertiesBaseStyle?.RunFonts?.Ascii;
             }
             set {
                 var runPropertiesBaseStyle = SetDefaultStyleProperties();
                 if (runPropertiesBaseStyle != null) {
-                    //runPropertiesBaseStyle.RunFonts = new RunFonts();
                     if (runPropertiesBaseStyle.RunFonts == null) {
                         runPropertiesBaseStyle.RunFonts = new RunFonts() { AsciiTheme = ThemeFontValues.MinorHighAnsi, HighAnsiTheme = ThemeFontValues.MinorHighAnsi, EastAsiaTheme = ThemeFontValues.MinorHighAnsi, ComplexScriptTheme = ThemeFontValues.MinorBidi };
                     }
-                    // we need to reset default AsciiTheme, before applying Ascii
                     runPropertiesBaseStyle.RunFonts.AsciiTheme = null;
                     runPropertiesBaseStyle.RunFonts.Ascii = value;
-                    // we also set HighAnsi to the same value
                     runPropertiesBaseStyle.RunFonts.HighAnsi = value;
                     runPropertiesBaseStyle.RunFonts.HighAnsiTheme = null;
-                    // we also set EastAsia to the same value
                     runPropertiesBaseStyle.RunFonts.EastAsia = value;
                     runPropertiesBaseStyle.RunFonts.EastAsiaTheme = null;
-                    // we also set ComplexScript to the same value
                     runPropertiesBaseStyle.RunFonts.ComplexScript = value;
                     runPropertiesBaseStyle.RunFonts.ComplexScriptTheme = null;
                 } else {
-                    throw new Exception("Could not set font family. Styles not found.");
+                    throw new InvalidOperationException("Could not set font family. Styles not found.");
                 }
             }
         }
@@ -334,25 +368,17 @@ namespace OfficeIMO.Word {
         /// Gets or Sets default font family for the whole document in HighAnsi.
         /// </summary>
         /// <seealso href="http://officeopenxml.com/WPtextFonts.php">WordProcessingText Fonts </seealso>
-        public string FontFamilyHighAnsi {
+        public string? FontFamilyHighAnsi {
             get {
                 var runPropertiesBaseStyle = GetDefaultStyleProperties();
-                if (runPropertiesBaseStyle != null) {
-                    if (runPropertiesBaseStyle.RunFonts != null) {
-                        var fontFamily = runPropertiesBaseStyle.RunFonts.HighAnsi;
-                        return fontFamily;
-                    }
-                }
-                return null;
+                return runPropertiesBaseStyle?.RunFonts?.HighAnsi;
             }
             set {
                 var runPropertiesBaseStyle = SetDefaultStyleProperties();
                 if (runPropertiesBaseStyle != null) {
-                    //runPropertiesBaseStyle.RunFonts = new RunFonts();
                     if (runPropertiesBaseStyle.RunFonts == null) {
                         runPropertiesBaseStyle.RunFonts = new RunFonts() { AsciiTheme = ThemeFontValues.MinorHighAnsi, HighAnsiTheme = ThemeFontValues.MinorHighAnsi, EastAsiaTheme = ThemeFontValues.MinorHighAnsi, ComplexScriptTheme = ThemeFontValues.MinorBidi };
                     }
-                    // we also need to change it in highAnsi to fix https://github.com/EvotecIT/OfficeIMO/issues/54
                     if (string.IsNullOrEmpty(value)) {
                         runPropertiesBaseStyle.RunFonts.HighAnsi = null;
                     } else {
@@ -360,7 +386,7 @@ namespace OfficeIMO.Word {
                     }
                     runPropertiesBaseStyle.RunFonts.HighAnsiTheme = null;
                 } else {
-                    throw new Exception("Could not set font family. Styles not found.");
+                    throw new InvalidOperationException("Could not set font family. Styles not found.");
                 }
             }
         }
@@ -369,16 +395,10 @@ namespace OfficeIMO.Word {
         /// Gets or Sets default font family for the whole document in EastAsia.
         /// </summary>
         /// <seealso href="http://officeopenxml.com/WPtextFonts.php">WordProcessingText Fonts </seealso>
-        public string FontFamilyEastAsia {
+        public string? FontFamilyEastAsia {
             get {
                 var runPropertiesBaseStyle = GetDefaultStyleProperties();
-                if (runPropertiesBaseStyle != null) {
-                    if (runPropertiesBaseStyle.RunFonts != null) {
-                        var fontFamily = runPropertiesBaseStyle.RunFonts.EastAsia;
-                        return fontFamily;
-                    }
-                }
-                return null;
+                return runPropertiesBaseStyle?.RunFonts?.EastAsia;
             }
             set {
                 var runPropertiesBaseStyle = SetDefaultStyleProperties();
@@ -393,7 +413,7 @@ namespace OfficeIMO.Word {
                     }
                     runPropertiesBaseStyle.RunFonts.EastAsiaTheme = null;
                 } else {
-                    throw new Exception("Could not set font family. Styles not found.");
+                    throw new InvalidOperationException("Could not set font family. Styles not found.");
                 }
             }
         }
@@ -402,16 +422,10 @@ namespace OfficeIMO.Word {
         /// Gets or Sets default font family for the whole document in ComplexScript.
         /// </summary>
         /// <seealso href="http://officeopenxml.com/WPtextFonts.php">WordProcessingText Fonts </seealso>
-        public string FontFamilyComplexScript {
+        public string? FontFamilyComplexScript {
             get {
                 var runPropertiesBaseStyle = GetDefaultStyleProperties();
-                if (runPropertiesBaseStyle != null) {
-                    if (runPropertiesBaseStyle.RunFonts != null) {
-                        var fontFamily = runPropertiesBaseStyle.RunFonts.ComplexScript;
-                        return fontFamily;
-                    }
-                }
-                return null;
+                return runPropertiesBaseStyle?.RunFonts?.ComplexScript;
             }
             set {
                 var runPropertiesBaseStyle = SetDefaultStyleProperties();
@@ -426,7 +440,7 @@ namespace OfficeIMO.Word {
                     }
                     runPropertiesBaseStyle.RunFonts.ComplexScriptTheme = null;
                 } else {
-                    throw new Exception("Could not set font family. Styles not found.");
+                    throw new InvalidOperationException("Could not set font family. Styles not found.");
                 }
             }
         }
@@ -434,15 +448,10 @@ namespace OfficeIMO.Word {
         /// <summary>
         /// Gets or Sets default language for the whole document. Default is en-Us.
         /// </summary>
-        public string Language {
+        public string? Language {
             get {
                 var runPropertiesBaseStyle = GetDefaultStyleProperties();
-                if (runPropertiesBaseStyle != null) {
-                    if (runPropertiesBaseStyle.Languages != null) {
-                        return runPropertiesBaseStyle.Languages.Val;
-                    }
-                }
-                return null;
+                return runPropertiesBaseStyle?.Languages?.Val;
             }
             set {
                 var runPropertiesBaseStyle = SetDefaultStyleProperties();
@@ -451,9 +460,8 @@ namespace OfficeIMO.Word {
                         runPropertiesBaseStyle.Languages = new Languages();
                     }
                     runPropertiesBaseStyle.Languages.Val = value;
-                    //runPropertiesBaseStyle.Languages.EastAsia = value;
                 } else {
-                    throw new Exception("Could not set language. Styles not found.");
+                    throw new InvalidOperationException("Could not set language. Styles not found.");
                 }
             }
         }
@@ -461,91 +469,247 @@ namespace OfficeIMO.Word {
         /// <summary>
         /// Gets or Sets default Background Color for the whole document
         /// </summary>
-        public string BackgroundColor {
+        public string? BackgroundColor {
             get {
-                if (_document._wordprocessingDocument.MainDocumentPart.Document.DocumentBackground != null) {
-                    return _document._wordprocessingDocument.MainDocumentPart.Document.DocumentBackground.Color;
-                }
-
-                return null;
+                var background = _document._wordprocessingDocument.MainDocumentPart?
+                    .Document?.DocumentBackground;
+                return background?.Color?.Value?.ToUpperInvariant();
             }
             set {
-                _document._wordprocessingDocument.MainDocumentPart.DocumentSettingsPart.Settings.DisplayBackgroundShape = new DisplayBackgroundShape();
-                if (_document._wordprocessingDocument.MainDocumentPart.Document.DocumentBackground == null) {
-                    _document._wordprocessingDocument.MainDocumentPart.Document.DocumentBackground = new DocumentBackground();
+                var settings = _document._wordprocessingDocument.MainDocumentPart?
+                    .DocumentSettingsPart?.Settings;
+                if (settings == null) {
+                    return;
                 }
-                _document._wordprocessingDocument.MainDocumentPart.Document.DocumentBackground.Color = value;
+                settings.DisplayBackgroundShape = new DisplayBackgroundShape();
+                var document = _document._wordprocessingDocument.MainDocumentPart?.Document;
+                if (document == null) {
+                    return;
+                }
+                if (document.DocumentBackground == null) {
+                    document.DocumentBackground = new DocumentBackground();
+                }
+                document.DocumentBackground.Color = value;
             }
         }
+        /// <summary>
+        /// Sets the background color using a hex value.
+        /// </summary>
+        /// <param name="backgroundColor">Hexadecimal color value.</param>
+        /// <returns>The current <see cref="WordSettings"/> instance.</returns>
         public WordSettings SetBackgroundColor(string backgroundColor) {
-            this.BackgroundColor = backgroundColor;
+            BackgroundColor = backgroundColor;
             return this;
         }
-        public WordSettings SetBackgroundColor(SixLabors.ImageSharp.Color backgroundColor) {
-            this.BackgroundColor = backgroundColor.ToHexColor();
+
+        /// <summary>
+        /// Sets the background color using a <see cref="OfficeIMO.Drawing.OfficeColor"/> value.
+        /// </summary>
+        /// <param name="backgroundColor">Color value.</param>
+        /// <returns>The current <see cref="WordSettings"/> instance.</returns>
+        public WordSettings SetBackgroundColor(OfficeIMO.Drawing.OfficeColor backgroundColor) {
+            BackgroundColor = backgroundColor.ToRgbHex();
             return this;
         }
 
         /// <summary>
         /// Sets property in document recommending user to open the document as read only
         /// User can choose to do so, or ignore this recommendation
-        /// This setting can in theory go with a ReadOnlyPassword but it doesn't seem to work the same way as Document Password
         /// </summary>
         public bool? ReadOnlyRecommended {
             get {
-                var settings = _document._wordprocessingDocument.MainDocumentPart.DocumentSettingsPart.Settings;
-                if (settings.WriteProtection == null) {
+                var settings = _document._wordprocessingDocument.MainDocumentPart?
+                    .DocumentSettingsPart?.Settings;
+                if (settings?.WriteProtection?.Recommended == null) {
                     return false;
                 }
-                if (settings.WriteProtection.Recommended == null) {
-                    return false;
+                var recommended = settings.WriteProtection.Recommended;
+                if (recommended.Value == true && (recommended.InnerText == "1" || string.IsNullOrEmpty(recommended.InnerText))) {
+                    return true;
                 }
-                return settings.WriteProtection.Recommended.Value;
+                return false;
             }
             set {
-                var settings = _document._wordprocessingDocument.MainDocumentPart.DocumentSettingsPart.Settings;
-                if (settings.WriteProtection == null) {
-                    if (value == null) {
-                        // user wanted to remove read only protection
-                        return;
-                    }
+                var settings = _document._wordprocessingDocument.MainDocumentPart?
+                    .DocumentSettingsPart?.Settings;
+                if (settings == null) {
+                    return;
+                }
+                if (settings.WriteProtection == null && value != null && value != false) {
                     settings.WriteProtection = new WriteProtection();
-                } else {
-                    if (value == null) {
-                        // user wanted to remove read only protection
-                        settings.WriteProtection.Remove();
-                        return;
+                }
+                if (settings.WriteProtection != null) {
+                    if (value == null || value == false) {
+                        settings.WriteProtection.Recommended = null;
+                        if (string.IsNullOrEmpty(settings.WriteProtection.Hash) && settings.WriteProtection.Recommended == null) {
+                            settings.WriteProtection.Remove();
+                        }
+                    } else {
+                        var onOff = new DocumentFormat.OpenXml.OnOffValue(true) { InnerText = "1" };
+                        settings.WriteProtection.Recommended = onOff;
                     }
                 }
-                settings.WriteProtection.Recommended = value;
             }
         }
 
         /// <summary>
-        /// Sets password protection when recommending document to be read only
-        /// Doesn't seem to work
+        /// Gets or sets a value indicating whether the document is marked as
+        /// final. When set to <c>true</c>, Word notifies users that the
+        /// document is finalized and should be treated as read-only.
         /// </summary>
-        public string ReadOnlyPassword {
+        public bool FinalDocument {
+            get {
+                if (_document.CustomDocumentProperties.TryGetValue("_MarkAsFinal", out var markFinalProperty)) {
+                    if (markFinalProperty?.Value is string valueString) {
+                        return string.Equals(valueString, "1", StringComparison.Ordinal);
+                    }
+                }
+                return false;
+            }
             set {
-                Security.SetWriteProtection(this._document._wordprocessingDocument, value);
+                string newValue = value ? "1" : "0";
+                if (_document.CustomDocumentProperties.ContainsKey("_MarkAsFinal")) {
+                    _document.CustomDocumentProperties["_MarkAsFinal"].Value = newValue;
+                } else {
+                    _document.CustomDocumentProperties.Add("_MarkAsFinal", new WordCustomProperty(newValue));
+                }
             }
         }
 
-        public bool FinalDocument {
+        /// <summary>
+        /// Gets or sets a value indicating whether the gutter should be placed
+        /// at the top of the page when the document uses a vertical layout.
+        /// </summary>
+        public bool GutterAtTop {
             get {
-                if (_document.CustomDocumentProperties.ContainsKey("_MarkAsFinal")) {
-                    // key exists in dictionary
-                    var markFinalProperty = _document.CustomDocumentProperties["_MarkAsFinal"];
-                    return markFinalProperty != null && (bool)markFinalProperty.Value;
-                } else {
+                var settings = _document._wordprocessingDocument.MainDocumentPart?
+                    .DocumentSettingsPart?.Settings;
+                var gutterAtTop = settings?.GetFirstChild<GutterAtTop>();
+                if (gutterAtTop == null) {
                     return false;
                 }
+                return gutterAtTop.Val?.Value ?? false;
             }
             set {
-                if (_document.CustomDocumentProperties.ContainsKey("_MarkAsFinal")) {
-                    _document.CustomDocumentProperties["_MarkAsFinal"].Value = value;
+                var settings = _document._wordprocessingDocument.MainDocumentPart?
+                    .DocumentSettingsPart?.Settings;
+                if (settings == null) {
+                    return;
+                }
+                var gutterAtTop = settings.GetFirstChild<GutterAtTop>();
+                if (gutterAtTop == null) {
+                    gutterAtTop = new GutterAtTop();
+                    settings.Append(gutterAtTop);
+                }
+                gutterAtTop.Val = value;
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether odd and even pages use mirrored inside/outside margins.
+        /// </summary>
+        public bool MirrorMargins {
+            get {
+                var settings = _document._wordprocessingDocument.MainDocumentPart?
+                    .DocumentSettingsPart?.Settings;
+                var mirrorMargins = settings?.GetFirstChild<MirrorMargins>();
+                if (mirrorMargins == null) {
+                    return false;
+                }
+
+                return mirrorMargins.Val?.Value ?? true;
+            }
+            set {
+                var settings = _document._wordprocessingDocument.MainDocumentPart?
+                    .DocumentSettingsPart?.Settings;
+                if (settings == null) {
+                    return;
+                }
+
+                var mirrorMargins = settings.GetFirstChild<MirrorMargins>();
+                if (value) {
+                    if (mirrorMargins == null) {
+                        mirrorMargins = new MirrorMargins();
+                        settings.Append(mirrorMargins);
+                    }
+
+                    mirrorMargins.Val = true;
                 } else {
-                    _document.CustomDocumentProperties.Add("_MarkAsFinal", new WordCustomProperty(value));
+                    mirrorMargins?.Remove();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Enable or disable tracking of revisions in the document.
+        /// </summary>
+        public bool TrackRevisions {
+            get {
+                var settings = _document._wordprocessingDocument.MainDocumentPart?
+                    .DocumentSettingsPart?.Settings;
+                return settings?.GetFirstChild<TrackRevisions>() != null;
+            }
+            set {
+                var settings = _document._wordprocessingDocument.MainDocumentPart?
+                    .DocumentSettingsPart?.Settings;
+                if (settings == null) {
+                    return;
+                }
+                var track = settings.GetFirstChild<TrackRevisions>();
+                if (value) {
+                    if (track == null) {
+                        settings.Append(new TrackRevisions());
+                    }
+                } else {
+                    track?.Remove();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Enable or disable tracking of formatting changes.
+        /// </summary>
+        public bool TrackFormatting {
+            get {
+                var settings = _document._wordprocessingDocument.MainDocumentPart?
+                    .DocumentSettingsPart?.Settings;
+                return settings?.GetFirstChild<DoNotTrackFormatting>() == null;
+            }
+            set {
+                var settings = _document._wordprocessingDocument.MainDocumentPart?
+                    .DocumentSettingsPart?.Settings;
+                if (settings == null) {
+                    return;
+                }
+                var formatting = settings.GetFirstChild<DoNotTrackFormatting>();
+                if (value) {
+                    formatting?.Remove();
+                } else if (formatting == null) {
+                    settings.Append(new DoNotTrackFormatting());
+                }
+            }
+        }
+
+        /// <summary>
+        /// Enable or disable tracking of move operations.
+        /// </summary>
+        public bool TrackMoves {
+            get {
+                var settings = _document._wordprocessingDocument.MainDocumentPart?
+                    .DocumentSettingsPart?.Settings;
+                return settings?.GetFirstChild<DoNotTrackMoves>() == null;
+            }
+            set {
+                var settings = _document._wordprocessingDocument.MainDocumentPart?
+                    .DocumentSettingsPart?.Settings;
+                if (settings == null) {
+                    return;
+                }
+                var moves = settings.GetFirstChild<DoNotTrackMoves>();
+                if (value) {
+                    moves?.Remove();
+                } else if (moves == null) {
+                    settings.Append(new DoNotTrackMoves());
                 }
             }
         }

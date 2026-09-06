@@ -1,0 +1,382 @@
+using AngleSharp.Dom;
+using OfficeIMO.Drawing;
+using System.Collections.ObjectModel;
+
+namespace OfficeIMO.Html;
+
+/// <summary>Typed semantic HTML block categories interpreted once by the shared core.</summary>
+public enum HtmlSemanticBlockKind {
+    /// <summary>Heading block.</summary>
+    Heading,
+    /// <summary>Paragraph or address block.</summary>
+    Paragraph,
+    /// <summary>Preformatted source or code block.</summary>
+    Code,
+    /// <summary>Quoted block.</summary>
+    Quote,
+    /// <summary>Ordered, unordered, or definition list.</summary>
+    List,
+    /// <summary>One list item.</summary>
+    ListItem,
+    /// <summary>Tabular content.</summary>
+    Table,
+    /// <summary>Image content.</summary>
+    Image,
+    /// <summary>Audio, video, or embedded media.</summary>
+    Media,
+    /// <summary>Form or form control.</summary>
+    Form,
+    /// <summary>Footnote, endnote, or note-like content.</summary>
+    Note,
+    /// <summary>Other retained semantic content.</summary>
+    Other
+}
+
+/// <summary>Source used to name a projected semantic section.</summary>
+public enum HtmlSemanticSectionTitleSource {
+    /// <summary>The title was synthesized because the source supplied no usable name.</summary>
+    Generated,
+    /// <summary>The title came from the HTML document title.</summary>
+    DocumentTitle,
+    /// <summary>The title came from a visible HTML heading.</summary>
+    Heading,
+    /// <summary>The title came from an ARIA label.</summary>
+    AriaLabel,
+    /// <summary>The title came from the section element ID.</summary>
+    Id
+}
+
+/// <summary>Canonical typed semantic representation shared by HTML target adapters.</summary>
+public sealed class HtmlSemanticDocument {
+    internal HtmlSemanticDocument(
+        string title,
+        string language,
+        IReadOnlyDictionary<string, string> metadata,
+        IReadOnlyList<HtmlSemanticSection> sections,
+        IReadOnlyList<HtmlSemanticBlock> rootTables,
+        IReadOnlyList<HtmlSemanticResource> resourceOccurrences,
+        IReadOnlyList<HtmlSemanticResource> resources) {
+        Title = title;
+        Language = language;
+        Metadata = SnapshotDictionary(metadata, nameof(metadata));
+        Sections = Snapshot(sections, nameof(sections));
+        RootTables = Snapshot(rootTables, nameof(rootTables));
+        ResourceOccurrences = Snapshot(resourceOccurrences, nameof(resourceOccurrences));
+        Resources = Snapshot(resources, nameof(resources));
+    }
+
+    /// <summary>Normalized document title.</summary>
+    public string Title { get; }
+
+    /// <summary>Declared document language.</summary>
+    public string Language { get; }
+
+    /// <summary>Normalized document metadata keyed by lower-case name.</summary>
+    public IReadOnlyDictionary<string, string> Metadata { get; }
+
+    /// <summary>Ordered semantic sections used as pages, sheets, or slides by generic adapters.</summary>
+    public IReadOnlyList<HtmlSemanticSection> Sections { get; }
+
+    /// <summary>Top-level tables, excluding tables nested in another table.</summary>
+    public IReadOnlyList<HtmlSemanticBlock> RootTables { get; }
+
+    /// <summary>Every resource occurrence referenced by retained semantic blocks in source order.</summary>
+    public IReadOnlyList<HtmlSemanticResource> ResourceOccurrences { get; }
+
+    /// <summary>Deduplicated resource inventory keyed by kind and source.</summary>
+    public IReadOnlyList<HtmlSemanticResource> Resources { get; }
+
+    private static IReadOnlyList<T> Snapshot<T>(IReadOnlyList<T> values, string parameterName) =>
+        Array.AsReadOnly((values ?? throw new ArgumentNullException(parameterName)).ToArray());
+
+    private static IReadOnlyDictionary<string, string> SnapshotDictionary(
+        IReadOnlyDictionary<string, string> values, string parameterName) {
+        if (values == null) throw new ArgumentNullException(parameterName);
+        var copy = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (KeyValuePair<string, string> pair in values) copy[pair.Key] = pair.Value;
+        return new ReadOnlyDictionary<string, string>(copy);
+    }
+}
+
+/// <summary>One shared semantic section.</summary>
+public sealed class HtmlSemanticSection {
+    internal HtmlSemanticSection(
+        string title,
+        HtmlSemanticSectionTitleSource titleSource,
+        IReadOnlyList<HtmlSemanticBlock> blocks,
+        HtmlSemanticSourceLocation? sourceLocation) {
+        Title = title;
+        TitleSource = titleSource;
+        Blocks = Array.AsReadOnly((blocks ?? throw new ArgumentNullException(nameof(blocks))).ToArray());
+        SourceLocation = sourceLocation;
+    }
+
+    /// <summary>Section title selected by shared heading, label, id, and document-title rules.</summary>
+    public string Title { get; }
+
+    /// <summary>Source used to select <see cref="Title"/>.</summary>
+    public HtmlSemanticSectionTitleSource TitleSource { get; }
+
+    /// <summary>Ordered blocks contained by this section.</summary>
+    public IReadOnlyList<HtmlSemanticBlock> Blocks { get; }
+
+    /// <summary>Source provenance for the section container or first retained block.</summary>
+    public HtmlSemanticSourceLocation? SourceLocation { get; }
+}
+
+/// <summary>One typed semantic block with optional list, table, resource, form, and rich-run data.</summary>
+public sealed class HtmlSemanticBlock {
+    internal HtmlSemanticBlock(
+        HtmlSemanticBlockKind kind,
+        string text,
+        int level,
+        IReadOnlyList<HtmlSemanticRun> runs,
+        IReadOnlyList<HtmlSemanticBlock> children,
+        HtmlSemanticList? list,
+        HtmlSemanticListItem? listItem,
+        HtmlSemanticTable? table,
+        HtmlSemanticResource? resource,
+        IReadOnlyList<HtmlSemanticResource> inlineResources,
+        HtmlSemanticForm? form,
+        HtmlSemanticFormControl? formControl,
+        HtmlComputedStyle? style,
+        HtmlSemanticSourceLocation? sourceLocation,
+        IElement sourceElement) {
+        Kind = kind;
+        Text = text;
+        Level = level;
+        Runs = Array.AsReadOnly((runs ?? throw new ArgumentNullException(nameof(runs))).ToArray());
+        Children = Array.AsReadOnly((children ?? throw new ArgumentNullException(nameof(children))).ToArray());
+        List = list;
+        ListItem = listItem;
+        Table = table;
+        Resource = resource;
+        InlineResources = Array.AsReadOnly((inlineResources ?? throw new ArgumentNullException(nameof(inlineResources))).ToArray());
+        Form = form;
+        FormControl = formControl;
+        Style = style;
+        SourceLocation = sourceLocation;
+        SourceElement = sourceElement;
+    }
+
+    /// <summary>Semantic block category.</summary>
+    public HtmlSemanticBlockKind Kind { get; }
+
+    /// <summary>Normalized plain-text projection.</summary>
+    public string Text { get; }
+
+    /// <summary>Heading level or nested list depth; zero when not applicable.</summary>
+    public int Level { get; }
+
+    /// <summary>Whether this block is an ordered list.</summary>
+    public bool Ordered => List?.Kind == HtmlSemanticListKind.Ordered;
+
+    /// <summary>Rich editable text runs.</summary>
+    public IReadOnlyList<HtmlSemanticRun> Runs { get; }
+
+    /// <summary>Nested list items or retained child blocks.</summary>
+    public IReadOnlyList<HtmlSemanticBlock> Children { get; }
+
+    /// <summary>Typed list state when <see cref="Kind"/> is <see cref="HtmlSemanticBlockKind.List"/>.</summary>
+    public HtmlSemanticList? List { get; }
+
+    /// <summary>Typed list-item state when <see cref="Kind"/> is <see cref="HtmlSemanticBlockKind.ListItem"/>.</summary>
+    public HtmlSemanticListItem? ListItem { get; }
+
+    /// <summary>Typed table data when <see cref="Kind"/> is <see cref="HtmlSemanticBlockKind.Table"/>.</summary>
+    public HtmlSemanticTable? Table { get; }
+
+    /// <summary>Typed resource when the block references an image or media object.</summary>
+    public HtmlSemanticResource? Resource { get; }
+
+    /// <summary>Resources embedded inside this block, retained independently from its text runs.</summary>
+    public IReadOnlyList<HtmlSemanticResource> InlineResources { get; }
+
+    /// <summary>Typed form-container state when this block represents a form element.</summary>
+    public HtmlSemanticForm? Form { get; }
+
+    /// <summary>Typed form state when the block represents a form control.</summary>
+    public HtmlSemanticFormControl? FormControl { get; }
+
+    /// <summary>Computed style snapshot from the shared CSS engine.</summary>
+    public HtmlComputedStyle? Style { get; }
+
+    /// <summary>Source provenance.</summary>
+    public HtmlSemanticSourceLocation? SourceLocation { get; }
+
+    internal IElement SourceElement { get; }
+}
+
+/// <summary>Editable rich-text run shared by native adapters.</summary>
+public sealed class HtmlSemanticRun {
+    internal HtmlSemanticRun(string text, string? hyperlink, bool bold, bool italic, bool underline,
+        bool strikethrough, bool superscript, bool subscript, HtmlComputedStyle? style,
+        HtmlSemanticSourceLocation? sourceLocation,
+        bool isLineBreak,
+        IReadOnlyDictionary<string, string>? dataAttributes = null,
+        string? backgroundColor = null)
+        : this(text, hyperlink, bold, italic, underline, ResolveDecorationStyle(style),
+            strikethrough, ResolveDecorationStyle(style), superscript, subscript, style,
+            sourceLocation, isLineBreak, dataAttributes, backgroundColor) {
+    }
+
+    internal HtmlSemanticRun(string text, string? hyperlink, bool bold, bool italic, bool underline,
+        OfficeTextDecorationStyle underlineStyle, bool strikethrough, OfficeTextDecorationStyle strikethroughStyle,
+        bool superscript, bool subscript, HtmlComputedStyle? style,
+        HtmlSemanticSourceLocation? sourceLocation,
+        bool isLineBreak,
+        IReadOnlyDictionary<string, string>? dataAttributes = null,
+        string? backgroundColor = null) {
+        Text = text;
+        Hyperlink = hyperlink;
+        Bold = bold;
+        Italic = italic;
+        Underline = underline;
+        UnderlineStyle = underline ? NormalizeDecorationStyle(underlineStyle) : OfficeTextDecorationStyle.None;
+        Strikethrough = strikethrough;
+        StrikethroughStyle = strikethrough ? NormalizeDecorationStyle(strikethroughStyle) : OfficeTextDecorationStyle.None;
+        Superscript = superscript;
+        Subscript = subscript;
+        Style = style;
+        SourceLocation = sourceLocation;
+        IsLineBreak = isLineBreak;
+        DataAttributes = dataAttributes ?? new ReadOnlyDictionary<string, string>(new Dictionary<string, string>());
+        BackgroundColor = backgroundColor;
+    }
+
+    /// <summary>Run text.</summary>
+    public string Text { get; }
+    /// <summary>Policy-normalized hyperlink, when present.</summary>
+    public string? Hyperlink { get; }
+    /// <summary>Whether the run is bold.</summary>
+    public bool Bold { get; }
+    /// <summary>Whether the run is italic.</summary>
+    public bool Italic { get; }
+    /// <summary>Whether the run is underlined.</summary>
+    public bool Underline { get; }
+    /// <summary>Resolved underline pattern for targets that expose more than a Boolean underline flag.</summary>
+    public OfficeTextDecorationStyle UnderlineStyle { get; }
+    /// <summary>Whether the run is struck through.</summary>
+    public bool Strikethrough { get; }
+    /// <summary>Resolved strike-through pattern for targets that expose more than a Boolean strike flag.</summary>
+    public OfficeTextDecorationStyle StrikethroughStyle { get; }
+    /// <summary>Whether the run is superscript.</summary>
+    public bool Superscript { get; }
+    /// <summary>Whether the run is subscript.</summary>
+    public bool Subscript { get; }
+    /// <summary>Resolved run baseline.</summary>
+    public OfficeTextBaseline Baseline => Superscript
+        ? OfficeTextBaseline.Superscript
+        : Subscript ? OfficeTextBaseline.Subscript : OfficeTextBaseline.Normal;
+    /// <summary>Computed style snapshot.</summary>
+    public HtmlComputedStyle? Style { get; }
+    /// <summary>Source provenance.</summary>
+    public HtmlSemanticSourceLocation? SourceLocation { get; }
+    /// <summary>Whether this run represents an explicit HTML line break.</summary>
+    public bool IsLineBreak { get; }
+    /// <summary>Trusted converter metadata attached to the source run, keyed by normalized data-* attribute name.</summary>
+    public IReadOnlyDictionary<string, string> DataAttributes { get; }
+    /// <summary>Nearest effective nontransparent inline background color, suitable for native text highlighting.</summary>
+    public string? BackgroundColor { get; }
+
+    private static OfficeTextDecorationStyle NormalizeDecorationStyle(OfficeTextDecorationStyle value) =>
+        value == OfficeTextDecorationStyle.None ? OfficeTextDecorationStyle.Single : value;
+
+    private static OfficeTextDecorationStyle ResolveDecorationStyle(HtmlComputedStyle? style) =>
+        (style?.GetValue("text-decoration-style") ?? string.Empty).Trim().ToLowerInvariant() switch {
+            "double" => OfficeTextDecorationStyle.Double,
+            "dotted" => OfficeTextDecorationStyle.Dotted,
+            "dashed" => OfficeTextDecorationStyle.Dashed,
+            "wavy" => OfficeTextDecorationStyle.Wavy,
+            _ => OfficeTextDecorationStyle.Single
+        };
+}
+
+/// <summary>Typed semantic table.</summary>
+public sealed class HtmlSemanticTable {
+    internal HtmlSemanticTable(string caption, IReadOnlyList<HtmlSemanticTableRow> rows) {
+        Caption = caption;
+        Rows = Array.AsReadOnly((rows ?? throw new ArgumentNullException(nameof(rows))).ToArray());
+    }
+
+    /// <summary>Resolved table caption or shared fallback title.</summary>
+    public string Caption { get; }
+    /// <summary>Rows in source order.</summary>
+    public IReadOnlyList<HtmlSemanticTableRow> Rows { get; }
+}
+
+/// <summary>One semantic table row.</summary>
+public sealed class HtmlSemanticTableRow {
+    internal HtmlSemanticTableRow(IReadOnlyList<HtmlSemanticTableCell> cells, HtmlSemanticSourceLocation? sourceLocation) {
+        Cells = Array.AsReadOnly((cells ?? throw new ArgumentNullException(nameof(cells))).ToArray());
+        SourceLocation = sourceLocation;
+    }
+
+    /// <summary>Cells in source order.</summary>
+    public IReadOnlyList<HtmlSemanticTableCell> Cells { get; }
+    /// <summary>Source provenance.</summary>
+    public HtmlSemanticSourceLocation? SourceLocation { get; }
+}
+
+/// <summary>One semantic table cell.</summary>
+public sealed class HtmlSemanticTableCell {
+    internal HtmlSemanticTableCell(string text, bool isHeader, int rowSpan, int columnSpan,
+        IReadOnlyList<HtmlSemanticRun> runs, IReadOnlyList<HtmlSemanticResource> resources,
+        HtmlComputedStyle? style, HtmlSemanticSourceLocation? sourceLocation) {
+        Text = text;
+        IsHeader = isHeader;
+        RowSpan = rowSpan;
+        ColumnSpan = columnSpan;
+        Runs = Array.AsReadOnly((runs ?? throw new ArgumentNullException(nameof(runs))).ToArray());
+        Resources = Array.AsReadOnly((resources ?? throw new ArgumentNullException(nameof(resources))).ToArray());
+        Style = style;
+        SourceLocation = sourceLocation;
+    }
+
+    /// <summary>Normalized cell text.</summary>
+    public string Text { get; }
+    /// <summary>Whether the source used a header cell.</summary>
+    public bool IsHeader { get; }
+    /// <summary>Source row span, normalized to at least one.</summary>
+    public int RowSpan { get; }
+    /// <summary>Source column span, normalized to at least one.</summary>
+    public int ColumnSpan { get; }
+    /// <summary>Rich cell runs.</summary>
+    public IReadOnlyList<HtmlSemanticRun> Runs { get; }
+    /// <summary>Resources embedded in the cell.</summary>
+    public IReadOnlyList<HtmlSemanticResource> Resources { get; }
+    /// <summary>Computed cell style.</summary>
+    public HtmlComputedStyle? Style { get; }
+    /// <summary>Source provenance.</summary>
+    public HtmlSemanticSourceLocation? SourceLocation { get; }
+}
+
+/// <summary>Policy-normalized resource reference interpreted from a semantic element.</summary>
+public sealed class HtmlSemanticResource {
+    internal HtmlSemanticResource(HtmlResourceKind kind, string source, string alternateText,
+        string mediaType, double? widthPixels, double? heightPixels,
+        HtmlSemanticSourceLocation? sourceLocation) {
+        Kind = kind;
+        Source = source;
+        AlternateText = alternateText;
+        MediaType = mediaType;
+        WidthPixels = widthPixels;
+        HeightPixels = heightPixels;
+        SourceLocation = sourceLocation;
+    }
+
+    /// <summary>Resource kind.</summary>
+    public HtmlResourceKind Kind { get; }
+    /// <summary>Policy-normalized source value.</summary>
+    public string Source { get; }
+    /// <summary>Accessible alternate text.</summary>
+    public string AlternateText { get; }
+    /// <summary>Declared or data-URI media type.</summary>
+    public string MediaType { get; }
+    /// <summary>Resolved CSS or HTML width in pixels, when explicitly available.</summary>
+    public double? WidthPixels { get; }
+    /// <summary>Resolved CSS or HTML height in pixels, when explicitly available.</summary>
+    public double? HeightPixels { get; }
+    /// <summary>Source provenance.</summary>
+    public HtmlSemanticSourceLocation? SourceLocation { get; }
+}

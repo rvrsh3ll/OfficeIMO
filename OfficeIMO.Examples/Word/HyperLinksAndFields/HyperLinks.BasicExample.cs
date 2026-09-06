@@ -5,7 +5,7 @@ using System.Text;
 using System.Threading.Tasks;
 using DocumentFormat.OpenXml.Wordprocessing;
 using OfficeIMO.Word;
-using Color = SixLabors.ImageSharp.Color;
+using Color = OfficeIMO.Drawing.OfficeColor;
 
 namespace OfficeIMO.Examples.Word {
     internal static partial class HyperLinks {
@@ -27,7 +27,7 @@ namespace OfficeIMO.Examples.Word {
                 var test = document.AddParagraph("Test Email Address ").AddHyperLink("Przemysław Klys", new Uri("mailto:kontakt@evotec.pl?subject=Test Subject"), true);
                 test.Bold = true;
                 test.Italic = true;
-                test.Underline = UnderlineValues.Dash;
+                test.Underline = WordUnderlineStyle.Dash;
                 test.Color = Color.Green;
 
                 // this hyperlink will have no style at all
@@ -48,7 +48,8 @@ namespace OfficeIMO.Examples.Word {
 
                 Console.WriteLine(document.HyperLinks.Count);
 
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
     }

@@ -1,0 +1,36 @@
+namespace OfficeIMO.Html;
+
+internal static partial class RtfHtmlWriter {
+    private static void AppendGeneratedText(StringBuilder builder, RtfGeneratedText generatedText, bool includeRoundTripMetadata) {
+        if (!includeRoundTripMetadata) {
+            if (generatedText.FallbackText is string fallbackText && fallbackText.Length > 0) {
+                builder.Append(Encode(fallbackText));
+            }
+
+            return;
+        }
+
+        builder.Append("<span data-officeimo-rtf-generated-text=\"");
+        builder.Append(EncodeAttribute(FormatGeneratedTextKind(generatedText.Kind)));
+        builder.Append("\"></span>");
+    }
+
+    private static string FormatGeneratedTextKind(RtfGeneratedTextKind kind) {
+        switch (kind) {
+            case RtfGeneratedTextKind.SectionNumber:
+                return "section-number";
+            case RtfGeneratedTextKind.CurrentDate:
+                return "current-date";
+            case RtfGeneratedTextKind.CurrentDateLong:
+                return "current-date-long";
+            case RtfGeneratedTextKind.CurrentDateAbbreviated:
+                return "current-date-abbreviated";
+            case RtfGeneratedTextKind.CurrentTime:
+                return "current-time";
+            case RtfGeneratedTextKind.NoteReference:
+                return "note-reference";
+            default:
+                return "page-number";
+        }
+    }
+}

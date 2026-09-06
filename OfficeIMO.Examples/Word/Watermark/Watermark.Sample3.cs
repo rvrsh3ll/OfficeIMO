@@ -4,10 +4,15 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using OfficeIMO.Word;
-using SixLabors.ImageSharp;
+using Color = OfficeIMO.Drawing.OfficeColor;
 
 namespace OfficeIMO.Examples.Word {
     internal static partial class Watermark {
+        /// <summary>
+        /// Demonstrates adding a watermark to a document with multiple sections.
+        /// </summary>
+        /// <param name="folderPath">Destination folder for the document.</param>
+        /// <param name="openWord">Whether to open the document after creation.</param>
         public static void Watermark_Sample3(string folderPath, bool openWord) {
             Console.WriteLine("[*] Creating standard document with watermark");
             string filePath = System.IO.Path.Combine(folderPath, "Basic Document with watermark and sections.docx");
@@ -55,7 +60,8 @@ namespace OfficeIMO.Examples.Word {
                 Console.WriteLine("Watermarks section 2: " + document.Sections[2].Watermarks.Count);
                 Console.WriteLine("Paragraphs: " + document.Paragraphs.Count);
 
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
     }

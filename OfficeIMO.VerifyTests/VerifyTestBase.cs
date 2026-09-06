@@ -1,3 +1,10 @@
+using DocumentFormat.OpenXml.CustomProperties;
+using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Drawing;
+using DocumentFormat.OpenXml.Drawing.Charts;
+using DocumentFormat.OpenXml.Drawing.Wordprocessing;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Wordprocessing;
 using System;
 using System.Globalization;
 using System.IO;
@@ -6,12 +13,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using System.Xml;
-using DocumentFormat.OpenXml.CustomProperties;
-using DocumentFormat.OpenXml.Drawing.Charts;
-using DocumentFormat.OpenXml.Packaging;
-using DocumentFormat.OpenXml.Wordprocessing;
 using VerifyTests;
-using VerifyXunit;
 using Formatting = System.Xml.Formatting;
 using Hyperlink = DocumentFormat.OpenXml.Wordprocessing.Hyperlink;
 
@@ -26,7 +28,10 @@ public abstract class VerifyTestBase {
 
     static VerifyTestBase() {
         // To disable Visual Studio popping up on every test execution.
-        Environment.SetEnvironmentVariable("DiffEngine_Disabled", "true");
+        var diffDisabled = Environment.GetEnvironmentVariable("DiffEngine_Disabled");
+        if (string.IsNullOrEmpty(diffDisabled))
+            Environment.SetEnvironmentVariable("DiffEngine_Disabled", "true");
+
         Environment.SetEnvironmentVariable("Verify_DisableClipboard", "true");
     }
 
@@ -57,14 +62,15 @@ public abstract class VerifyTestBase {
     }
 
     private static async Task<string> GetVerifyResult(IdPartPair id) {
-        if (id.OpenXmlPart.RootElement is null)
-            return "";
-
         var result = new StringBuilder();
-        var xml = FormatXml(id.OpenXmlPart.RootElement.OuterXml);
+        var content = await GetPartContent(id.OpenXmlPart);
+        if (string.IsNullOrEmpty(content)) {
+            return "";
+        }
+
         result.AppendLine(id.OpenXmlPart.Uri.ToString());
         result.AppendLine(RowDelimiter);
-        result.AppendLine(xml);
+        result.AppendLine(content);
         result.AppendLine(RowDelimiter);
 
         foreach (var part in id.OpenXmlPart.Parts) {
@@ -76,8 +82,27 @@ public abstract class VerifyTestBase {
         return result.ToString();
     }
 
+    private static async Task<string> GetPartContent(OpenXmlPart part) {
+        if (part.RootElement != null) {
+            return FormatXml(part.RootElement.OuterXml);
+        }
+
+        if (part is AlternativeFormatImportPart altPart && IsTextContent(altPart.ContentType)) {
+            using var stream = altPart.GetStream();
+            using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            var text = await reader.ReadToEndAsync();
+
+            var result = new StringBuilder();
+            result.AppendLine($"ContentType: {altPart.ContentType}");
+            result.Append(NormalizeText(text));
+            return result.ToString();
+        }
+
+        return "";
+    }
+
     private static void NormalizeWord(WordprocessingDocument document) {
-        NormalizeDocument(document.MainDocumentPart?.Document);
+        NormalizePart(document.MainDocumentPart);
         NormalizeCustomFilePropertiesPart(document.CustomFilePropertiesPart);
     }
 
@@ -97,17 +122,61 @@ public abstract class VerifyTestBase {
         return sb.ToString();
     }
 
-    private static void NormalizeDocument(Document? document) {
-        if (document is null)
+    private static void NormalizePart(OpenXmlPart? part) {
+        if (part is null) {
             return;
-
-        var i = 1;
-        foreach (var hyperlink in document.Descendants<Hyperlink>()) {
-            hyperlink.Id = "R" + i.ToString("X8");
-            i++;
         }
 
-        i = 1;
+        NormalizeRootElement(part.RootElement);
+
+        if (part is WordprocessingCommentsPart commentsPart && commentsPart.RootElement != null) {
+            foreach (var comment in commentsPart.RootElement.Descendants<Comment>()) {
+                comment.Date = DateTime.MaxValue;
+            }
+
+            foreach (var paragraph in commentsPart.RootElement.Descendants<DocumentFormat.OpenXml.Wordprocessing.Paragraph>()) {
+                paragraph.ParagraphId = null;
+                paragraph.TextId = null;
+            }
+        }
+
+        if (part is NumberingDefinitionsPart numberingPart && numberingPart.RootElement != null) {
+            var i = 1;
+            foreach (var nsid in numberingPart.RootElement.Descendants<Nsid>()) {
+                nsid.Val = i.ToString("X8");
+                i++;
+            }
+        }
+
+        foreach (var childPart in part.Parts) {
+            NormalizePart(childPart.OpenXmlPart);
+        }
+    }
+
+    private static void NormalizeRootElement(DocumentFormat.OpenXml.OpenXmlElement? rootElement) {
+        if (rootElement is null) {
+            return;
+        }
+
+        if (rootElement is Document document) {
+            NormalizeDocumentReferences(document);
+        } else {
+            NormalizeRelationshipReferences(rootElement);
+        }
+
+        NormalizeDrawingReferences(rootElement);
+        NormalizeSectionProperties(rootElement);
+        NormalizeRevisionMetadata(rootElement);
+        NormalizeStructuredDocumentTagIds(rootElement);
+        NormalizeEmptyRunProperties(rootElement);
+        NormalizeTableGrid(rootElement);
+        NormalizeSettings(rootElement);
+    }
+
+    private static void NormalizeDocumentReferences(Document document) {
+        NormalizeRelationshipReferences(document);
+
+        var i = 1;
         foreach (var headerReference in document.Descendants<HeaderReference>()) {
             headerReference.Id = "R" + i.ToString("X8");
             i++;
@@ -118,30 +187,86 @@ public abstract class VerifyTestBase {
             footerReference.Id = "R" + i.ToString("X8");
             i++;
         }
+    }
+
+    private static void NormalizeRelationshipReferences(DocumentFormat.OpenXml.OpenXmlElement rootElement) {
+        var i = 1;
+        foreach (var hyperlink in rootElement.Descendants<Hyperlink>()) {
+            hyperlink.Id = "R" + i.ToString("X8");
+            i++;
+        }
 
         i = 1;
-        foreach (var chartReference in document.Descendants<ChartReference>()) {
+        foreach (var chartReference in rootElement.Descendants<ChartReference>()) {
             chartReference.Id = "R" + i.ToString("X8");
             i++;
         }
 
-        if (document.MainDocumentPart!.GetPartsOfType<WordprocessingCommentsPart>().Any()) {
-            foreach (var comment in document.MainDocumentPart.WordprocessingCommentsPart!.RootElement!.Descendants<Comment>()) {
-                comment.Date = DateTime.MaxValue;
-            }
+        i = 1;
+        foreach (var altChunk in rootElement.Descendants<AltChunk>()) {
+            altChunk.Id = "R" + i.ToString("X8");
+            i++;
         }
 
-        if (document.MainDocumentPart!.GetPartsOfType<NumberingDefinitionsPart>().Any()) {
-            i = 1;
-            foreach (var nsid in document.MainDocumentPart.NumberingDefinitionsPart!.RootElement!.Descendants<Nsid>()) {
-                nsid.Val = i.ToString("X8");
+        i = 1;
+        foreach (var blip in rootElement.Descendants<Blip>()) {
+            if (blip.Embed != null) {
+                blip.Embed = "R" + i.ToString("X8");
+                i++;
+            }
+
+            if (blip.Link != null) {
+                blip.Link = "R" + i.ToString("X8");
                 i++;
             }
         }
+    }
 
-        // Normalize RSID in SectionProperties
+    private static void NormalizeDrawingReferences(DocumentFormat.OpenXml.OpenXmlElement rootElement) {
+        var i = 1;
+        foreach (var docProperties in rootElement.Descendants<DocumentFormat.OpenXml.Drawing.Wordprocessing.DocProperties>()) {
+            docProperties.Id = (UInt32Value)(uint)i;
+            i++;
+        }
+
         i = 1;
-        foreach (var sectionProperties in document.Descendants<SectionProperties>()) {
+        foreach (var anchor in rootElement.Descendants<DocumentFormat.OpenXml.Drawing.Wordprocessing.Anchor>()) {
+            anchor.AnchorId = i.ToString("X8");
+            anchor.EditId = "E" + i.ToString("X8");
+            i++;
+        }
+
+        i = 1;
+        foreach (var inline in rootElement.Descendants<Inline>()) {
+            inline.AnchorId = i.ToString("X8");
+            inline.EditId = "E" + i.ToString("X8");
+            i++;
+        }
+
+        i = 1;
+        foreach (var sdtId in rootElement.Descendants<SdtId>()) {
+            sdtId.Val = new Int32Value(i);
+            i++;
+        }
+    }
+
+    private static void NormalizeStructuredDocumentTagIds(DocumentFormat.OpenXml.OpenXmlElement rootElement) {
+        var i = 1;
+        foreach (var element in rootElement
+                     .Descendants()
+                     .Where(x => x.LocalName == "id"
+                                 && x.NamespaceUri == "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                                 && x.Parent?.LocalName == "sdtPr")) {
+            element.SetAttribute(new OpenXmlAttribute("w", "val",
+                "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+                i.ToString(CultureInfo.InvariantCulture)));
+            i++;
+        }
+    }
+
+    private static void NormalizeSectionProperties(DocumentFormat.OpenXml.OpenXmlElement rootElement) {
+        var i = 1;
+        foreach (var sectionProperties in rootElement.Descendants<SectionProperties>()) {
             if (sectionProperties.RsidRPr != null) {
                 sectionProperties.RsidRPr = "R" + i.ToString("X8");
                 i++;
@@ -154,14 +279,181 @@ public abstract class VerifyTestBase {
                 sectionProperties.RsidDel = "R" + i.ToString("X8");
                 i++;
             }
+
+            EnsureDefaultSectionLayout(sectionProperties);
         }
     }
 
+    private static void NormalizeRevisionMetadata(DocumentFormat.OpenXml.OpenXmlElement rootElement) {
+        var revisionDate = new DateTime(9999, 12, 31, 23, 59, 59, DateTimeKind.Utc);
+
+        var i = 1;
+        foreach (var inserted in rootElement.Descendants<InsertedRun>()) {
+            inserted.Id = i.ToString(CultureInfo.InvariantCulture);
+            inserted.Author = "Comparer";
+            inserted.Date = revisionDate;
+            i++;
+        }
+
+        i = 1;
+        foreach (var deleted in rootElement.Descendants<DeletedRun>()) {
+            deleted.Id = i.ToString(CultureInfo.InvariantCulture);
+            deleted.Author = "Comparer";
+            deleted.Date = revisionDate;
+            i++;
+        }
+
+        i = 1;
+        foreach (var change in rootElement.Descendants<RunPropertiesChange>()) {
+            change.Id = i.ToString(CultureInfo.InvariantCulture);
+            change.Author = "Comparer";
+            change.Date = revisionDate;
+            i++;
+        }
+
+        i = 1;
+        foreach (var run in rootElement.Descendants<DocumentFormat.OpenXml.Wordprocessing.Run>()) {
+            if (run.RsidRunAddition != null) {
+                run.RsidRunAddition = "R" + i.ToString("X8");
+                i++;
+            }
+
+            if (run.RsidRunDeletion != null) {
+                run.RsidRunDeletion = "R" + i.ToString("X8");
+                i++;
+            }
+        }
+    }
+
+    private static void NormalizeEmptyRunProperties(DocumentFormat.OpenXml.OpenXmlElement rootElement) {
+        foreach (var runProperties in rootElement.Descendants<DocumentFormat.OpenXml.Wordprocessing.RunProperties>().ToList()) {
+            if (!runProperties.HasChildren && !runProperties.GetAttributes().Any()) {
+                runProperties.Remove();
+            }
+        }
+    }
+
+    private static void NormalizeTableGrid(DocumentFormat.OpenXml.OpenXmlElement rootElement) {
+        foreach (var tableGrid in rootElement.Descendants<DocumentFormat.OpenXml.Wordprocessing.TableGrid>()) {
+            var columns = tableGrid.Elements<DocumentFormat.OpenXml.Wordprocessing.GridColumn>().ToList();
+            if (columns.Count == 0) {
+                continue;
+            }
+
+            var widths = columns
+                .Select(static column => column.Width?.Value)
+                .Where(static width => !string.IsNullOrWhiteSpace(width))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+
+            if (widths.Count == 0 && TryGetGridWidthsFromFirstRow(tableGrid, columns.Count, out var inferredWidths)) {
+                for (var index = 0; index < columns.Count; index++) {
+                    columns[index].Width = inferredWidths[index];
+                }
+                continue;
+            }
+
+            if (widths.Count == 1) {
+                foreach (var column in columns) {
+                    column.Width = widths[0];
+                }
+            }
+        }
+    }
+
+    private static void NormalizeSettings(DocumentFormat.OpenXml.OpenXmlElement rootElement) {
+        if (rootElement is not Settings settings) {
+            return;
+        }
+
+        var updateFields = settings.Elements<UpdateFieldsOnOpen>().FirstOrDefault();
+        var zoom = settings.Elements<Zoom>().FirstOrDefault();
+
+        if (updateFields != null && zoom != null && !ReferenceEquals(updateFields.NextSibling<DocumentFormat.OpenXml.OpenXmlElement>(), zoom)) {
+            updateFields.Remove();
+            settings.InsertBefore(updateFields, zoom);
+        }
+    }
+
+    private static void EnsureDefaultSectionLayout(SectionProperties sectionProperties) {
+        var pageSize = sectionProperties.Elements<PageSize>().FirstOrDefault();
+        if (pageSize == null) {
+            pageSize = new PageSize {
+                Width = 12240U,
+                Height = 15840U,
+                Code = (UInt16Value)1U
+            };
+
+            var anchor = sectionProperties.Elements<FooterReference>().Cast<DocumentFormat.OpenXml.OpenXmlElement>().LastOrDefault()
+                         ?? sectionProperties.Elements<HeaderReference>().Cast<DocumentFormat.OpenXml.OpenXmlElement>().LastOrDefault();
+
+            if (anchor != null) {
+                sectionProperties.InsertAfter(pageSize, anchor);
+            } else {
+                sectionProperties.PrependChild(pageSize);
+            }
+        }
+
+        var pageMargin = sectionProperties.Elements<PageMargin>().FirstOrDefault();
+        if (pageMargin == null) {
+            pageMargin = new PageMargin {
+                Top = 1440,
+                Right = 1440U,
+                Bottom = 1440,
+                Left = 1440U,
+                Header = 720U,
+                Footer = 720U,
+                Gutter = 0U
+            };
+
+            sectionProperties.InsertAfter(pageMargin, pageSize);
+        }
+    }
+
+    private static bool TryGetGridWidthsFromFirstRow(
+        DocumentFormat.OpenXml.Wordprocessing.TableGrid tableGrid,
+        int expectedColumns,
+        out string[] widths) {
+        widths = Array.Empty<string>();
+
+        if (tableGrid.Parent is not DocumentFormat.OpenXml.Wordprocessing.Table table) {
+            return false;
+        }
+
+        var firstRow = table.Elements<DocumentFormat.OpenXml.Wordprocessing.TableRow>().FirstOrDefault();
+        if (firstRow == null) {
+            return false;
+        }
+
+        var cellWidths = firstRow.Elements<DocumentFormat.OpenXml.Wordprocessing.TableCell>()
+            .Select(static cell => cell.Elements<DocumentFormat.OpenXml.Wordprocessing.TableCellProperties>().FirstOrDefault()?.Elements<TableCellWidth>().FirstOrDefault()?.Width?.Value)
+            .ToList();
+
+        if (cellWidths.Count != expectedColumns || cellWidths.Any(string.IsNullOrWhiteSpace)) {
+            return false;
+        }
+
+        widths = cellWidths.Select(static width => width!).ToArray();
+        return true;
+    }
+
     private static void NormalizeCustomFilePropertiesPart(CustomFilePropertiesPart? part) {
-        var fileTime = part?.Properties
-            .FirstOrDefault(x => ((CustomDocumentProperty?)x)?.VTFileTime != null);
+        var fileTime = part?.Properties?
+            .Elements<CustomDocumentProperty>()
+            .FirstOrDefault(x => x.VTFileTime != null);
         if (fileTime is CustomDocumentProperty property) {
             property.VTFileTime!.Text = LastTime;
         }
+    }
+
+    private static bool IsTextContent(string contentType) {
+        return string.Equals(contentType, AlternativeFormatImportPartType.Html.ContentType, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(contentType, AlternativeFormatImportPartType.Rtf.ContentType, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(contentType, AlternativeFormatImportPartType.TextPlain.ContentType, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeText(string value) {
+        return value.Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace("\r", "\n", StringComparison.Ordinal);
     }
 }

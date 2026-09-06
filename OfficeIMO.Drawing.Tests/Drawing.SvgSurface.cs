@@ -1,0 +1,146 @@
+using OfficeIMO.Drawing;
+using System.Threading;
+using Xunit;
+
+namespace OfficeIMO.Tests;
+
+public partial class DrawingTests {
+    [Fact]
+    public void OfficeDrawingSvgExporter_PreservesLegacyPointsAndOffersExplicitPixelSurface() {
+        var drawing = new OfficeDrawing(120D, 80D);
+
+        string points = OfficeDrawingSvgExporter.ToSvg(drawing, 1.5D);
+        string pixels = OfficeDrawingSvgExporter.ToSvg(drawing, 1.5D, OfficeSvgSizeUnit.Pixel);
+
+        Assert.Contains("width=\"180pt\" height=\"120pt\" viewBox=\"0 0 120 80\"", points, StringComparison.Ordinal);
+        Assert.Contains("width=\"180px\" height=\"120px\" viewBox=\"0 0 120 80\"", pixels, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OfficeDrawingSvgExporter_UsesWholePixelSurfaceDimensions() {
+        var drawing = new OfficeDrawing(10.2D, 8.1D);
+
+        byte[] svg = OfficeDrawingSvgExporter.ToSvgBytes(drawing, 1D, OfficeSvgSizeUnit.Pixel);
+        OfficeImageInfo info = OfficeImageReader.Identify(svg);
+
+        Assert.Equal(11, info.Width);
+        Assert.Equal(9, info.Height);
+        Assert.Contains("width=\"11px\" height=\"9px\" viewBox=\"0 0 10.2 8.1\"", System.Text.Encoding.UTF8.GetString(svg), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OfficeDrawingText_RetainsResolvedAdvanceAndOverflowAcrossCloneAndSvg() {
+        var drawing = new OfficeDrawing(120D, 40D).AddPositionedText(
+            "One model.",
+            4D,
+            4D,
+            54D,
+            20D,
+            new OfficeFontInfo("Arial", 14D),
+            OfficeColor.Black);
+
+        OfficeDrawing clone = drawing.Clone();
+        OfficeDrawingText text = Assert.Single(clone.Elements.OfType<OfficeDrawingText>());
+        string svg = OfficeDrawingSvgExporter.ToSvg(clone, 1D, OfficeSvgSizeUnit.Pixel);
+
+        Assert.Equal(OfficeTextOverflowBehavior.Clip, text.OverflowBehavior);
+        Assert.Equal(54D, text.TextAdvanceWidth);
+        Assert.Contains("textLength=\"54\" lengthAdjust=\"spacingAndGlyphs\"", svg, StringComparison.Ordinal);
+        Assert.Contains(">One model.</text>", svg, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OfficeDrawingSvgExporter_PrefixesGeneratedResourceIdentifiersAndReferences() {
+        var drawing = new OfficeDrawing(120D, 80D);
+        var shape = OfficeShape.Rectangle(80D, 40D);
+        shape.FillGradient = OfficeLinearGradient.Horizontal(OfficeColor.Red, OfficeColor.Blue);
+        shape.ClipPath = OfficeClipPath.Rectangle(60D, 30D);
+        drawing.AddShape(shape, 10D, 10D);
+
+        string svg = OfficeDrawingSvgExporter.ToSvg(
+            drawing,
+            1D,
+            OfficeSvgSizeUnit.Pixel,
+            imageCodec: null,
+            resourceIdPrefix: "page-2-");
+
+        Assert.Contains("id=\"page-2-officeimo-gradient-1\"", svg, StringComparison.Ordinal);
+        Assert.Contains("url(#page-2-officeimo-gradient-1)", svg, StringComparison.Ordinal);
+        Assert.Contains("id=\"page-2-officeimo-clip-1\"", svg, StringComparison.Ordinal);
+        Assert.Contains("url(#page-2-officeimo-clip-1)", svg, StringComparison.Ordinal);
+        Assert.DoesNotContain("id=\"officeimo-", svg, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OfficeDrawingSvgExporter_HonorsCancellationAtTheSharedVectorBoundary() {
+        var drawing = new OfficeDrawing(120D, 80D);
+        var shape = OfficeShape.Rectangle(20D, 20D);
+        shape.FillColor = OfficeColor.Blue;
+        drawing.AddShape(shape, 0D, 0D);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        Assert.Throws<OperationCanceledException>(() => OfficeDrawingSvgExporter.ToSvgBytes(
+            drawing,
+            1D,
+            OfficeSvgSizeUnit.Pixel,
+            imageCodec: null,
+            resourceIdPrefix: null,
+            cancellationToken: cancellation.Token));
+    }
+
+    [Fact]
+    public void OfficeDrawingSvgExporter_RechecksCancellationAfterTheFinalElement() {
+        var drawing = new OfficeDrawing(20D, 16D);
+        drawing.AddImage(
+            new byte[] { 1, 2, 3 },
+            "image/x-test",
+            new OfficeImageProjection(new OfficeImagePlacement(4D, 3D, 8D, 6D)));
+        using var cancellation = new CancellationTokenSource();
+
+        Assert.Throws<OperationCanceledException>(() => OfficeDrawingSvgExporter.ToSvgBytes(
+            drawing,
+            1D,
+            OfficeSvgSizeUnit.Pixel,
+            new CancelingImageCodec(cancellation),
+            resourceIdPrefix: null,
+            cancellationToken: cancellation.Token));
+    }
+
+    [Fact]
+    public void OfficeDrawingSvgExporter_BoundsEmbeddedImageDataDuringSerialization() {
+        var drawing = new OfficeDrawing(20D, 16D);
+        drawing.AddImage(
+            new byte[4096],
+            "image/png",
+            new OfficeImageProjection(new OfficeImagePlacement(4D, 3D, 8D, 6D)));
+
+        OfficeImageExportBatchLimitException exception =
+            Assert.Throws<OfficeImageExportBatchLimitException>(() =>
+                OfficeDrawingSvgExporter.ToSvgBytes(
+                    drawing,
+                    1D,
+                    OfficeSvgSizeUnit.Pixel,
+                    imageCodec: null,
+                    resourceIdPrefix: null,
+                    maximumUtf8Bytes: 1024L,
+                    cancellationToken: CancellationToken.None));
+
+        Assert.Equal(nameof(OfficeImageExportOptions.MaximumTotalEncodedBytes), exception.LimitName);
+        Assert.Equal(1024L, exception.Maximum);
+    }
+
+    private sealed class CancelingImageCodec : IOfficeRasterImageCodec {
+        private readonly CancellationTokenSource _cancellation;
+
+        internal CancelingImageCodec(CancellationTokenSource cancellation) {
+            _cancellation = cancellation;
+        }
+
+        public bool TryDecode(byte[] encodedBytes, string? contentType, out OfficeRasterImage? image) {
+            _cancellation.Cancel();
+            image = new OfficeRasterImage(1, 1, OfficeColor.White);
+            return true;
+        }
+    }
+}

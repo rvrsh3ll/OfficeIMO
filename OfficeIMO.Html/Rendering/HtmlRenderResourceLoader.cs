@@ -1,0 +1,769 @@
+using System.Security.Cryptography;
+
+namespace OfficeIMO.Html;
+
+/// <summary>
+/// Operation-scoped owner for HTML resource policy, resolution, MIME validation, deduplication,
+/// caching, budgets, timeouts, cancellation evidence, canonical identities, and content digests.
+/// </summary>
+public sealed class HtmlResourceSession {
+    private int _resolverRequestCount;
+    private readonly object _diagnosticSync = new object();
+    private readonly Dictionary<string, HtmlResolvedResource> _resources = new Dictionary<string, HtmlResolvedResource>(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _resolvedSources = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _attempted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _budgetedStylesheets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _rejectedStylesheets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    private readonly List<HtmlResourceSessionEntry> _entries = new List<HtmlResourceSessionEntry>();
+    private readonly IReadOnlyList<HtmlResourceSessionEntry> _readOnlyEntries;
+
+    /// <summary>Creates an independent resource session.</summary>
+    public HtmlResourceSession(
+        HtmlUrlPolicy? resourcePolicy = null,
+        HtmlRenderResourceResolver? resolver = null,
+        TimeSpan? resourceTimeout = null,
+        int maxConcurrentLoads = 8,
+        long maxResourceBytes = 10L * 1024L * 1024L,
+        long maxTotalResourceBytes = 50L * 1024L * 1024L,
+        int maxResourceCount = 256,
+        int maxResourceRequests = 512,
+        int maxStylesheetImportDepth = 16) {
+        ResourcePolicy = (resourcePolicy ?? HtmlUrlPolicy.CreateOfficeIMOProfile()).Clone();
+        Resolver = resolver;
+        ResourceTimeout = resourceTimeout ?? TimeSpan.FromSeconds(30D);
+        MaxConcurrentLoads = maxConcurrentLoads;
+        MaxResourceBytes = maxResourceBytes;
+        MaxTotalResourceBytes = maxTotalResourceBytes;
+        MaxResourceCount = maxResourceCount;
+        MaxResourceRequests = maxResourceRequests;
+        MaxStylesheetImportDepth = maxStylesheetImportDepth;
+        ValidateLimits();
+        Diagnostics = new HtmlDiagnosticReport();
+        _readOnlyEntries = _entries.AsReadOnly();
+    }
+
+    internal HtmlResourceSession(HtmlRenderOptions options, HtmlDiagnosticReport diagnostics) {
+        if (options == null) throw new ArgumentNullException(nameof(options));
+        ResourcePolicy = options.GetResourceUrlPolicy().Clone();
+        Resolver = options.ResourceResolver;
+        SynchronousResolver = options.SynchronousResourceResolver;
+        ResourceTimeout = options.ResourceTimeout;
+        MaxConcurrentLoads = options.MaxConcurrentResourceLoads;
+        MaxResourceBytes = options.MaxResourceBytes;
+        MaxTotalResourceBytes = options.MaxTotalResourceBytes;
+        MaxResourceCount = options.MaxResourceCount;
+        MaxResourceRequests = options.MaxResourceRequests;
+        MaxStylesheetImportDepth = options.MaxStylesheetImportDepth;
+        ValidateLimits();
+        Diagnostics = diagnostics ?? throw new ArgumentNullException(nameof(diagnostics));
+        _readOnlyEntries = _entries.AsReadOnly();
+    }
+
+    /// <summary>Resource URL policy snapshot owned by this operation.</summary>
+    public HtmlUrlPolicy ResourcePolicy { get; }
+
+    /// <summary>Asynchronous application resolver snapshot owned by this operation.</summary>
+    public HtmlRenderResourceResolver? Resolver { get; }
+
+    /// <summary>Maximum duration of one resolver invocation.</summary>
+    public TimeSpan ResourceTimeout { get; }
+
+    /// <summary>Maximum concurrent asynchronous resolver invocations.</summary>
+    public int MaxConcurrentLoads { get; }
+
+    /// <summary>Maximum accepted bytes for one resource.</summary>
+    public long MaxResourceBytes { get; }
+
+    /// <summary>Maximum accepted bytes for the operation.</summary>
+    public long MaxTotalResourceBytes { get; }
+
+    /// <summary>Maximum accepted resource count.</summary>
+    public int MaxResourceCount { get; }
+
+    /// <summary>Maximum attempted resolver requests.</summary>
+    public int MaxResourceRequests { get; }
+
+    /// <summary>Maximum external stylesheet import depth.</summary>
+    public int MaxStylesheetImportDepth { get; }
+
+    /// <summary>Diagnostics emitted by this session.</summary>
+    public HtmlDiagnosticReport Diagnostics { get; }
+
+    /// <summary>Accepted canonical resources in acceptance order.</summary>
+    public IReadOnlyList<HtmlResourceSessionEntry> Resources => _readOnlyEntries;
+
+    internal HtmlRenderSynchronousResourceResolver? SynchronousResolver { get; }
+
+    /// <summary>Total accepted encoded bytes.</summary>
+    public long AcceptedResourceBytes { get; private set; }
+
+    /// <summary>Number of accepted deduplicated resources.</summary>
+    public int AcceptedResourceCount { get; private set; }
+
+    /// <summary>Number of resolver requests reserved by the session.</summary>
+    public int ResolverRequestCount => Volatile.Read(ref _resolverRequestCount);
+
+    /// <summary>Resolves a manifest synchronously using the configured synchronous package resolver, when present.</summary>
+    public static HtmlResourceSession Resolve(
+        HtmlResourceManifest manifest,
+        HtmlRenderOptions options,
+        HtmlDiagnosticReport? diagnostics = null,
+        CancellationToken cancellationToken = default) =>
+        HtmlRenderResourceLoader.Load(
+            manifest,
+            options,
+            diagnostics ?? new HtmlDiagnosticReport(),
+            HtmlConversionLimits.CreateUntrustedProfile(),
+            cancellationToken);
+
+    /// <summary>Resolves a manifest asynchronously using one operation-scoped session.</summary>
+    public static Task<HtmlResourceSession> ResolveAsync(
+        HtmlResourceManifest manifest,
+        HtmlRenderOptions options,
+        HtmlDiagnosticReport? diagnostics = null,
+        CancellationToken cancellationToken = default) =>
+        HtmlRenderResourceLoader.LoadAsync(
+            manifest,
+            options,
+            diagnostics ?? new HtmlDiagnosticReport(),
+            HtmlConversionLimits.CreateUntrustedProfile(),
+            cancellationToken);
+
+    internal void MarkAttempted(HtmlResourceReference reference) {
+        if (reference.Source.Length > 0) _attempted.Add(reference.Source);
+        if (reference.ResolvedSource.Length > 0) _attempted.Add(reference.ResolvedSource);
+    }
+
+    internal void Add(HtmlResourceReference reference, HtmlResolvedResource resource) {
+        AcceptedResourceBytes += resource.Length;
+        AcceptedResourceCount++;
+        string canonicalSource = GetCanonicalSource(reference, resource);
+        AddAliases(reference, canonicalSource, resource);
+        _entries.Add(CreateEntry(reference.Kind, reference.Source, canonicalSource, resource));
+    }
+
+    private void AddAliases(
+        HtmlResourceReference reference,
+        string canonicalSource,
+        HtmlResolvedResource resource) {
+        if (reference.Source.Length > 0) {
+            _resources[reference.Source] = resource;
+            _resolvedSources[reference.Source] = canonicalSource;
+        }
+
+        if (reference.ResolvedSource.Length > 0) {
+            _resources[reference.ResolvedSource] = resource;
+            _resolvedSources[reference.ResolvedSource] = canonicalSource;
+        }
+        if (canonicalSource.Length > 0) {
+            _resources[canonicalSource] = resource;
+            _resolvedSources[canonicalSource] = canonicalSource;
+        }
+    }
+
+    private static string GetCanonicalSource(HtmlResourceReference reference, HtmlResolvedResource resource) =>
+        resource.FinalUri?.IsAbsoluteUri == true
+            ? resource.FinalUri.AbsoluteUri
+            : reference.ResolvedSource;
+
+    internal bool TryReserveRequest(HtmlResourceReference reference) {
+        while (true) {
+            int current = Volatile.Read(ref _resolverRequestCount);
+            if (current >= MaxResourceRequests) break;
+            if (Interlocked.CompareExchange(ref _resolverRequestCount, current + 1, current) == current) return true;
+        }
+
+        lock (_diagnosticSync) {
+            Diagnostics.Add("OfficeIMO.Html.Renderer", HtmlRenderDiagnosticCodes.ResourceRequestLimitExceeded,
+                "Resource resolver invocations exceeded the configured operation-wide request limit.",
+                HtmlDiagnosticSeverity.Error, reference.Source, "limit=" + MaxResourceRequests,
+                OfficeConversionLossKind.Omission);
+        }
+        return false;
+    }
+
+    internal bool TryAccept(
+        HtmlResourceReference reference,
+        HtmlResolvedResource resource,
+        out bool stop,
+        out bool alreadyAccepted) {
+        stop = false;
+        alreadyAccepted = false;
+        string canonicalSource = GetCanonicalSource(reference, resource);
+        if (canonicalSource.Length > 0 && _resources.TryGetValue(canonicalSource, out HtmlResolvedResource? accepted)) {
+            if (!IsAcceptedContentType(reference.Kind, accepted.ContentType)) {
+                Diagnostics.Add("OfficeIMO.Html.Renderer", HtmlRenderDiagnosticCodes.ResourceContentTypeRejected,
+                    "A resolver returned a canonical resource incompatible with the requested resource kind.",
+                    HtmlDiagnosticSeverity.Warning, reference.Source,
+                    reference.Kind + ":" + accepted.ContentType, OfficeConversionLossKind.Omission);
+                return false;
+            }
+            AddAliases(reference, canonicalSource, accepted);
+            if (reference.Kind == HtmlResourceKind.Stylesheet) {
+                PropagateStylesheetState(_budgetedStylesheets, reference, canonicalSource);
+                PropagateStylesheetState(_rejectedStylesheets, reference, canonicalSource);
+            }
+            alreadyAccepted = true;
+            return true;
+        }
+        long length = resource.Length;
+        if (length > MaxResourceBytes) {
+            Diagnostics.Add("OfficeIMO.Html.Renderer", HtmlRenderDiagnosticCodes.ResourceByteLimitExceeded,
+                "A resolved resource exceeded the configured per-resource byte limit.",
+                HtmlDiagnosticSeverity.Warning, reference.Source, "bytes=" + length,
+                OfficeConversionLossKind.Omission);
+            return false;
+        }
+        if (AcceptedResourceCount >= MaxResourceCount) {
+            Diagnostics.Add("OfficeIMO.Html.Renderer", HtmlRenderDiagnosticCodes.ResourceCountLimitExceeded,
+                "Resolved resources exceeded the configured operation-wide count limit.",
+                HtmlDiagnosticSeverity.Error, reference.Source, "limit=" + MaxResourceCount,
+                OfficeConversionLossKind.Omission);
+            stop = true;
+            return false;
+        }
+        if (length > MaxTotalResourceBytes - AcceptedResourceBytes) {
+            Diagnostics.Add("OfficeIMO.Html.Renderer", HtmlRenderDiagnosticCodes.TotalResourceByteLimitExceeded,
+                "Resolved resources exceeded the configured total byte limit.",
+                HtmlDiagnosticSeverity.Error, reference.Source,
+                "bytes=" + (AcceptedResourceBytes + length), OfficeConversionLossKind.Omission);
+            stop = true;
+            return false;
+        }
+        if (!IsAcceptedContentType(reference.Kind, resource.ContentType)) {
+            Diagnostics.Add("OfficeIMO.Html.Renderer", HtmlRenderDiagnosticCodes.ResourceContentTypeRejected,
+                "A resolver returned an incompatible media type for the requested resource kind.",
+                HtmlDiagnosticSeverity.Warning, reference.Source,
+                reference.Kind + ":" + resource.ContentType, OfficeConversionLossKind.Omission);
+            return false;
+        }
+
+        Add(reference, resource);
+        return true;
+    }
+
+    internal bool CanAcceptInlineResource(
+        long estimatedBytes,
+        out string diagnosticCode,
+        out string diagnosticDetail) {
+        if (estimatedBytes > MaxResourceBytes) {
+            diagnosticCode = HtmlRenderDiagnosticCodes.ResourceByteLimitExceeded;
+            diagnosticDetail = "bytes=" + estimatedBytes;
+            return false;
+        }
+
+        if (AcceptedResourceCount >= MaxResourceCount) {
+            diagnosticCode = HtmlRenderDiagnosticCodes.ResourceCountLimitExceeded;
+            diagnosticDetail = "limit=" + MaxResourceCount;
+            return false;
+        }
+
+        if (estimatedBytes > MaxTotalResourceBytes - AcceptedResourceBytes) {
+            diagnosticCode = HtmlRenderDiagnosticCodes.TotalResourceByteLimitExceeded;
+            diagnosticDetail = "bytes=" + (AcceptedResourceBytes + estimatedBytes);
+            return false;
+        }
+
+        diagnosticCode = string.Empty;
+        diagnosticDetail = string.Empty;
+        return true;
+    }
+
+    internal bool TryAcceptInline(
+        HtmlResourceKind kind,
+        string resolvedSource,
+        HtmlResolvedResource resource,
+        out string diagnosticCode,
+        out string diagnosticDetail) {
+        if (string.IsNullOrWhiteSpace(resolvedSource)) throw new ArgumentException("A canonical inline resource source is required.", nameof(resolvedSource));
+        if (resource == null) throw new ArgumentNullException(nameof(resource));
+        if (_resources.ContainsKey(resolvedSource)) {
+            diagnosticCode = string.Empty;
+            diagnosticDetail = string.Empty;
+            return true;
+        }
+        if (!IsAcceptedContentType(kind, resource.ContentType)) {
+            diagnosticCode = HtmlRenderDiagnosticCodes.ResourceContentTypeRejected;
+            diagnosticDetail = kind + ":" + resource.ContentType;
+            return false;
+        }
+        if (!CanAcceptInlineResource(resource.Length, out diagnosticCode, out diagnosticDetail)) return false;
+        AcceptedResourceBytes += resource.Length;
+        AcceptedResourceCount++;
+        _resources[resolvedSource] = resource;
+        _resolvedSources[resolvedSource] = resolvedSource;
+        _entries.Add(CreateEntry(kind, resolvedSource, resolvedSource, resource));
+        diagnosticCode = string.Empty;
+        diagnosticDetail = string.Empty;
+        return true;
+    }
+
+    /// <summary>Gets a cached resource by original or canonical source.</summary>
+    public bool TryGet(string? source, string? resolvedSource, out HtmlResolvedResource resource) {
+        if (!string.IsNullOrWhiteSpace(resolvedSource) && _resources.TryGetValue(resolvedSource!, out resource!)) return true;
+        if (!string.IsNullOrWhiteSpace(source) && _resources.TryGetValue(source!, out resource!)) return true;
+        resource = null!;
+        return false;
+    }
+
+    internal bool TryGetResolvedSource(string? source, string? resolvedSource, out string value) {
+        if (!string.IsNullOrWhiteSpace(resolvedSource) && _resolvedSources.TryGetValue(resolvedSource!, out value!)) return true;
+        if (!string.IsNullOrWhiteSpace(source) && _resolvedSources.TryGetValue(source!, out value!)) return true;
+        value = string.Empty;
+        return false;
+    }
+
+    internal bool WasAttempted(string? source, string? resolvedSource) =>
+        !string.IsNullOrWhiteSpace(source) && _attempted.Contains(source!)
+        || !string.IsNullOrWhiteSpace(resolvedSource) && _attempted.Contains(resolvedSource!);
+
+    internal void MarkStylesheetBudgeted(HtmlResourceReference reference) =>
+        MarkStylesheetState(_budgetedStylesheets, reference);
+
+    internal void MarkStylesheetRejected(HtmlResourceReference reference) =>
+        MarkStylesheetState(_rejectedStylesheets, reference);
+
+    internal bool WasStylesheetBudgeted(string? source, string? resolvedSource) =>
+        ContainsStylesheetState(_budgetedStylesheets, source, resolvedSource);
+
+    internal bool WasStylesheetRejected(string? source, string? resolvedSource) =>
+        ContainsStylesheetState(_rejectedStylesheets, source, resolvedSource);
+
+    private void MarkStylesheetState(HashSet<string> state, HtmlResourceReference reference) {
+        if (reference.Source.Length > 0) state.Add(reference.Source);
+        if (reference.ResolvedSource.Length > 0) state.Add(reference.ResolvedSource);
+        if (TryGetResolvedSource(reference.Source, reference.ResolvedSource, out string canonicalSource)
+            && canonicalSource.Length > 0) {
+            state.Add(canonicalSource);
+        }
+    }
+
+    private void PropagateStylesheetState(
+        HashSet<string> state,
+        HtmlResourceReference reference,
+        string canonicalSource) {
+        if (canonicalSource.Length > 0 && state.Contains(canonicalSource)) {
+            MarkStylesheetState(state, reference);
+        }
+    }
+
+    private static bool ContainsStylesheetState(HashSet<string> state, string? source, string? resolvedSource) =>
+        !string.IsNullOrWhiteSpace(source) && state.Contains(source!)
+        || !string.IsNullOrWhiteSpace(resolvedSource) && state.Contains(resolvedSource!);
+
+    private static HtmlResourceSessionEntry CreateEntry(
+        HtmlResourceKind kind,
+        string source,
+        string canonicalSource,
+        HtmlResolvedResource resource) {
+        byte[] digest;
+        using (SHA256 sha = SHA256.Create()) digest = sha.ComputeHash(resource.EncodedBytes);
+        string digestText = BitConverter.ToString(digest).Replace("-", string.Empty).ToLowerInvariant();
+        return new HtmlResourceSessionEntry(kind, source, canonicalSource, resource.ContentType, resource.Length, digestText);
+    }
+
+    private void ValidateLimits() {
+        if (ResourceTimeout <= TimeSpan.Zero || ResourceTimeout == Timeout.InfiniteTimeSpan) throw new ArgumentOutOfRangeException(nameof(ResourceTimeout));
+        if (MaxConcurrentLoads <= 0) throw new ArgumentOutOfRangeException(nameof(MaxConcurrentLoads));
+        if (MaxResourceBytes <= 0) throw new ArgumentOutOfRangeException(nameof(MaxResourceBytes));
+        if (MaxTotalResourceBytes < MaxResourceBytes) throw new ArgumentOutOfRangeException(nameof(MaxTotalResourceBytes));
+        if (MaxResourceCount <= 0) throw new ArgumentOutOfRangeException(nameof(MaxResourceCount));
+        if (MaxResourceRequests < MaxResourceCount) throw new ArgumentOutOfRangeException(nameof(MaxResourceRequests));
+        if (MaxStylesheetImportDepth <= 0) throw new ArgumentOutOfRangeException(nameof(MaxStylesheetImportDepth));
+    }
+
+    private static bool IsAcceptedContentType(HtmlResourceKind kind, string contentType) {
+        string normalized = contentType.Split(';')[0].Trim();
+        if (kind == HtmlResourceKind.Image) return normalized.StartsWith("image/", StringComparison.OrdinalIgnoreCase);
+        if (kind == HtmlResourceKind.Font) {
+            return normalized.StartsWith("font/", StringComparison.OrdinalIgnoreCase)
+                || normalized.StartsWith("application/font-", StringComparison.OrdinalIgnoreCase)
+                || normalized.StartsWith("application/x-font-", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(normalized, "application/octet-stream", StringComparison.OrdinalIgnoreCase);
+        }
+        return kind == HtmlResourceKind.Stylesheet
+            && (string.Equals(normalized, "text/css", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(normalized, "application/css", StringComparison.OrdinalIgnoreCase));
+    }
+}
+
+/// <summary>Immutable accepted-resource identity and evidence.</summary>
+public sealed class HtmlResourceSessionEntry {
+    internal HtmlResourceSessionEntry(HtmlResourceKind kind, string source, string canonicalSource,
+        string contentType, long length, string sha256) {
+        Kind = kind;
+        Source = source;
+        CanonicalSource = canonicalSource;
+        ContentType = contentType;
+        Length = length;
+        Sha256 = sha256;
+    }
+
+    /// <summary>Resource kind requested by the document.</summary>
+    public HtmlResourceKind Kind { get; }
+    /// <summary>Original policy-approved source.</summary>
+    public string Source { get; }
+    /// <summary>Canonical absolute URI or data source used as the cache identity.</summary>
+    public string CanonicalSource { get; }
+    /// <summary>Validated MIME type.</summary>
+    public string ContentType { get; }
+    /// <summary>Accepted encoded byte length.</summary>
+    public long Length { get; }
+    /// <summary>Lower-case SHA-256 content digest.</summary>
+    public string Sha256 { get; }
+}
+
+internal static class HtmlRenderResourceLoader {
+    private const string ComponentName = "OfficeIMO.Html.Renderer";
+
+    private readonly struct ResourceResolution {
+        internal ResourceResolution(bool isHandled, HtmlResolvedResource? resource) {
+            IsHandled = isHandled;
+            Resource = resource;
+        }
+
+        internal bool IsHandled { get; }
+        internal HtmlResolvedResource? Resource { get; }
+    }
+
+    private delegate Task<ResourceResolution> ResourceResolver(
+        HtmlRenderResourceRequest request,
+        CancellationToken cancellationToken);
+
+    private readonly struct PendingResource {
+        internal PendingResource(HtmlResourceReference reference, int importDepth) {
+            Reference = reference;
+            ImportDepth = importDepth;
+        }
+
+        internal HtmlResourceReference Reference { get; }
+        internal int ImportDepth { get; }
+    }
+
+    private readonly struct CompletedResolution {
+        internal CompletedResolution(PendingResource pending, Uri uri, ResourceResolution resolution, Exception? exception) {
+            Pending = pending;
+            Uri = uri;
+            Resolution = resolution;
+            Exception = exception;
+        }
+
+        internal PendingResource Pending { get; }
+        internal Uri Uri { get; }
+        internal ResourceResolution Resolution { get; }
+        internal Exception? Exception { get; }
+    }
+
+    internal static HtmlResourceSession Load(
+        HtmlResourceManifest manifest,
+        HtmlRenderOptions options,
+        HtmlDiagnosticReport diagnostics,
+        HtmlConversionLimits limits,
+        CancellationToken cancellationToken,
+        HtmlCssByteBudget? cssBudget = null) {
+        var session = new HtmlResourceSession(options, diagnostics);
+        HtmlRenderSynchronousResourceResolver? resolver = session.SynchronousResolver;
+        if (resolver == null) return session;
+        return LoadCoreAsync(
+                manifest,
+                options,
+                session,
+                limits,
+                cancellationToken,
+                cssBudget,
+                markAttemptedBeforeResolve: false,
+                resolver: (request, token) => {
+                    bool isHandled = resolver(
+                        request,
+                        token,
+                        out HtmlResolvedResource? resource);
+                    return Task.FromResult(
+                        new ResourceResolution(isHandled, resource));
+                })
+            .GetAwaiter()
+            .GetResult();
+    }
+
+    internal static Task<HtmlResourceSession> LoadAsync(
+        HtmlResourceManifest manifest,
+        HtmlRenderOptions options,
+        HtmlDiagnosticReport diagnostics,
+        HtmlConversionLimits limits,
+        CancellationToken cancellationToken,
+        HtmlCssByteBudget? cssBudget = null) {
+        var session = new HtmlResourceSession(options, diagnostics);
+        HtmlRenderResourceResolver? resolver = session.Resolver;
+        if (resolver == null) {
+            return Task.FromResult(session);
+        }
+        return LoadCoreAsync(
+            manifest,
+            options,
+            session,
+            limits,
+            cancellationToken,
+            cssBudget,
+            markAttemptedBeforeResolve: true,
+            resolver: async (request, token) => new ResourceResolution(
+                true,
+                await resolver(request, token).ConfigureAwait(false)));
+    }
+
+    private static async Task<HtmlResourceSession> LoadCoreAsync(
+        HtmlResourceManifest manifest,
+        HtmlRenderOptions options,
+        HtmlResourceSession result,
+        HtmlConversionLimits limits,
+        CancellationToken cancellationToken,
+        HtmlCssByteBudget? cssBudget,
+        bool markAttemptedBeforeResolve,
+        ResourceResolver resolver) {
+        HtmlDiagnosticReport diagnostics = result.Diagnostics;
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var pending = new Queue<PendingResource>();
+        foreach (HtmlResourceReference reference in manifest.Resources) {
+            pending.Enqueue(new PendingResource(reference, 0));
+        }
+
+        var resourceOptions = new HtmlResourcePipelineOptions {
+            ResourceUrlPolicy = result.ResourcePolicy.Clone(),
+            Limits = limits.Clone(),
+            MaxResponsiveImageCandidates = options.ResponsiveImageCandidateLimit,
+            MediaContext = options.MediaContext,
+            MediaWidth = options.Mode == HtmlRenderMode.Paged ? options.PageWidth : options.ViewportWidth,
+            MediaHeight = options.Mode == HtmlRenderMode.Paged ? options.PageHeight : options.ViewportHeight ?? 1056D,
+            MediaFeatures = options.MediaFeatures.Clone()
+        };
+        bool stop = false;
+        int concurrency = markAttemptedBeforeResolve ? result.MaxConcurrentLoads : 1;
+        while (pending.Count > 0 && !stop) {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (result.AcceptedResourceCount >= result.MaxResourceCount) {
+                diagnostics.Add(ComponentName, HtmlRenderDiagnosticCodes.ResourceCountLimitExceeded, "Resolved resources exceeded the configured operation-wide count limit.", HtmlDiagnosticSeverity.Error, detail: "limit=" + result.MaxResourceCount, lossKind: OfficeConversionLossKind.Omission);
+                break;
+            }
+
+            int batchCapacity = Math.Min(concurrency, result.MaxResourceCount - result.AcceptedResourceCount);
+            var tasks = new List<Task<CompletedResolution>>(batchCapacity);
+            while (tasks.Count < batchCapacity && pending.Count > 0) {
+                PendingResource pendingResource = pending.Dequeue();
+                HtmlResourceReference reference = pendingResource.Reference;
+                if (!reference.IsAllowed || !IsLoadableKind(reference.Kind) || reference.ResolvedSource.Length == 0) continue;
+                if (reference.ResolvedSource.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!seen.Add(reference.ResolvedSource)) continue;
+                if (!result.TryReserveRequest(reference)) {
+                    stop = true;
+                    break;
+                }
+
+                if (!Uri.TryCreate(reference.ResolvedSource, UriKind.Absolute, out Uri? uri)) {
+                    diagnostics.Add(ComponentName, HtmlRenderDiagnosticCodes.ResourceUriInvalid, "A policy-approved resource could not be represented as an absolute URI.", HtmlDiagnosticSeverity.Warning, reference.Source, reference.ResolvedSource, OfficeConversionLossKind.Omission);
+                    continue;
+                }
+
+                if (markAttemptedBeforeResolve) {
+                    result.MarkAttempted(reference);
+                }
+
+                tasks.Add(ResolvePendingAsync(pendingResource, uri, result.ResourceTimeout, resolver,
+                    () => result.TryReserveRequest(reference), cancellationToken));
+            }
+
+            if (tasks.Count == 0) continue;
+            CompletedResolution[] completed = await Task.WhenAll(tasks).ConfigureAwait(false);
+            foreach (CompletedResolution item in completed) {
+                cancellationToken.ThrowIfCancellationRequested();
+                PendingResource pendingResource = item.Pending;
+                HtmlResourceReference reference = pendingResource.Reference;
+                if (item.Exception != null) {
+                    if (item.Exception is HtmlRenderTotalResourceByteLimitException totalByteLimit) {
+                        result.MarkAttempted(reference);
+                        diagnostics.Add(ComponentName, HtmlRenderDiagnosticCodes.TotalResourceByteLimitExceeded, "Resolved resources exceeded the configured total byte limit.", HtmlDiagnosticSeverity.Error, reference.Source, "bytes=" + totalByteLimit.ActualBytes, OfficeConversionLossKind.Omission);
+                        stop = true;
+                        break;
+                    } else if (item.Exception is HtmlRenderResourceByteLimitException byteLimit) {
+                        result.MarkAttempted(reference);
+                        diagnostics.Add(ComponentName, HtmlRenderDiagnosticCodes.ResourceByteLimitExceeded, "A resolved resource exceeded the configured per-resource byte limit.", HtmlDiagnosticSeverity.Warning, reference.Source, "bytes=" + byteLimit.ActualBytes, OfficeConversionLossKind.Omission);
+                    } else if (item.Exception is OperationCanceledException) {
+                        diagnostics.Add(ComponentName, HtmlRenderDiagnosticCodes.ResourceTimeout, "Resource resolution exceeded the configured timeout.", HtmlDiagnosticSeverity.Warning, reference.Source, reference.ResolvedSource, OfficeConversionLossKind.Omission);
+                    } else {
+                        diagnostics.Add(ComponentName, HtmlRenderDiagnosticCodes.ResourceLoadFailed, "The configured resource resolver failed to load a resource.", HtmlDiagnosticSeverity.Warning, reference.Source, item.Exception.GetType().Name, OfficeConversionLossKind.Omission);
+                    }
+                    continue;
+                }
+
+                ResourceResolution resolution = item.Resolution;
+                if (!resolution.IsHandled) {
+                    continue;
+                }
+
+                if (!markAttemptedBeforeResolve) {
+                    result.MarkAttempted(reference);
+                }
+                HtmlResolvedResource? resource = resolution.Resource;
+                if (resource == null) {
+                    diagnostics.Add(ComponentName, HtmlRenderDiagnosticCodes.ResourceUnavailable, "The configured resource resolver did not return content.", HtmlDiagnosticSeverity.Warning, reference.Source, reference.ResolvedSource, OfficeConversionLossKind.Omission);
+                    continue;
+                }
+
+                Uri resourceUri = item.Uri;
+                if (resource.FinalUri?.IsAbsoluteUri == true) {
+                    string approvedFinalSource = HtmlUrlPolicyEvaluator.ResolveUrl(
+                        resource.FinalUri.AbsoluteUri,
+                        baseUri: null,
+                        HtmlResourceUrlPolicy.Create(result.ResourcePolicy));
+                    if (!Uri.TryCreate(approvedFinalSource, UriKind.Absolute, out Uri? approvedFinalUri)
+                        || !approvedFinalUri.Equals(resource.FinalUri)) {
+                        diagnostics.Add(
+                            ComponentName,
+                            GetPolicyRejectionCode(reference.Kind),
+                            "A resolver-reported final resource URI was rejected by the configured URL policy.",
+                            HtmlDiagnosticSeverity.Warning,
+                            reference.Source,
+                            resource.FinalUri.AbsoluteUri,
+                            OfficeConversionLossKind.Omission);
+                        continue;
+                    }
+
+                    resourceUri = resource.FinalUri;
+                }
+
+                if (!result.TryAccept(
+                        reference,
+                        resource,
+                        out bool stopAfterResource,
+                        out bool alreadyAccepted)) {
+                    if (stopAfterResource) stop = true;
+                    continue;
+                }
+                seen.Add(resourceUri.AbsoluteUri);
+                if (alreadyAccepted) continue;
+                if (reference.Kind == HtmlResourceKind.Stylesheet
+                    && HtmlRenderStylesheetText.TryDecode(resource.EncodedBytes, resource.ContentType, out string css)) {
+                    if (cssBudget != null
+                        && !HtmlRenderStylesheetApplier.TryReserveCss(cssBudget, resource.EncodedBytes.LongLength, reference.Source, diagnostics)) {
+                        result.MarkStylesheetRejected(reference);
+                        continue;
+                    }
+
+                    if (cssBudget != null) result.MarkStylesheetBudgeted(reference);
+                    EnqueueStylesheetResources(
+                        pending,
+                        css,
+                        resourceUri,
+                        pendingResource.ImportDepth,
+                        resourceOptions,
+                        result.MaxStylesheetImportDepth,
+                        diagnostics);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private static async Task<CompletedResolution> ResolvePendingAsync(
+        PendingResource pending,
+        Uri uri,
+        TimeSpan resourceTimeout,
+        ResourceResolver resolver,
+        Func<bool> tryReserveAdditionalRequest,
+        CancellationToken cancellationToken) {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(resourceTimeout);
+        try {
+            HtmlResourceReference reference = pending.Reference;
+            var request = new HtmlRenderResourceRequest(uri, reference.Source, reference.Kind,
+                tryReserveAdditionalRequest);
+            ResourceResolution resolution = await resolver(request, timeout.Token).ConfigureAwait(false);
+            return new CompletedResolution(pending, uri, resolution, null);
+        } catch (Exception exception) {
+            return new CompletedResolution(pending, uri, default, exception);
+        }
+    }
+
+    private static void EnqueueStylesheetResources(
+        Queue<PendingResource> pending,
+        string css,
+        Uri stylesheetUri,
+        int importDepth,
+        HtmlResourcePipelineOptions resourceOptions,
+        int maxStylesheetImportDepth,
+        HtmlDiagnosticReport diagnostics) {
+        HtmlExternalStylesheetAnalysis analysis = HtmlResourcePipeline.AnalyzeExternalStylesheet(css, stylesheetUri, resourceOptions);
+        foreach (HtmlResourceReference imageResource in analysis.ImageResources) {
+            if (imageResource.IsAllowed) {
+                pending.Enqueue(new PendingResource(imageResource, importDepth));
+            } else {
+                diagnostics.Add(
+                    ComponentName,
+                    imageResource.DiagnosticCode.Length == 0 ? "ImageResourceRejectedByPolicy" : imageResource.DiagnosticCode,
+                    "A stylesheet image source was rejected by the configured URL policy.",
+                    HtmlDiagnosticSeverity.Warning,
+                    imageResource.Source,
+                    stylesheetUri.AbsoluteUri);
+            }
+        }
+
+        foreach (HtmlResourceReference fontResource in analysis.FontResources) {
+            if (fontResource.IsAllowed) {
+                pending.Enqueue(new PendingResource(fontResource, importDepth));
+            } else {
+                diagnostics.Add(
+                    ComponentName,
+                    fontResource.DiagnosticCode.Length == 0 ? "FontResourceRejectedByPolicy" : fontResource.DiagnosticCode,
+                    "A stylesheet font source was rejected by the configured URL policy.",
+                    HtmlDiagnosticSeverity.Warning,
+                    fontResource.Source,
+                    stylesheetUri.AbsoluteUri);
+            }
+        }
+
+        foreach (HtmlExternalStylesheetImport import in analysis.Imports) {
+            if (!import.IsApplicable) {
+                continue;
+            }
+
+            HtmlResourceReference reference = import.Reference;
+            if (!reference.IsAllowed) {
+                diagnostics.Add(
+                    ComponentName,
+                    reference.DiagnosticCode.Length == 0 ? "StylesheetResourceRejectedByPolicy" : reference.DiagnosticCode,
+                    "A stylesheet import was rejected by the configured URL policy.",
+                    HtmlDiagnosticSeverity.Warning,
+                    reference.Source,
+                    stylesheetUri.AbsoluteUri);
+                continue;
+            }
+
+            if (importDepth >= maxStylesheetImportDepth) {
+                diagnostics.Add(
+                    ComponentName,
+                    HtmlRenderDiagnosticCodes.StylesheetImportDepthExceeded,
+                    "Stylesheet imports exceeded the configured recursion depth.",
+                    HtmlDiagnosticSeverity.Error,
+                    reference.Source,
+                    "limit=" + maxStylesheetImportDepth);
+                continue;
+            }
+
+            pending.Enqueue(new PendingResource(reference, importDepth + 1));
+        }
+    }
+
+    private static string GetPolicyRejectionCode(HtmlResourceKind kind) {
+        return kind switch {
+            HtmlResourceKind.Image => "ImageResourceRejectedByPolicy",
+            HtmlResourceKind.Stylesheet => "StylesheetResourceRejectedByPolicy",
+            HtmlResourceKind.Hyperlink => "HyperlinkRejectedByPolicy",
+            HtmlResourceKind.Script => "ScriptResourceRejectedByPolicy",
+            HtmlResourceKind.Media => "MediaResourceRejectedByPolicy",
+            HtmlResourceKind.Font => "FontResourceRejectedByPolicy",
+            _ => "HtmlResourceRejectedByPolicy"
+        };
+    }
+
+    private static bool IsLoadableKind(HtmlResourceKind kind) =>
+        kind == HtmlResourceKind.Image || kind == HtmlResourceKind.Stylesheet || kind == HtmlResourceKind.Font;
+
+}

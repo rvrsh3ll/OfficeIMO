@@ -1,0 +1,255 @@
+using OfficeIMO.Drawing;
+using PdfCore = OfficeIMO.Pdf;
+
+namespace OfficeIMO.Excel.Pdf {
+    public static partial class ExcelPdfConverterExtensions {
+        private static void ApplyWorksheetPageSetup(PdfCore.PdfPageBuilder page, ExcelSheetPageSetup? pageSetup, ExcelToPdfOptions options) {
+            if (ShouldApplyPageSize(options, pageSetup)) {
+                page.Size(GetEffectivePageSize(options, pageSetup));
+            }
+
+            if (options.Margins.HasValue) {
+                page.Margin(options.Margins.Value);
+            } else if (pageSetup?.Margins != null) {
+                page.Margin(ToPdfMargins(pageSetup.Margins));
+            }
+        }
+
+        private static bool ShouldApplyPageSize(ExcelToPdfOptions options, ExcelSheetPageSetup? pageSetup) {
+            if (options.PageSize.HasValue) {
+                return true;
+            }
+
+            if (options.HasExplicitPdfPageSizeConfiguration) {
+                return false;
+            }
+
+            return options.UseWorksheetPageSetup && pageSetup != null;
+        }
+
+        private static PdfCore.PageMargins ToPdfMargins(ExcelSheetPageMargins margins) {
+            return PdfCore.PageMargins.FromInches(margins.Left, margins.Top, margins.Right, margins.Bottom);
+        }
+
+        private static IReadOnlyList<string> GetSheetNames(ExcelDocumentReader reader, ExcelToPdfOptions options) {
+            IReadOnlyList<string> requestedNames = options.SheetNames ?? Array.Empty<string>();
+            if (requestedNames.Count == 0) {
+                return reader.GetSheetNames();
+            }
+
+            var names = new List<string>(requestedNames.Count);
+            foreach (string name in requestedNames) {
+                if (string.IsNullOrWhiteSpace(name)) {
+                    throw new ArgumentException("Sheet names cannot contain null, empty, or whitespace values.", nameof(options));
+                }
+
+                ExcelSheetReader sheet = reader.GetSheet(name);
+                names.Add(sheet.Name);
+            }
+
+            return names;
+        }
+
+        private static bool HasExplicitSheetSelection(ExcelToPdfOptions options) {
+            return options.SheetNames != null && options.SheetNames.Count > 0;
+        }
+
+        private static bool ShouldSkipWorkbookSheet(ExcelSheet? workbookSheet, ExcelToPdfOptions options, bool hasExplicitSheetSelection) {
+            return !hasExplicitSheetSelection
+                   && options.RespectWorkbookSheetVisibility
+                   && workbookSheet?.Hidden == true;
+        }
+
+        private static IReadOnlyList<WorksheetImageExportData> ReadWorksheetImages(ExcelSheet? workbookSheet, ExcelToPdfOptions options, string sheetName) {
+            if (!options.UseWorksheetImages || workbookSheet == null) {
+                return Array.Empty<WorksheetImageExportData>();
+            }
+
+            var images = new List<WorksheetImageExportData>();
+            foreach (ExcelImage image in workbookSheet.Images.OrderBy(image => image.RowIndex).ThenBy(image => image.ColumnIndex)) {
+                if (!IsPdfSupportedImageContentType(image.ContentType)) {
+                    AddWarning(
+                        options,
+                        sheetName,
+                        "WorksheetImage",
+                        $"Worksheet image anchored at {A1.CellReference(image.RowIndex, image.ColumnIndex)} was not exported because content type '{image.ContentType}' is not supported by the first-party PDF image writer.");
+                    continue;
+                }
+
+                byte[] bytes = image.ToBytes();
+                if (bytes.Length == 0 || image.WidthPixels <= 0 || image.HeightPixels <= 0) {
+                    AddWarning(
+                        options,
+                        sheetName,
+                        "WorksheetImage",
+                        $"Worksheet image anchored at {A1.CellReference(image.RowIndex, image.ColumnIndex)} was not exported because it has empty image bytes or non-positive dimensions.");
+                    continue;
+                }
+
+                if (!TryPreparePdfImageBytes(bytes, image.ContentType, out byte[] preparedBytes, out string? unsupportedReason)) {
+                    AddWarning(
+                        options,
+                        sheetName,
+                        "WorksheetImage",
+                        $"Worksheet image anchored at {A1.CellReference(image.RowIndex, image.ColumnIndex)} was not exported because the first-party PDF image writer cannot export the image bytes. {unsupportedReason}");
+                    continue;
+                }
+
+                string? alternativeText = string.IsNullOrWhiteSpace(image.Description)
+                    ? string.IsNullOrWhiteSpace(image.Title) ? null : image.Title
+                    : image.Description;
+                images.Add(new WorksheetImageExportData(
+                    preparedBytes,
+                    PixelsToPoints(image.WidthPixels),
+                    PixelsToPoints(image.HeightPixels),
+                    A1.CellReference(image.RowIndex, image.ColumnIndex),
+                    image.RowIndex,
+                    image.ColumnIndex,
+                    PixelsToPoints(image.OffsetXPixels),
+                    PixelsToPoints(image.OffsetYPixels),
+                    image.RotationDegrees,
+                    image.FlipHorizontal,
+                    image.FlipVertical,
+                    alternativeText));
+            }
+
+            return images;
+        }
+
+        private static IReadOnlyList<WorksheetChartExportData> ReadWorksheetCharts(ExcelSheet? workbookSheet, ExcelToPdfOptions options, string sheetName) {
+            if (!options.UseWorksheetCharts || workbookSheet == null) {
+                return Array.Empty<WorksheetChartExportData>();
+            }
+
+            var charts = new List<WorksheetChartExportData>();
+            foreach (ExcelChart chart in workbookSheet.Charts) {
+                if (!chart.TryGetSnapshot(out ExcelChartSnapshot snapshot)) {
+                    AddWarning(
+                        options,
+                        sheetName,
+                        "WorksheetChart",
+                        $"Worksheet chart '{chart.Name}' was not exported because its chart data could not be read into a first-party PDF snapshot.");
+                    continue;
+                }
+
+                if (!HasRenderableChartData(snapshot)) {
+                    AddWarning(
+                        options,
+                        sheetName,
+                        "WorksheetChart",
+                        $"Worksheet chart '{GetChartDisplayName(snapshot)}' was not exported because it does not contain renderable chart categories and series.");
+                } else if (IsSupportedChartSnapshot(snapshot, out string? unsupportedReason, out List<string> approximationWarnings)) {
+                    charts.Add(new WorksheetChartExportData(snapshot));
+                    foreach (string approximationWarning in approximationWarnings) {
+                        AddWarning(
+                            options,
+                            sheetName,
+                            "chart-approximation",
+                            $"Worksheet chart '{GetChartDisplayName(snapshot)}' was exported with an explicit approximation: {approximationWarning}");
+                    }
+                } else {
+                    AddWarning(
+                        options,
+                        sheetName,
+                        "WorksheetChart",
+                        $"Worksheet chart '{GetChartDisplayName(snapshot)}' was not exported because {unsupportedReason}");
+                }
+            }
+
+            return charts
+                .OrderBy(chart => chart.Snapshot.RowIndex)
+                .ThenBy(chart => chart.Snapshot.ColumnIndex)
+                .ToList();
+        }
+
+        private static bool IsSupportedChartSnapshot(
+            ExcelChartSnapshot snapshot,
+            out string? unsupportedReason,
+            out List<string> approximationWarnings) {
+            unsupportedReason = null;
+            approximationWarnings = new List<string>();
+            if (!TryMapChartKind(snapshot.ChartType, out _)) {
+                unsupportedReason = $"chart type '{snapshot.ChartType}' is not supported by the first-party PDF chart renderer.";
+                return false;
+            }
+
+            bool hasMixedSeries = snapshot.Data.Series.Any(series =>
+                series.ChartType.HasValue && series.ChartType.Value != snapshot.ChartType);
+            if (hasMixedSeries &&
+                !ExcelRangeImageRenderer.TryMapSeriesRenderKind(snapshot.ChartType, out _, out _)) {
+                unsupportedReason =
+                    $"combo-chart base type '{snapshot.ChartType}' is not supported by the shared Cartesian combo-chart renderer.";
+                return false;
+            }
+
+            foreach (ExcelChartSeries series in snapshot.Data.Series) {
+                ExcelChartType effectiveType = series.ChartType ?? snapshot.ChartType;
+                if (effectiveType == snapshot.ChartType) {
+                    continue;
+                }
+
+                if (!ExcelRangeImageRenderer.TryMapCompatibleComboSeriesRenderKind(
+                        snapshot.ChartType,
+                        effectiveType,
+                        out _,
+                        out string? approximation,
+                        out string? incompatibility)) {
+                    unsupportedReason = $"combo-chart series '{series.Name}' uses chart type '{effectiveType}': {incompatibility}";
+                    return false;
+                }
+
+                if (!string.IsNullOrWhiteSpace(approximation)) {
+                    approximationWarnings.Add($"series '{series.Name}' ({effectiveType}): {approximation}");
+                }
+            }
+
+            return true;
+        }
+
+        private static bool HasRenderableChartData(ExcelChartSnapshot snapshot) {
+            return snapshot.Data.Categories.Count > 0 && snapshot.Data.Series.Count > 0;
+        }
+
+        private static string GetChartDisplayName(ExcelChartSnapshot snapshot) {
+            if (!string.IsNullOrWhiteSpace(snapshot.Title)) {
+                return snapshot.Title!;
+            }
+
+            return string.IsNullOrWhiteSpace(snapshot.Name) ? snapshot.ChartType.ToString() : snapshot.Name;
+        }
+
+        private static void AddWarning(ExcelToPdfOptions options, string sheetName, string feature, string message) {
+            var warning = new ExcelPdfExportWarning(sheetName, feature, message);
+            options.Warnings.Add(warning);
+            options.Report.Add(warning.ToConversionWarning());
+        }
+
+        private static bool IsPdfSupportedImageContentType(string contentType) {
+            return OfficeImagePdfCompatibility.IsSupportedContentType(contentType);
+        }
+
+        private static bool TryPreparePdfImageBytes(
+            byte[] bytes,
+            string contentType,
+            out byte[] preparedBytes,
+            out string? unsupportedReason) {
+            preparedBytes = Array.Empty<byte>();
+            unsupportedReason = null;
+            if (!OfficeImagePdfCompatibility.TryValidateDeclaredContentType(bytes, contentType, out _, out unsupportedReason)) {
+                return false;
+            }
+
+            return PdfCore.PdfDocument.TryPrepareImageBytes(
+                bytes,
+                out preparedBytes,
+                out _,
+                out _,
+                out unsupportedReason);
+        }
+
+        private static double PixelsToPoints(int pixels) {
+            return pixels * 72D / 96D;
+        }
+
+    }
+}

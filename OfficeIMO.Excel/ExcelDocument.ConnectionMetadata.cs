@@ -1,0 +1,359 @@
+using System.Globalization;
+using System.Text;
+using System.Xml.Linq;
+using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Spreadsheet;
+
+namespace OfficeIMO.Excel {
+    public partial class ExcelDocument {
+        internal const int MaximumWorkbookConnectionMetadataCharacters = 1_000_000;
+        private const string WorkbookConnectionRelationshipType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/connections";
+        private const string WorkbookConnectionContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.connections+xml";
+        private const string WorksheetQueryTableRelationshipType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/queryTable";
+        private const string WorksheetQueryTableContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.queryTable+xml";
+        private const string SpreadsheetMainNamespace = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        private const string OfficeDocumentRelationshipsNamespace = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+        private const string MicrosoftWorkbookSlicerCacheRelationshipType = "http://schemas.microsoft.com/office/2007/relationships/slicerCache";
+        private const string MicrosoftWorkbookSlicerCacheContentType = "application/vnd.ms-excel.slicerCache+xml";
+        private const string MicrosoftWorkbookSlicerCacheNamespace = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
+        private const string MicrosoftWorkbookTimelineCacheRelationshipType = "http://schemas.microsoft.com/office/2011/relationships/timelineCache";
+        private const string MicrosoftWorkbookTimelineCacheContentType = "application/vnd.ms-excel.timelineCache+xml";
+        private const string MicrosoftWorkbookTimelineCacheNamespace = "http://schemas.microsoft.com/office/spreadsheetml/2011/1/main";
+        private const string WorkbookSlicerCacheRelationshipType = "https://schemas.evotec.xyz/officeimo/excel/relationships/slicerCacheMetadata";
+        private const string WorkbookSlicerCacheContentType = "application/vnd.officeimo.excel.slicerCache-metadata+xml";
+        private const string WorkbookTimelineCacheRelationshipType = "https://schemas.evotec.xyz/officeimo/excel/relationships/timelineCacheMetadata";
+        private const string WorkbookTimelineCacheContentType = "application/vnd.officeimo.excel.timelineCache-metadata+xml";
+        private const string WorkbookPivotInteractionRelationshipType = "https://schemas.evotec.xyz/officeimo/excel/relationships/pivotInteractionMetadata";
+        private const string WorkbookPivotInteractionContentType = "application/vnd.officeimo.excel.pivot-interaction-metadata+xml";
+        private const string WorkbookPivotInteractionNamespace = "https://schemas.evotec.xyz/officeimo/excel";
+
+        /// <summary>
+        /// Adds caller-supplied workbook connection metadata XML as a workbook package part.
+        /// OfficeIMO preserves this metadata but does not execute or refresh external connections.
+        /// </summary>
+        /// <param name="xml">Connection metadata XML.</param>
+        /// <returns>Information identifying the added or updated package part.</returns>
+        public ExcelPackagePartInfo AddWorkbookConnectionMetadata(string xml) {
+            OpenXmlPart? existingPart = GetWorkbookConnectionPart();
+            if (existingPart == null) {
+                ExtendedPart addedPart = AddMetadataPart(
+                    WorkbookPartRoot,
+                    WorkbookConnectionRelationshipType,
+                    WorkbookConnectionContentType,
+                    NormalizeWorkbookConnectionMetadata(xml),
+                    "xml");
+                return DescribePart(WorkbookPartRoot, addedPart);
+            }
+
+            string mergedXml = MergeWorkbookConnectionMetadata(ReadMetadataPart(existingPart), xml);
+            WriteMetadataPart(existingPart, mergedXml);
+            MarkMetadataPartChanged();
+            return DescribePart(WorkbookPartRoot, existingPart);
+        }
+
+        /// <summary>
+        /// Adds caller-supplied query-table metadata XML as a worksheet package part.
+        /// OfficeIMO preserves this metadata but does not execute or refresh external queries.
+        /// </summary>
+        /// <param name="worksheetName">Worksheet that owns the query-table metadata.</param>
+        /// <param name="xml">Query-table metadata XML.</param>
+        /// <returns>Information identifying the added package part.</returns>
+        public ExcelPackagePartInfo AddWorksheetQueryTableMetadata(string worksheetName, string xml) {
+            if (string.IsNullOrWhiteSpace(worksheetName)) throw new ArgumentNullException(nameof(worksheetName));
+            var sheet = this[worksheetName];
+            ExtendedPart part = AddMetadataPart(
+                sheet.WorksheetPart,
+                WorksheetQueryTableRelationshipType,
+                WorksheetQueryTableContentType,
+                xml,
+                "xml");
+            LinkWorksheetQueryTablePart(sheet.WorksheetPart, part);
+            return DescribePart(sheet.WorksheetPart, part);
+        }
+
+        /// <summary>
+        /// Adds OfficeIMO-owned workbook-level slicer binding metadata. This does not impersonate a native Excel slicer-cache part;
+        /// native cache structures and UI shapes must be materialized separately.
+        /// </summary>
+        /// <param name="options">Slicer cache metadata options.</param>
+        /// <returns>Information identifying the added package part.</returns>
+        public ExcelPackagePartInfo AddWorkbookSlicerCache(ExcelSlicerCacheOptions options) {
+            if (options == null) throw new ArgumentNullException(nameof(options));
+            return AddWorkbookPivotInteractionMetadata(options.ToXml(), ExcelPivotInteractionCacheKind.Slicer);
+        }
+
+        /// <summary>
+        /// Adds OfficeIMO-owned workbook-level timeline binding metadata. This does not impersonate a native Excel timeline-cache part;
+        /// native cache structures and UI shapes must be materialized separately.
+        /// </summary>
+        /// <param name="options">Timeline cache metadata options.</param>
+        /// <returns>Information identifying the added package part.</returns>
+        public ExcelPackagePartInfo AddWorkbookTimelineCache(ExcelTimelineCacheOptions options) {
+            if (options == null) throw new ArgumentNullException(nameof(options));
+            return AddWorkbookPivotInteractionMetadata(options.ToXml(), ExcelPivotInteractionCacheKind.Timeline);
+        }
+
+        private ExcelPackagePartInfo AddWorkbookPivotInteractionMetadata(
+            string bindingXml,
+            ExcelPivotInteractionCacheKind kind) {
+            XDocument binding = XDocument.Parse(bindingXml);
+            XElement bindingRoot = binding.Root
+                ?? throw new InvalidDataException("Pivot interaction metadata must have a root element.");
+            string expectedName = kind == ExcelPivotInteractionCacheKind.Slicer
+                ? "pivotSlicerBinding"
+                : "pivotTimelineBinding";
+            XElement storedBinding = string.Equals(bindingRoot.Name.LocalName, expectedName, StringComparison.Ordinal)
+                ? new XElement(bindingRoot)
+                : new XElement(
+                    XName.Get(expectedName, WorkbookPivotInteractionNamespace),
+                    new XAttribute("customPayload", true),
+                    new XElement(bindingRoot));
+            List<OpenXmlPart> existingParts = WorkbookPartRoot.Parts
+                .Select(pair => pair.OpenXmlPart)
+                .Where(IsCombinedPivotInteractionMetadataPart)
+                .ToList();
+            var root = new XElement(XName.Get("pivotInteractionBindings", WorkbookPivotInteractionNamespace));
+            foreach (OpenXmlPart existingPart in existingParts) {
+                XDocument existingMetadata = XDocument.Parse(ReadPivotInteractionPartText(existingPart));
+                XElement existingRoot = existingMetadata.Root
+                    ?? throw new InvalidDataException("Pivot interaction metadata part has no root element.");
+                foreach (XElement existingBinding in existingRoot.Elements()) {
+                    root.Add(new XElement(existingBinding));
+                }
+            }
+
+            root.Add(storedBinding);
+            string mergedXml = new XDocument(root).ToString(SaveOptions.DisableFormatting);
+            if (mergedXml.Length > MaximumPivotInteractionPartCharacters) {
+                throw new InvalidDataException(
+                    "Pivot interaction metadata exceeds the supported character limit.");
+            }
+
+            CustomXmlPart? canonicalPart = existingParts.OfType<CustomXmlPart>().FirstOrDefault();
+            canonicalPart ??= WorkbookPartRoot.AddCustomXmlPart(CustomXmlPartType.CustomXml);
+            WriteMetadataPart(canonicalPart, mergedXml);
+            foreach (OpenXmlPart obsoletePart in existingParts.Where(part => !ReferenceEquals(part, canonicalPart))) {
+                WorkbookPartRoot.DeletePart(obsoletePart);
+            }
+            MarkMetadataPartChanged();
+            return DescribePart(WorkbookPartRoot, canonicalPart);
+        }
+
+        /// <summary>
+        /// Adds caller-supplied XML as a workbook package metadata part.
+        /// </summary>
+        /// <param name="relationshipType">Open XML relationship type.</param>
+        /// <param name="contentType">Package part content type.</param>
+        /// <param name="xml">Metadata XML.</param>
+        /// <param name="targetExtension">Target extension for the generated package part.</param>
+        /// <returns>Information identifying the added package part.</returns>
+        public ExcelPackagePartInfo AddWorkbookMetadataPart(string relationshipType, string contentType, string xml, string targetExtension = "xml") {
+            ExtendedPart part = AddMetadataPart(WorkbookPartRoot, relationshipType, contentType, xml, targetExtension);
+            return DescribePart(WorkbookPartRoot, part);
+        }
+
+        /// <summary>
+        /// Adds caller-supplied XML as a worksheet package metadata part.
+        /// </summary>
+        /// <param name="sheet">Worksheet that owns the metadata part.</param>
+        /// <param name="relationshipType">Open XML relationship type.</param>
+        /// <param name="contentType">Package part content type.</param>
+        /// <param name="xml">Metadata XML.</param>
+        /// <param name="targetExtension">Target extension for the generated package part.</param>
+        /// <returns>Information identifying the added package part.</returns>
+        public ExcelPackagePartInfo AddWorksheetMetadataPart(ExcelSheet sheet, string relationshipType, string contentType, string xml, string targetExtension = "xml") {
+            if (sheet == null) throw new ArgumentNullException(nameof(sheet));
+            if (!ReferenceEquals(sheet.Document, this)) {
+                throw new ArgumentException("Worksheet metadata can only be added to a worksheet owned by this workbook.", nameof(sheet));
+            }
+
+            ExtendedPart part = AddMetadataPart(sheet.WorksheetPart, relationshipType, contentType, xml, targetExtension);
+            return DescribePart(sheet.WorksheetPart, part);
+        }
+
+        private ExtendedPart AddMetadataPart(OpenXmlPartContainer container, string relationshipType, string contentType, string xml, string targetExtension) {
+            if (container == null) throw new ArgumentNullException(nameof(container));
+            if (string.IsNullOrWhiteSpace(relationshipType)) throw new ArgumentNullException(nameof(relationshipType));
+            if (string.IsNullOrWhiteSpace(contentType)) throw new ArgumentNullException(nameof(contentType));
+            if (string.IsNullOrWhiteSpace(xml)) throw new ArgumentNullException(nameof(xml));
+
+            var part = container.AddExtendedPart(relationshipType, contentType, NormalizeMetadataPartExtension(targetExtension));
+            WriteMetadataPart(part, xml);
+            MarkMetadataPartChanged();
+            return part;
+        }
+
+        private static ExcelPackagePartInfo DescribePart(OpenXmlPartContainer owner, OpenXmlPart part) => new(owner, part);
+
+        private void LinkWorksheetQueryTablePart(WorksheetPart worksheetPart, OpenXmlPart queryTablePart) {
+            string relationshipId = worksheetPart.GetIdOfPart(queryTablePart);
+            Worksheet worksheet = worksheetPart.Worksheet ?? throw new InvalidDataException("Worksheet metadata cannot be linked because the worksheet part has no worksheet XML.");
+            OpenXmlElement? queryTableParts = worksheet.ChildElements.FirstOrDefault(IsQueryTablePartsElement);
+            if (queryTableParts == null) {
+                queryTableParts = new OpenXmlUnknownElement(string.Empty, "queryTableParts", SpreadsheetMainNamespace);
+                WorksheetExtensionList? extensionList = worksheet.GetFirstChild<WorksheetExtensionList>();
+                if (extensionList != null) {
+                    worksheet.InsertBefore(queryTableParts, extensionList);
+                } else {
+                    worksheet.Append(queryTableParts);
+                }
+            }
+
+            bool exists = queryTableParts.ChildElements
+                .Where(IsQueryTablePartElement)
+                .Any(part => string.Equals(GetRelationshipId(part), relationshipId, StringComparison.Ordinal));
+            if (!exists) {
+                var linkedPart = new OpenXmlUnknownElement(string.Empty, "queryTablePart", SpreadsheetMainNamespace);
+                linkedPart.SetAttribute(new OpenXmlAttribute("r", "id", OfficeDocumentRelationshipsNamespace, relationshipId));
+                queryTableParts.Append(linkedPart);
+            }
+
+            int count = queryTableParts.ChildElements.Count(IsQueryTablePartElement);
+            queryTableParts.SetAttribute(new OpenXmlAttribute("count", string.Empty, count.ToString(CultureInfo.InvariantCulture)));
+            worksheet.Save();
+            MarkMetadataPartChanged();
+        }
+
+        private static bool IsQueryTablePartsElement(OpenXmlElement element) {
+            return string.Equals(element.LocalName, "queryTableParts", StringComparison.Ordinal)
+                && string.Equals(element.NamespaceUri, SpreadsheetMainNamespace, StringComparison.Ordinal);
+        }
+
+        private static bool IsQueryTablePartElement(OpenXmlElement element) {
+            return string.Equals(element.LocalName, "queryTablePart", StringComparison.Ordinal)
+                && string.Equals(element.NamespaceUri, SpreadsheetMainNamespace, StringComparison.Ordinal);
+        }
+
+        private static string? GetRelationshipId(OpenXmlElement element) {
+            string? id = element.GetAttribute("id", OfficeDocumentRelationshipsNamespace).Value;
+            if (!string.IsNullOrWhiteSpace(id)) {
+                return id;
+            }
+
+            return element.GetAttribute("id", string.Empty).Value;
+        }
+
+        private OpenXmlPart? GetWorkbookConnectionPart() {
+            return EnumerateWorkbookConnectionParts()
+                .FirstOrDefault(part => string.Equals(part.ContentType, WorkbookConnectionContentType, StringComparison.OrdinalIgnoreCase)
+                    || part is ConnectionsPart);
+        }
+
+        private IEnumerable<OpenXmlPart> EnumerateWorkbookConnectionParts() {
+            foreach (IdPartPair pair in WorkbookPartRoot.Parts) {
+                OpenXmlPart part = pair.OpenXmlPart;
+                if (part is ConnectionsPart
+                    || string.Equals(part.RelationshipType, WorkbookConnectionRelationshipType, StringComparison.Ordinal)
+                    || part.ContentType.IndexOf("connections", StringComparison.OrdinalIgnoreCase) >= 0) {
+                    yield return part;
+                }
+            }
+        }
+
+        private static string MergeWorkbookConnectionMetadata(string existingXml, string newXml) {
+            XDocument existingDocument = XDocument.Parse(existingXml);
+            XDocument newDocument = XDocument.Parse(newXml);
+            if (existingDocument.Root == null || newDocument.Root == null) {
+                throw new InvalidDataException("Workbook connection metadata must have a document root.");
+            }
+
+            IEnumerable<XElement> newConnections = newDocument.Root.Name.LocalName == "connection"
+                ? new[] { newDocument.Root }
+                : newDocument.Root.Elements().Where(element => element.Name.LocalName == "connection");
+
+            foreach (XElement connection in newConnections) {
+                existingDocument.Root.Add(new XElement(connection));
+            }
+
+            existingDocument.Root.SetAttributeValue("count", existingDocument.Root.Elements().Count(element => element.Name.LocalName == "connection").ToString(System.Globalization.CultureInfo.InvariantCulture));
+            return existingDocument.ToString(SaveOptions.DisableFormatting);
+        }
+
+        private static string NormalizeWorkbookConnectionMetadata(string xml) {
+            XDocument document = XDocument.Parse(xml);
+            if (document.Root == null) {
+                throw new InvalidDataException("Workbook connection metadata must have a document root.");
+            }
+
+            if (document.Root.Name.LocalName != "connection") {
+                return document.ToString(SaveOptions.DisableFormatting);
+            }
+
+            XNamespace ns = document.Root.Name.Namespace;
+            var connections = new XElement(ns + "connections", new XElement(document.Root));
+            connections.SetAttributeValue("count", "1");
+            return new XDocument(connections).ToString(SaveOptions.DisableFormatting);
+        }
+
+        private static string ReadMetadataPart(OpenXmlPart part) {
+            return ReadOpenXmlPartText(part);
+        }
+
+        private static void WriteMetadataPart(OpenXmlPart part, string xml) {
+            WriteOpenXmlPartText(part, xml);
+        }
+
+        internal static string ReadOpenXmlPartText(OpenXmlPart part) {
+            if (part is ConnectionsPart connectionsPart && connectionsPart.IsRootElementLoaded) {
+                Connections? connections = connectionsPart.Connections;
+                if (connections == null) return string.Empty;
+                try {
+                    ExcelSheet.MeasureMutationSnapshotRoot(
+                        connections,
+                        MaximumWorkbookConnectionMetadataCharacters,
+                        MaximumWorkbookConnectionMetadataCharacters);
+                } catch (InvalidOperationException exception) {
+                    throw new InvalidDataException(
+                        $"Workbook connection metadata exceeds {MaximumWorkbookConnectionMetadataCharacters} characters.",
+                        exception);
+                }
+                string xml = connections.OuterXml;
+                if (xml.Length > MaximumWorkbookConnectionMetadataCharacters) {
+                    throw new InvalidDataException(
+                        $"Workbook connection metadata exceeds {MaximumWorkbookConnectionMetadataCharacters} characters.");
+                }
+                return xml;
+            }
+
+            using Stream stream = part.GetStream(FileMode.Open, FileAccess.Read);
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+            var text = new StringBuilder(Math.Min(8192, MaximumWorkbookConnectionMetadataCharacters));
+            var buffer = new char[4096];
+            while (true) {
+                int read = reader.Read(buffer, 0, buffer.Length);
+                if (read == 0) break;
+                if (text.Length > MaximumWorkbookConnectionMetadataCharacters - read) {
+                    throw new InvalidDataException(
+                        $"Workbook connection metadata exceeds {MaximumWorkbookConnectionMetadataCharacters} characters.");
+                }
+                text.Append(buffer, 0, read);
+            }
+            return text.ToString();
+        }
+
+        private static void WriteOpenXmlPartText(OpenXmlPart part, string xml) {
+            using Stream stream = part.GetStream(FileMode.Create, FileAccess.Write);
+            byte[] bytes = Encoding.UTF8.GetBytes(xml);
+            stream.Write(bytes, 0, bytes.Length);
+            if (part is ConnectionsPart connectionsPart) {
+                connectionsPart.Connections = new Connections(xml);
+            }
+        }
+
+        private void MarkMetadataPartChanged() {
+            _packageDirty = true;
+            _packageContentTypesKnownNormalized = true;
+            _simplePackageContentKnown = false;
+            MarkRequiresSavePreflight();
+        }
+
+        private static string NormalizeMetadataPartExtension(string targetExtension) {
+            if (string.IsNullOrWhiteSpace(targetExtension)) {
+                return "xml";
+            }
+
+            return targetExtension.Trim().TrimStart('.');
+        }
+    }
+}

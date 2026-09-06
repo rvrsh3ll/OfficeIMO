@@ -3,13 +3,26 @@ using DocumentFormat.OpenXml.Wordprocessing;
 
 namespace OfficeIMO.Word;
 
+/// <summary>
+/// Contains private methods for list handling.
+/// </summary>
 public partial class WordList : WordElement {
     /// <summary>
     /// Retrieves the <see cref="AbstractNum"/> associated with this list.
     /// </summary>
-    private AbstractNum GetAbstractNum() {
-        return _document._wordprocessingDocument.MainDocumentPart!.NumberingDefinitionsPart!.Numbering
-            .Elements<AbstractNum>().FirstOrDefault(a => a.AbstractNumberId.Value == _abstractId);
+    private AbstractNum? GetAbstractNum() {
+        var numbering = TryGetNumberingRoot();
+        if (numbering == null) {
+            return null;
+        }
+        if (_abstractId == 0) {
+            var instance = numbering.Elements<NumberingInstance>()
+                .FirstOrDefault(n => n.NumberID != null && n.NumberID.Value == _numberId);
+            if (instance?.AbstractNumId?.Val != null) {
+                _abstractId = (int)instance.AbstractNumId.Val.Value;
+            }
+        }
+        return numbering.Elements<AbstractNum>().FirstOrDefault(a => a.AbstractNumberId != null && a.AbstractNumberId.Value == _abstractId);
     }
 
     /// <summary>
@@ -19,7 +32,7 @@ public partial class WordList : WordElement {
     private static int GetNextAbstractNum(Numbering numbering) {
         var ids = numbering.ChildElements
             .OfType<AbstractNum>()
-            .Select(element => (int)element.AbstractNumberId)
+            .Select(element => (int)(element.AbstractNumberId?.Value ?? 0))
             .ToList();
         return ids.Count > 0 ? ids.Max() + 1 : 0;
     }
@@ -31,7 +44,7 @@ public partial class WordList : WordElement {
     private static int GetNextNumberingInstance(Numbering numbering) {
         var ids = numbering.ChildElements
             .OfType<NumberingInstance>()
-            .Select(element => (int)element.NumberID)
+            .Select(element => (int)(element.NumberID?.Value ?? 0))
             .ToList();
         return ids.Count > 0 ? ids.Max() + 1 : 1;
     }
@@ -42,7 +55,7 @@ public partial class WordList : WordElement {
     /// <typeparam name="T">The type of the property.</typeparam>
     /// <param name="propertySelector">The selector function to extract the property.</param>
     /// <param name="defaultValue">The default value if the property is not found.</param>
-    private T GetNumberingProperty<T>(Func<NumberingSymbolRunProperties, T> propertySelector, T defaultValue = default) {
+    private T? GetNumberingProperty<T>(Func<NumberingSymbolRunProperties, T?> propertySelector, T? defaultValue = default) {
         var abstractNum = GetAbstractNum();
         var level = abstractNum?.Elements<Level>().FirstOrDefault();
         if (level != null) {
@@ -80,7 +93,7 @@ public partial class WordList : WordElement {
     /// </summary>
     /// <param name="document">The Word document.</param>
     private void CreateNumberingDefinition(WordDocument document) {
-        var numberingDefinitionsPart = document._wordprocessingDocument.MainDocumentPart!.NumberingDefinitionsPart ?? _wordprocessingDocument.MainDocumentPart!.AddNewPart<NumberingDefinitionsPart>();
+        var numberingDefinitionsPart = EnsureNumberingDefinitionsPartRoot();
         if (numberingDefinitionsPart.Numbering == null) {
             // the check for null is required even tho Resharper claims it's not
             Numbering numbering1 = new Numbering() { MCAttributes = new MarkupCompatibilityAttributes() { Ignorable = "w14 w15 w16se w16cid w16 w16cex w16sdtdh wp14" } };
@@ -119,7 +132,7 @@ public partial class WordList : WordElement {
             numbering1.AddNamespaceDeclaration("wps", "http://schemas.microsoft.com/office/word/2010/wordprocessingShape");
 
             numberingDefinitionsPart.Numbering = numbering1;
-            numberingDefinitionsPart.Numbering.Save(_document._wordprocessingDocument.MainDocumentPart.NumberingDefinitionsPart);
+            numbering1.Save(numberingDefinitionsPart);
         }
     }
 
@@ -204,7 +217,7 @@ public partial class WordList : WordElement {
     /// <param name="style">The list style to apply.</param>
     internal void AddList(WordListStyle style) {
         CreateNumberingDefinition(_document);
-        var numbering = _document._wordprocessingDocument.MainDocumentPart!.NumberingDefinitionsPart!.Numbering;
+        var numbering = EnsureNumberingRoot();
 
         _abstractId = GetNextAbstractNum(numbering);
         _numberId = GetNextNumberingInstance(numbering);
@@ -214,8 +227,193 @@ public partial class WordList : WordElement {
         var abstractNumId = new AbstractNumId {
             Val = _abstractId
         };
-        NumberingInstance numberingInstance = new NumberingInstance();
-        numberingInstance = RestartNumberingInstance(abstractNumId, _numberId);
-        numbering.Append(numberingInstance, abstractNum);
+        NumberingInstance numberingInstance = RestartNumberingInstance(abstractNumId, _numberId);
+        numbering.Append(abstractNum, numberingInstance);
+    }
+
+    private WordList Clone(OpenXmlElement referenceParagraph, bool after) {
+        var numberingPart = MainDocumentPartRoot.NumberingDefinitionsPart;
+        if (numberingPart == null) {
+            numberingPart = MainDocumentPartRoot.AddNewPart<NumberingDefinitionsPart>();
+            numberingPart.Numbering = new Numbering();
+        }
+        var numbering = numberingPart.Numbering ??= new Numbering();
+
+        var originalAbstract = numbering.Elements<AbstractNum>().First(a => a.AbstractNumberId != null && a.AbstractNumberId.Value == _abstractId);
+        var originalInstance = numbering.Elements<NumberingInstance>().First(n => n.NumberID != null && n.NumberID.Value == _numberId);
+
+        int newAbstractId = GetNextAbstractNum(numbering);
+        int newNumberId = GetNextNumberingInstance(numbering);
+
+        var newAbstract = (AbstractNum)originalAbstract.CloneNode(true);
+        newAbstract.AbstractNumberId = newAbstractId;
+
+        var restartAttr = originalAbstract.GetAttribute("restartNumberingAfterBreak", "http://schemas.microsoft.com/office/word/2012/wordml");
+        if (!string.IsNullOrEmpty(restartAttr.Value)) {
+            EnsureW15Namespace(numbering);
+            newAbstract.SetAttribute(new OpenXmlAttribute("w15", "restartNumberingAfterBreak", "http://schemas.microsoft.com/office/word/2012/wordml", restartAttr.Value));
+        }
+
+        numbering.Append(newAbstract);
+
+        var newInstance = new NumberingInstance { NumberID = newNumberId };
+        newInstance.Append(new AbstractNumId { Val = newAbstractId });
+        foreach (var levelOverride in originalInstance.Elements<LevelOverride>()) {
+            newInstance.Append((LevelOverride)levelOverride.CloneNode(true));
+        }
+        numbering.Append(newInstance);
+
+        WordList clonedList;
+        if (_headerFooter != null) {
+            clonedList = new WordList(_document, _headerFooter);
+        } else if (_tableCell != null) {
+            clonedList = new WordList(_document, _tableCell);
+        } else if (_wordParagraph != null) {
+            clonedList = new WordList(_document, _wordParagraph, _isToc);
+        } else {
+            clonedList = new WordList(_document, _isToc);
+        }
+
+        clonedList._abstractId = newAbstractId;
+        clonedList._numberId = newNumberId;
+
+        OpenXmlElement currentRef = referenceParagraph;
+        WordParagraph? firstInserted = null;
+        foreach (var item in ListItems) {
+            var clonedParagraph = (Paragraph)item._paragraph.CloneNode(true);
+            var numberingProps = clonedParagraph.GetFirstChild<ParagraphProperties>()?.NumberingProperties;
+            if (numberingProps?.NumberingId != null) {
+                numberingProps.NumberingId.Val = newNumberId;
+            }
+            OpenXmlElement inserted = after
+                ? currentRef.InsertAfterSelf(clonedParagraph)
+                : currentRef.InsertBeforeSelf(clonedParagraph);
+            if (after) {
+                currentRef = inserted;
+            }
+            var paragraphElement = inserted as Paragraph;
+            if (paragraphElement == null) {
+                continue;
+            }
+            var run = paragraphElement.GetFirstChild<Run>() ?? new Run();
+            if (run.Parent == null) paragraphElement.AppendChild(run);
+            var wp = new WordParagraph(_document, paragraphElement, run);
+            wp.Text = item.Text;
+            wp._list = clonedList;
+            clonedList._listItems.Add(wp);
+            if (firstInserted == null) {
+                firstInserted = wp;
+            }
+        }
+
+        if (firstInserted != null) {
+            clonedList._wordParagraph = firstInserted;
+        }
+
+        return clonedList;
+    }
+
+    private static Level CreateBulletLevel(char symbol, string fontName, string colorHex, int? fontSize) {
+        var level = new Level();
+        level.Append(new StartNumberingValue() { Val = 1 });
+        level.Append(new NumberingFormat() { Val = NumberFormatValues.Bullet });
+        level.Append(new LevelText() { Val = symbol.ToString() });
+        level.Append(new LevelJustification() { Val = LevelJustificationValues.Left });
+
+        var prevProps = new PreviousParagraphProperties();
+        prevProps.Append(new Indentation() { Left = "720", Hanging = "360" });
+        level.Append(prevProps);
+
+        var symbolProps = new NumberingSymbolRunProperties();
+        if (!string.IsNullOrEmpty(fontName)) {
+            symbolProps.Append(new RunFonts { Ascii = fontName, HighAnsi = fontName });
+        }
+        if (!string.IsNullOrEmpty(colorHex)) {
+            symbolProps.Append(new DocumentFormat.OpenXml.Wordprocessing.Color { Val = colorHex.Replace("#", "").ToUpperInvariant() });
+        }
+        if (fontSize.HasValue) {
+            var size = (fontSize.Value * 2).ToString();
+            symbolProps.Append(new FontSize { Val = size });
+            symbolProps.Append(new FontSizeComplexScript { Val = size });
+        }
+        level.Append(symbolProps);
+        return level;
+    }
+
+    /// <summary>
+    /// Replaces the underlying abstract numbering definition while keeping the current numbering instance.
+    /// </summary>
+    /// <param name="newAbstract">The new abstract numbering definition.</param>
+    private void ReplaceAbstractNum(AbstractNum newAbstract) {
+        var numberingPart = EnsureNumberingDefinitionsPartRoot();
+        var numbering = numberingPart.Numbering ??= new Numbering();
+
+        var oldAbstract = numbering.Elements<AbstractNum>().FirstOrDefault(a => a.AbstractNumberId != null && a.AbstractNumberId.Value == _abstractId);
+        if (oldAbstract == null) {
+            return;
+        }
+
+        // preserve indentation from existing levels
+        var oldLevels = oldAbstract.Elements<Level>().ToList();
+        var newLevels = newAbstract.Elements<Level>().ToList();
+        for (int i = 0; i < Math.Min(oldLevels.Count, newLevels.Count); i++) {
+            var oldIndent = oldLevels[i].GetFirstChild<PreviousParagraphProperties>()?.GetFirstChild<Indentation>();
+            if (oldIndent != null) {
+                var prev = newLevels[i].GetFirstChild<PreviousParagraphProperties>();
+                if (prev == null) {
+                    prev = new PreviousParagraphProperties();
+                    newLevels[i].Append(prev);
+                }
+                var indent = prev.GetFirstChild<Indentation>();
+                if (indent == null) {
+                    prev.Append((Indentation)oldIndent.CloneNode(true));
+                } else {
+                    indent.Left = oldIndent.Left;
+                    indent.Hanging = oldIndent.Hanging;
+                }
+            }
+        }
+
+        newAbstract.AbstractNumberId = _abstractId;
+        numbering.InsertAfter(newAbstract, oldAbstract);
+        oldAbstract.Remove();
+        numbering.Save();
+    }
+
+    private static char GetBulletSymbol(WordListLevelKind kind) {
+        return kind switch {
+            WordListLevelKind.Bullet => '\u2022',
+            WordListLevelKind.BulletSquareSymbol => '\u25A0',
+            WordListLevelKind.BulletBlackCircle => '\u25CF',
+            WordListLevelKind.BulletDiamondSymbol => '\u25C6',
+            WordListLevelKind.BulletArrowSymbol => '\u25BA',
+            WordListLevelKind.BulletSolidRound => '·',
+            WordListLevelKind.BulletOpenCircle => 'o',
+            WordListLevelKind.BulletSquare2 => '■',
+            WordListLevelKind.BulletSquare => '§',
+            WordListLevelKind.BulletClubs => 'v',
+            WordListLevelKind.BulletArrow => 'Ø',
+            WordListLevelKind.BulletDiamond => '¨',
+            WordListLevelKind.BulletCheckmark => 'ü',
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), "Only bullet kinds are supported")
+        };
+    }
+
+    private static void EnsureW15Namespace(Numbering numbering) {
+        const string prefix = "w15";
+        const string ns = "http://schemas.microsoft.com/office/word/2012/wordml";
+        if (numbering.LookupNamespace(prefix) == null) {
+            numbering.AddNamespaceDeclaration(prefix, ns);
+        }
+        if (numbering.MCAttributes == null) {
+            numbering.MCAttributes = new MarkupCompatibilityAttributes { Ignorable = prefix };
+        } else {
+            var ignorable = numbering.MCAttributes.Ignorable?.Value;
+            if (string.IsNullOrEmpty(ignorable)) {
+                numbering.MCAttributes.Ignorable = prefix;
+            } else if (ignorable is { Length: > 0 } ig && !ig.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries).Contains(prefix)) {
+                numbering.MCAttributes.Ignorable = ig + " " + prefix;
+            }
+        }
     }
 }

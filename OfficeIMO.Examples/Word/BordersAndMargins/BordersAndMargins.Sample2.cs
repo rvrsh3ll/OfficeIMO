@@ -1,7 +1,7 @@
 using System;
 using DocumentFormat.OpenXml.Drawing;
 using OfficeIMO.Word;
-using SixLabors.ImageSharp;
+using Color = OfficeIMO.Drawing.OfficeColor;
 
 namespace OfficeIMO.Examples.Word {
     internal static partial class BordersAndMargins {
@@ -21,7 +21,8 @@ namespace OfficeIMO.Examples.Word {
 
                 Console.WriteLine(document.Sections[1].Borders.Type);
 
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
     }

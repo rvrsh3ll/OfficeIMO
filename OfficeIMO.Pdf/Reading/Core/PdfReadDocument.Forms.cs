@@ -1,0 +1,651 @@
+namespace OfficeIMO.Pdf;
+
+public sealed partial class PdfReadDocument {
+    private IReadOnlyList<PdfFormField> ExtractFormFields(out int javaScriptCount, out long javaScriptBytes) {
+        javaScriptCount = 0;
+        javaScriptBytes = 0L;
+        PdfDictionary? acroForm = GetAcroFormDictionary();
+        if (acroForm is null ||
+            !acroForm.Items.TryGetValue("Fields", out var fieldsObject) ||
+            ResolveArray(fieldsObject) is not PdfArray fields) {
+            return Array.Empty<PdfFormField>();
+        }
+
+        var result = new List<PdfFormField>();
+        var visited = new HashSet<int>();
+        var widgetPageNumbers = BuildWidgetPageNumberLookup();
+        var actionBudget = new PdfFormWidgetActionReadBudget();
+        int nextDirectValueOwnerKey = -1;
+        PdfFormFieldInheritedState inherited = PdfFormFieldInheritedState.FromAcroForm(_acroFormDefaultAppearance, _acroFormQuadding);
+        if (fields.Items.Count > _options.Limits.MaxFormFields) {
+            throw PdfReadLimitException.Create(PdfReadLimitKind.FormFields, _options.Limits.MaxFormFields, fields.Items.Count);
+        }
+
+        for (int i = 0; i < fields.Items.Count; i++) {
+            ReadFormField(fields.Items[i], null, inherited, result, visited, widgetPageNumbers, actionBudget, ref nextDirectValueOwnerKey, depth: 1);
+        }
+
+        javaScriptCount = actionBudget.Count;
+        javaScriptBytes = actionBudget.TotalBytes;
+
+        return result.Count == 0 ? Array.Empty<PdfFormField>() : result.AsReadOnly();
+    }
+
+    private string? ExtractAcroFormText(string key) {
+        PdfDictionary? acroForm = GetAcroFormDictionary();
+        if (acroForm is null ||
+            !acroForm.Items.TryGetValue(key, out var value) ||
+            ResolveObject(value) is not PdfStringObj text ||
+            string.IsNullOrEmpty(text.Value)) {
+            return null;
+        }
+
+        return text.Value;
+    }
+
+    private bool? ExtractAcroFormBoolean(string key) {
+        PdfDictionary? acroForm = GetAcroFormDictionary();
+        if (acroForm is null ||
+            !acroForm.Items.TryGetValue(key, out var value) ||
+            ResolveObject(value) is not PdfBoolean boolean) {
+            return null;
+        }
+
+        return boolean.Value;
+    }
+
+    private int? ExtractAcroFormInteger(string key) {
+        PdfDictionary? acroForm = GetAcroFormDictionary();
+        if (acroForm is null ||
+            !acroForm.Items.TryGetValue(key, out var value) ||
+            ResolveObject(value) is not PdfNumber number ||
+            number.Value < int.MinValue ||
+            number.Value > int.MaxValue ||
+            Math.Truncate(number.Value) != number.Value) {
+            return null;
+        }
+
+        return (int)number.Value;
+    }
+
+    private PdfAcroFormXfaInfo? ExtractAcroFormXfaInfo() {
+        PdfDictionary? acroForm = GetAcroFormDictionary();
+        if (acroForm is null ||
+            !acroForm.Items.TryGetValue("XFA", out var xfaObject)) {
+            return null;
+        }
+
+        int? objectNumber = xfaObject is PdfReference reference ? reference.ObjectNumber : null;
+        PdfObject? resolved = ResolveObject(xfaObject);
+        if (resolved is null || resolved is PdfNull) {
+            return null;
+        }
+
+        return BuildAcroFormXfaInfo(resolved, objectNumber);
+    }
+
+    private PdfAcroFormXfaInfo BuildAcroFormXfaInfo(PdfObject xfaObject, int? objectNumber) {
+        if (xfaObject is PdfArray array) {
+            var packetNames = new List<string>();
+            int streamCount = 0;
+            int stringCount = 0;
+            int dictionaryCount = 0;
+            int totalPayloadBytes = 0;
+
+            for (int i = 0; i < array.Items.Count; i++) {
+                PdfObject? item = ResolveObject(array.Items[i]);
+                if (item is PdfStringObj packetName &&
+                    i + 1 < array.Items.Count) {
+                    packetNames.Add(packetName.Value);
+                    AddXfaPayloadStats(ResolveObject(array.Items[i + 1]), ref streamCount, ref stringCount, ref dictionaryCount, ref totalPayloadBytes);
+                    i++;
+                    continue;
+                }
+
+                AddXfaPayloadStats(item, ref streamCount, ref stringCount, ref dictionaryCount, ref totalPayloadBytes);
+            }
+
+            return new PdfAcroFormXfaInfo(
+                "array",
+                objectNumber,
+                packetNames.Count,
+                packetNames.AsReadOnly(),
+                streamCount,
+                stringCount,
+                dictionaryCount,
+                totalPayloadBytes,
+                ContainsXfaPacket(packetNames, "template"),
+                ContainsXfaPacket(packetNames, "datasets"));
+        }
+
+        int directStreamCount = 0;
+        int directStringCount = 0;
+        int directDictionaryCount = 0;
+        int directPayloadBytes = 0;
+        AddXfaPayloadStats(xfaObject, ref directStreamCount, ref directStringCount, ref directDictionaryCount, ref directPayloadBytes);
+
+        return new PdfAcroFormXfaInfo(
+            GetXfaObjectKind(xfaObject),
+            objectNumber,
+            0,
+            Array.Empty<string>(),
+            directStreamCount,
+            directStringCount,
+            directDictionaryCount,
+            directPayloadBytes,
+            false,
+            false);
+    }
+
+    private static void AddXfaPayloadStats(PdfObject? value, ref int streamCount, ref int stringCount, ref int dictionaryCount, ref int totalPayloadBytes) {
+        if (value is PdfStream stream) {
+            streamCount++;
+            totalPayloadBytes += stream.Data.Length;
+        } else if (value is PdfStringObj text) {
+            stringCount++;
+            totalPayloadBytes += text.RawBytes.Length;
+        } else if (value is PdfDictionary) {
+            dictionaryCount++;
+        }
+    }
+
+    private static bool ContainsXfaPacket(List<string> packetNames, string packetName) {
+        for (int i = 0; i < packetNames.Count; i++) {
+            if (string.Equals(packetNames[i], packetName, StringComparison.OrdinalIgnoreCase)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string GetXfaObjectKind(PdfObject value) {
+        if (value is PdfStream) return "stream";
+        if (value is PdfStringObj) return "string";
+        if (value is PdfDictionary) return "dictionary";
+        if (value is PdfArray) return "array";
+        if (value is PdfName) return "name";
+        if (value is PdfNumber) return "number";
+        if (value is PdfBoolean) return "boolean";
+        if (value is PdfNull) return "null";
+        return "unknown";
+    }
+
+    private PdfDictionary? GetAcroFormDictionary() {
+        PdfDictionary? catalog = FindCatalog();
+        if (catalog is null ||
+            !catalog.Items.TryGetValue("AcroForm", out var acroFormObject) ||
+            ResolveObject(acroFormObject) is not PdfDictionary acroForm) {
+            return null;
+        }
+
+        return acroForm;
+    }
+
+    private Dictionary<int, int> BuildWidgetPageNumberLookup() {
+        var widgetPageNumbers = new Dictionary<int, int>();
+        for (int i = 0; i < Pages.Count; i++) {
+            IReadOnlyList<int> annotationObjectNumbers = Pages[i].GetAnnotationObjectNumbers("Widget");
+            for (int j = 0; j < annotationObjectNumbers.Count; j++) {
+                if (!widgetPageNumbers.ContainsKey(annotationObjectNumbers[j])) {
+                    widgetPageNumbers.Add(annotationObjectNumbers[j], i + 1);
+                }
+            }
+        }
+
+        return widgetPageNumbers;
+    }
+
+    private void ReadFormField(PdfObject fieldObject, string? parentName, PdfFormFieldInheritedState inherited, List<PdfFormField> result, HashSet<int> visited, IReadOnlyDictionary<int, int> widgetPageNumbers, PdfFormWidgetActionReadBudget actionBudget, ref int nextDirectValueOwnerKey, int depth) {
+        if (depth > _options.Limits.MaxFormFieldDepth) {
+            throw PdfReadLimitException.Create(PdfReadLimitKind.FormFieldDepth, _options.Limits.MaxFormFieldDepth, depth);
+        }
+
+        PdfObject? resolved = ResolveObject(fieldObject);
+        if (resolved is not PdfDictionary field) {
+            return;
+        }
+
+        int? objectNumber = null;
+        if (fieldObject is PdfReference reference) {
+            objectNumber = reference.ObjectNumber;
+            if (!visited.Add(reference.ObjectNumber)) {
+                return;
+            }
+        } else {
+            int foundObjectNumber = FindExactObjectNumberFor(field);
+            if (foundObjectNumber > 0) {
+                objectNumber = foundObjectNumber;
+                if (!visited.Add(foundObjectNumber)) {
+                    return;
+                }
+            }
+        }
+
+        if (visited.Count > _options.Limits.MaxFormFields) {
+            throw PdfReadLimitException.Create(PdfReadLimitKind.FormFields, _options.Limits.MaxFormFields, visited.Count);
+        }
+
+        string? partialName = TryReadText(field, "T");
+        string? fullName = CombineFieldName(parentName, partialName);
+        string? fieldType = TryReadName(field, "FT") ?? inherited.FieldType;
+        bool hasOwnValueEntry = field.Items.ContainsKey("V");
+        bool hasValueEntry = hasOwnValueEntry || inherited.HasValueEntry;
+        string? value = hasOwnValueEntry ? TryReadSimpleFieldValue(field, "V") : inherited.Value;
+        IReadOnlyList<string> values = hasOwnValueEntry ? ReadSimpleFieldValues(field, "V") : inherited.Values;
+        int? valueOwnerKey = hasOwnValueEntry ? objectNumber ?? nextDirectValueOwnerKey-- : inherited.ValueOwnerKey;
+        bool hasOwnDefaultValueEntry = field.Items.ContainsKey("DV");
+        bool hasDefaultValueEntry = hasOwnDefaultValueEntry || inherited.HasDefaultValueEntry;
+        string? defaultValue = hasOwnDefaultValueEntry ? TryReadSimpleFieldValue(field, "DV") : inherited.DefaultValue;
+        IReadOnlyList<string> defaultValues = hasOwnDefaultValueEntry ? ReadSimpleFieldValues(field, "DV") : inherited.DefaultValues;
+        int? defaultValueOwnerKey = hasOwnDefaultValueEntry ? objectNumber ?? nextDirectValueOwnerKey-- : inherited.DefaultValueOwnerKey;
+        bool hasOwnRichValueEntry = field.Items.ContainsKey("RV");
+        bool hasRichValueEntry = hasOwnRichValueEntry || inherited.HasRichValueEntry;
+        string? richValue = hasOwnRichValueEntry ? TryReadText(field, "RV") : inherited.RichValue;
+        string? richValuePlainText = hasOwnRichValueEntry
+            ? PdfFreeTextStyleParser.ExtractPlainText(richValue)
+            : inherited.RichValuePlainText;
+        int? richValueOwnerKey = hasOwnRichValueEntry ? objectNumber ?? nextDirectValueOwnerKey-- : inherited.RichValueOwnerKey;
+        string? alternateName = TryReadText(field, "TU");
+        string? mappingName = TryReadText(field, "TM");
+        int? flags = field.Items.ContainsKey("Ff") ? TryReadInteger(field, "Ff") : inherited.Flags;
+        int? maxLength = field.Items.ContainsKey("MaxLen") ? TryReadPositiveInteger(field, "MaxLen") : inherited.MaxLength;
+        string? defaultAppearance = field.Items.ContainsKey("DA") ? TryReadText(field, "DA") : inherited.DefaultAppearance;
+        int? quadding = field.Items.ContainsKey("Q") ? TryReadInteger(field, "Q") : inherited.Quadding;
+        IReadOnlyList<PdfFormFieldOption> options = field.Items.ContainsKey("Opt") ? ReadFormFieldOptions(field) : inherited.Options;
+        IReadOnlyList<int> selectedIndices = field.Items.ContainsKey("I") ? ReadFormFieldSelectedIndices(field) : inherited.SelectedIndices;
+        bool isWidget = IsWidget(field);
+        var widgets = new List<PdfFormWidget>();
+        if (TryReadFormWidget(field, fullName, objectNumber, widgetPageNumbers, actionBudget, out PdfFormWidget? widget) && widget is not null) {
+            widgets.Add(widget);
+        }
+
+        PdfArray? kids = field.Items.TryGetValue("Kids", out var kidsObject) ? ResolveArray(kidsObject) : null;
+        bool hasReadableFieldState = fieldType != null || hasValueEntry || hasDefaultValueEntry || hasRichValueEntry || flags.HasValue;
+        var fieldKids = new List<PdfObject>();
+        if (kids is not null) {
+            for (int i = 0; i < kids.Items.Count; i++) {
+                PdfObject kidObject = kids.Items[i];
+                PdfDictionary? kid = ResolveObject(kidObject) as PdfDictionary;
+                if (kid is not null && IsWidget(kid) && !HasOwnFieldName(kid)) {
+                    int? kidObjectNumber = TryGetObjectNumber(kidObject, kid);
+                    if (TryReadFormWidget(kid, fullName, kidObjectNumber, widgetPageNumbers, actionBudget, out PdfFormWidget? kidWidget) && kidWidget is not null) {
+                        widgets.Add(kidWidget);
+                    }
+
+                    continue;
+                }
+
+                fieldKids.Add(kidObject);
+            }
+        }
+
+        bool hasTerminalShape = isWidget || fieldKids.Count == 0;
+        if (hasTerminalShape && (fullName != null || hasReadableFieldState || defaultValues.Count > 0 || alternateName != null || mappingName != null || maxLength.HasValue || defaultAppearance != null || quadding.HasValue || options.Count > 0)) {
+            if (result.Count >= _options.Limits.MaxFormFields) {
+                throw PdfReadLimitException.Create(PdfReadLimitKind.FormFields, _options.Limits.MaxFormFields, result.Count + 1L);
+            }
+
+            result.Add(new PdfFormField(
+                objectNumber: objectNumber,
+                name: fullName,
+                partialName: partialName,
+                fieldType: fieldType,
+                value: value,
+                alternateName: alternateName,
+                mappingName: mappingName,
+                flags: flags,
+                maxLength: maxLength,
+                values: values.Count == 0 ? null : values,
+                defaultValue: defaultValue,
+                defaultValues: defaultValues.Count == 0 ? null : defaultValues,
+                defaultAppearance: defaultAppearance,
+                quadding: quadding,
+                options: options.Count == 0 ? null : options,
+                selectedIndices: selectedIndices.Count == 0 ? null : selectedIndices,
+                widgets: widgets.Count == 0 ? null : widgets.AsReadOnly(),
+                valueOwnerKey: valueOwnerKey,
+                defaultValueOwnerKey: defaultValueOwnerKey,
+                hasValueEntry: hasValueEntry,
+                hasDefaultValueEntry: hasDefaultValueEntry,
+                richValue: richValue,
+                richValuePlainText: richValuePlainText,
+                richValueOwnerKey: richValueOwnerKey,
+                hasRichValueEntry: hasRichValueEntry));
+        }
+
+        if (fieldKids.Count == 0) {
+            return;
+        }
+
+        var childInherited = new PdfFormFieldInheritedState(fieldType, value, values, valueOwnerKey, hasValueEntry, defaultValue, defaultValues, defaultValueOwnerKey, hasDefaultValueEntry, flags, maxLength, defaultAppearance, quadding, options, selectedIndices, richValue, richValuePlainText, richValueOwnerKey, hasRichValueEntry);
+        for (int i = 0; i < fieldKids.Count; i++) {
+            ReadFormField(fieldKids[i], fullName, childInherited, result, visited, widgetPageNumbers, actionBudget, ref nextDirectValueOwnerKey, depth + 1);
+        }
+    }
+
+    private sealed class PdfFormFieldInheritedState {
+        internal static readonly PdfFormFieldInheritedState Empty = new PdfFormFieldInheritedState(null, null, Array.Empty<string>(), null, false, null, Array.Empty<string>(), null, false, null, null, null, null, Array.Empty<PdfFormFieldOption>(), Array.Empty<int>());
+
+        internal static PdfFormFieldInheritedState FromAcroForm(string? defaultAppearance, int? quadding) {
+            return string.IsNullOrEmpty(defaultAppearance) && !quadding.HasValue
+                ? Empty
+                : new PdfFormFieldInheritedState(null, null, Array.Empty<string>(), null, false, null, Array.Empty<string>(), null, false, null, null, defaultAppearance, quadding, Array.Empty<PdfFormFieldOption>(), Array.Empty<int>());
+        }
+
+        internal PdfFormFieldInheritedState(string? fieldType, string? value, IReadOnlyList<string> values, int? valueOwnerKey, bool hasValueEntry, string? defaultValue, IReadOnlyList<string> defaultValues, int? defaultValueOwnerKey, bool hasDefaultValueEntry, int? flags, int? maxLength, string? defaultAppearance, int? quadding, IReadOnlyList<PdfFormFieldOption> options, IReadOnlyList<int> selectedIndices, string? richValue = null, string? richValuePlainText = null, int? richValueOwnerKey = null, bool hasRichValueEntry = false) {
+            FieldType = fieldType;
+            Value = value;
+            Values = values;
+            ValueOwnerKey = valueOwnerKey;
+            HasValueEntry = hasValueEntry;
+            DefaultValue = defaultValue;
+            DefaultValues = defaultValues;
+            DefaultValueOwnerKey = defaultValueOwnerKey;
+            HasDefaultValueEntry = hasDefaultValueEntry;
+            Flags = flags;
+            MaxLength = maxLength;
+            DefaultAppearance = defaultAppearance;
+            Quadding = quadding;
+            Options = options;
+            SelectedIndices = selectedIndices;
+            RichValue = richValue;
+            RichValuePlainText = richValuePlainText;
+            RichValueOwnerKey = richValueOwnerKey;
+            HasRichValueEntry = hasRichValueEntry;
+        }
+
+        internal string? FieldType { get; }
+
+        internal string? Value { get; }
+
+        internal IReadOnlyList<string> Values { get; }
+
+        internal int? ValueOwnerKey { get; }
+
+        internal bool HasValueEntry { get; }
+
+        internal string? DefaultValue { get; }
+
+        internal IReadOnlyList<string> DefaultValues { get; }
+
+        internal int? DefaultValueOwnerKey { get; }
+
+        internal bool HasDefaultValueEntry { get; }
+
+        internal int? Flags { get; }
+
+        internal int? MaxLength { get; }
+
+        internal string? DefaultAppearance { get; }
+
+        internal int? Quadding { get; }
+
+        internal IReadOnlyList<PdfFormFieldOption> Options { get; }
+
+        internal IReadOnlyList<int> SelectedIndices { get; }
+
+        internal string? RichValue { get; }
+
+        internal string? RichValuePlainText { get; }
+
+        internal int? RichValueOwnerKey { get; }
+
+        internal bool HasRichValueEntry { get; }
+    }
+
+    private int? TryGetObjectNumber(PdfObject sourceObject, PdfDictionary resolvedDictionary) {
+        if (sourceObject is PdfReference reference) {
+            return reference.ObjectNumber;
+        }
+
+        int foundObjectNumber = FindExactObjectNumberFor(resolvedDictionary);
+        return foundObjectNumber > 0 ? foundObjectNumber : null;
+    }
+
+    private bool TryReadFormWidget(PdfDictionary dictionary, string? fieldName, int? objectNumber, IReadOnlyDictionary<int, int> widgetPageNumbers, PdfFormWidgetActionReadBudget actionBudget, out PdfFormWidget? widget) {
+        widget = null;
+        if (!IsWidget(dictionary)) {
+            return false;
+        }
+
+        IReadOnlyList<PdfFormWidgetAction> actions = ReadWidgetActions(dictionary, actionBudget);
+        if (!TryReadRectangle(dictionary.Items.TryGetValue("Rect", out var rectObject) ? rectObject : null, out var rect)) {
+            return false;
+        }
+
+        int? pageNumber = null;
+        if (objectNumber.HasValue && widgetPageNumbers.TryGetValue(objectNumber.Value, out int foundPageNumber)) {
+            pageNumber = foundPageNumber;
+        }
+
+        widget = new PdfFormWidget(
+            objectNumber,
+            fieldName,
+            pageNumber,
+            rect.X1,
+            rect.Y1,
+            rect.X2,
+            rect.Y2,
+            TryReadName(dictionary, "AS"),
+            TryReadInteger(dictionary, "F"),
+            ReadWidgetNormalAppearanceStates(dictionary),
+            actions);
+        return true;
+    }
+
+    private IReadOnlyList<PdfFormWidgetAction> ReadWidgetActions(PdfDictionary widget, PdfFormWidgetActionReadBudget budget) {
+        var actions = new List<PdfFormWidgetAction>();
+        if (widget.Items.TryGetValue("A", out PdfObject? primaryAction)) {
+            AddWidgetAction("A", primaryAction, actions, budget, new HashSet<int>(), depth: 0);
+        }
+
+        if (widget.Items.TryGetValue("AA", out PdfObject? additionalActionsObject) &&
+            ResolveObject(additionalActionsObject) is PdfDictionary additionalActions) {
+            foreach (KeyValuePair<string, PdfObject> item in additionalActions.Items) {
+                if (!string.IsNullOrEmpty(item.Key)) {
+                    AddWidgetAction(item.Key, item.Value, actions, budget, new HashSet<int>(), depth: 0);
+                }
+            }
+        }
+
+        return actions.Count == 0 ? Array.Empty<PdfFormWidgetAction>() : actions.AsReadOnly();
+    }
+
+    private void AddWidgetAction(string triggerName, PdfObject actionObject, List<PdfFormWidgetAction> actions, PdfFormWidgetActionReadBudget budget, HashSet<int> visitedReferences, int depth) {
+        if (depth > _options.Limits.MaxObjectNestingDepth) {
+            throw PdfReadLimitException.Create(PdfReadLimitKind.ObjectNestingDepth, _options.Limits.MaxObjectNestingDepth, depth);
+        }
+
+        HashSet<int> pathReferences = visitedReferences;
+        if (actionObject is PdfReference reference) {
+            if (!visitedReferences.Add(reference.ObjectNumber)) return;
+            pathReferences = new HashSet<int>(visitedReferences);
+        }
+
+        if (ResolveObject(actionObject) is not PdfDictionary action ||
+            TryReadName(action, "S") is not string actionType ||
+            string.IsNullOrEmpty(actionType)) {
+            return;
+        }
+
+        budget.ActionCount++;
+        if (budget.ActionCount > _options.Limits.MaxWidgetActions) {
+            throw PdfReadLimitException.Create(PdfReadLimitKind.WidgetActions, _options.Limits.MaxWidgetActions, budget.ActionCount);
+        }
+
+        string? javaScript = null;
+        long sourceBytes = 0L;
+        if (string.Equals(actionType, "JavaScript", StringComparison.Ordinal)) {
+            budget.Count++;
+            if (budget.Count > _options.Limits.MaxJavaScripts) {
+                throw PdfReadLimitException.Create(PdfReadLimitKind.JavaScripts, _options.Limits.MaxJavaScripts, budget.Count);
+            }
+
+            bool hasReadableSource = TryReadWidgetJavaScript(action, out javaScript, out sourceBytes);
+            budget.TotalBytes = checked(budget.TotalBytes + sourceBytes);
+            if (budget.TotalBytes > _options.Limits.MaxTotalJavaScriptBytes) {
+                throw PdfReadLimitException.Create(PdfReadLimitKind.JavaScriptBytes, _options.Limits.MaxTotalJavaScriptBytes, budget.TotalBytes);
+            }
+            if (!hasReadableSource) javaScript = null;
+        }
+
+        string? uri = string.Equals(actionType, "URI", StringComparison.Ordinal)
+            ? TryReadText(action, "URI")
+            : null;
+        actions.Add(new PdfFormWidgetAction(
+            triggerName,
+            actionType,
+            javaScript,
+            uri,
+            PdfActionPayloadFingerprint.Create(action, _objects, _options.Limits),
+            string.Equals(actionType, "JavaScript", StringComparison.Ordinal) ? sourceBytes : 0L));
+        if (action.Items.TryGetValue("Next", out PdfObject? nextAction)) {
+            AddWidgetNextActions(triggerName + ".Next", nextAction, actions, budget, pathReferences, depth + 1);
+        }
+    }
+
+    private void AddWidgetNextActions(string actionPath, PdfObject actionObject, List<PdfFormWidgetAction> actions, PdfFormWidgetActionReadBudget budget, HashSet<int> visitedReferences, int depth) {
+        if (depth > _options.Limits.MaxObjectNestingDepth) {
+            throw PdfReadLimitException.Create(PdfReadLimitKind.ObjectNestingDepth, _options.Limits.MaxObjectNestingDepth, depth);
+        }
+
+        HashSet<int> pathReferences = visitedReferences;
+        if (actionObject is PdfReference reference) {
+            if (!visitedReferences.Add(reference.ObjectNumber)) return;
+            pathReferences = new HashSet<int>(visitedReferences);
+        }
+
+        PdfObject? resolved = ResolveObject(actionObject);
+        if (resolved is PdfArray actionArray) {
+            for (int index = 0; index < actionArray.Items.Count; index++) {
+                AddWidgetAction(
+                    actionPath + "." + index.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    actionArray.Items[index],
+                    actions,
+                    budget,
+                    new HashSet<int>(pathReferences),
+                    depth + 1);
+            }
+        } else if (resolved is PdfDictionary) {
+            // The /Next reference is already present in this path's cycle guard. Pass the
+            // resolved dictionary so AddWidgetAction does not reject the same reference twice.
+            AddWidgetAction(actionPath, resolved, actions, budget, pathReferences, depth);
+        }
+    }
+
+    private bool TryReadWidgetJavaScript(PdfDictionary action, out string? javaScript, out long sourceBytes) {
+        if (!action.Items.TryGetValue("JS", out PdfObject? sourceObject)) {
+            javaScript = null;
+            sourceBytes = 0L;
+            return false;
+        }
+
+        int maximumBytes = Math.Min(_options.Limits.MaxJavaScriptBytes, _options.Limits.MaxDecodedStreamBytes);
+        PdfObject? source = ResolveObject(sourceObject);
+        if (source is PdfStringObj text) {
+            if (text.RawBytes.Length > maximumBytes) {
+                throw PdfReadLimitException.Create(PdfReadLimitKind.DecodedStreamBytes, maximumBytes, text.RawBytes.Length);
+            }
+
+            sourceBytes = text.RawBytes.LongLength;
+            return PdfJavaScriptStringEncoding.TryDecode(text.RawBytes, out javaScript!);
+        }
+
+        if (source is PdfStream stream) {
+            try {
+                byte[] decoded = _decodedStreamBudget.DecodeRequired(stream, _objects, maximumBytes);
+                sourceBytes = decoded.LongLength;
+                return PdfJavaScriptStringEncoding.TryDecode(decoded, out javaScript!);
+            } catch (PdfReadLimitException) {
+                throw;
+            } catch (InvalidDataException) {
+                javaScript = null;
+                sourceBytes = 0L;
+                return false;
+            }
+        }
+
+        javaScript = null;
+        sourceBytes = 0L;
+        return false;
+    }
+
+    private sealed class PdfFormWidgetActionReadBudget {
+        internal int ActionCount { get; set; }
+        internal int Count { get; set; }
+        internal long TotalBytes { get; set; }
+    }
+
+    private IReadOnlyList<string> ReadWidgetNormalAppearanceStates(PdfDictionary dictionary) {
+        if (!dictionary.Items.TryGetValue("AP", out var appearancesObject) ||
+            ResolveObject(appearancesObject) is not PdfDictionary appearances ||
+            !appearances.Items.TryGetValue("N", out var normalObject) ||
+            ResolveObject(normalObject) is not PdfDictionary normalAppearances ||
+            normalAppearances.Items.Count == 0) {
+            return Array.Empty<string>();
+        }
+
+        if (normalAppearances.Items.Count > _options.Limits.MaxFormFieldAppearanceStates) {
+            throw PdfReadLimitException.Create(
+                PdfReadLimitKind.FormAppearanceStates,
+                _options.Limits.MaxFormFieldAppearanceStates,
+                normalAppearances.Items.Count);
+        }
+
+        var states = new List<string>();
+        foreach (string state in normalAppearances.Items.Keys) {
+            if (!string.IsNullOrEmpty(state)) {
+                states.Add(state);
+            }
+        }
+
+        if (states.Count == 0) {
+            return Array.Empty<string>();
+        }
+
+        states.Sort(StringComparer.Ordinal);
+        return states.AsReadOnly();
+    }
+
+    private static bool IsWidget(PdfDictionary dictionary) {
+        return dictionary.Items.TryGetValue("Subtype", out var subtype) &&
+            subtype is PdfName name &&
+            string.Equals(name.Name, "Widget", StringComparison.Ordinal);
+    }
+
+    private bool HasOwnFieldName(PdfDictionary dictionary) {
+        return TryReadText(dictionary, "T") is not null;
+    }
+
+    private bool TryReadRectangle(PdfObject? obj, out (double X1, double Y1, double X2, double Y2) rect) {
+        rect = default;
+        var array = ResolveArray(obj);
+        if (array is null || array.Items.Count < 4) {
+            return false;
+        }
+
+        if (ResolveObject(array.Items[0]) is not PdfNumber x1 ||
+            ResolveObject(array.Items[1]) is not PdfNumber y1 ||
+            ResolveObject(array.Items[2]) is not PdfNumber x2 ||
+            ResolveObject(array.Items[3]) is not PdfNumber y2) {
+            return false;
+        }
+
+        double left = Math.Min(x1.Value, x2.Value);
+        double right = Math.Max(x1.Value, x2.Value);
+        double bottom = Math.Min(y1.Value, y2.Value);
+        double top = Math.Max(y1.Value, y2.Value);
+        if (double.IsNaN(left) || double.IsInfinity(left) ||
+            double.IsNaN(right) || double.IsInfinity(right) ||
+            double.IsNaN(bottom) || double.IsInfinity(bottom) ||
+            double.IsNaN(top) || double.IsInfinity(top) ||
+            right <= left ||
+            top <= bottom) {
+            return false;
+        }
+
+        rect = (left, bottom, right, top);
+        return true;
+    }
+}

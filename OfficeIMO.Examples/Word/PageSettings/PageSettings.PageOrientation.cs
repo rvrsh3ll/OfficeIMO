@@ -6,6 +6,8 @@ using System.Threading.Tasks;
 using DocumentFormat.OpenXml.Wordprocessing;
 using OfficeIMO.Word;
 
+namespace OfficeIMO.Examples.Word;
+
 internal static partial class PageSettings {
 
     internal static void Example_PageOrientation(string folderPath, bool openWord) {
@@ -14,17 +16,18 @@ internal static partial class PageSettings {
         using (WordDocument document = WordDocument.Create(filePath)) {
             Console.WriteLine("+ Page Orientation (starting): " + document.PageOrientation);
 
-            document.Sections[0].PageOrientation = PageOrientationValues.Landscape;
+            document.Sections[0].PageOrientation = OfficePageOrientation.Landscape;
 
             Console.WriteLine("+ Page Orientation (middle): " + document.PageOrientation);
 
-            document.PageOrientation = PageOrientationValues.Portrait;
+            document.PageOrientation = OfficePageOrientation.Portrait;
 
             Console.WriteLine("+ Page Orientation (ending): " + document.PageOrientation);
 
             document.AddParagraph("Test");
 
-            document.Save(openWord);
+            document.Save();
+            if (openWord) document.OpenInApplication();
         }
     }
 

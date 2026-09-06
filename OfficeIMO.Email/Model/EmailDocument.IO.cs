@@ -1,0 +1,293 @@
+using OfficeIMO.Core.Internal;
+namespace OfficeIMO.Email;
+
+public sealed partial class EmailDocument {
+    /// <summary>
+    /// Loads one EML, MSG, OFT, or TNEF artifact with the default bounded policy.
+    /// Use <see cref="EmailDocumentReader"/> when the caller also needs structured diagnostics.
+    /// </summary>
+    public static EmailDocument Load(string filePath, EmailReaderOptions? options = null,
+        CancellationToken cancellationToken = default) =>
+        GetDocumentOrThrow(new EmailDocumentReader(options ?? EmailReaderOptions.Default)
+            .Read(filePath, cancellationToken));
+
+    /// <summary>
+    /// Loads one EML, MSG, or TNEF artifact from memory. Use a source-name reader overload when bytes represent OFT.
+    /// Use <see cref="EmailDocumentReader"/> when the caller also needs structured diagnostics.
+    /// </summary>
+    public static EmailDocument Load(byte[] data, EmailReaderOptions? options = null,
+        CancellationToken cancellationToken = default) =>
+        GetDocumentOrThrow(new EmailDocumentReader(options ?? EmailReaderOptions.Default)
+            .Read(data, cancellationToken));
+
+    /// <summary>
+    /// Loads one EML, MSG, or TNEF artifact without closing the stream. Seekable streams are read from the beginning
+    /// and restored to their original position; non-seekable streams are read forward from their current position.
+    /// Use <see cref="EmailDocumentReader"/> when the caller also needs structured diagnostics.
+    /// </summary>
+    public static EmailDocument Load(Stream stream, EmailReaderOptions? options = null,
+        CancellationToken cancellationToken = default) =>
+        GetDocumentOrThrow(new EmailDocumentReader(options ?? EmailReaderOptions.Default)
+            .Read(stream, cancellationToken));
+
+    /// <summary>Asynchronously loads one EML, MSG, or TNEF artifact with the default bounded policy.</summary>
+    public static async Task<EmailDocument> LoadAsync(string filePath, EmailReaderOptions? options = null,
+        CancellationToken cancellationToken = default) {
+        EmailReadResult result = await new EmailDocumentReader(options ?? EmailReaderOptions.Default)
+            .ReadAsync(filePath, cancellationToken).ConfigureAwait(false);
+        return GetDocumentOrThrow(result);
+    }
+
+    /// <summary>
+    /// Asynchronously loads an artifact without closing the stream. Seekable streams are read from the beginning
+    /// and restored to their original position; non-seekable streams are read forward.
+    /// </summary>
+    public static async Task<EmailDocument> LoadAsync(Stream stream, EmailReaderOptions? options = null,
+        CancellationToken cancellationToken = default) {
+        EmailReadResult result = await new EmailDocumentReader(options ?? EmailReaderOptions.Default)
+            .ReadAsync(stream, cancellationToken).ConfigureAwait(false);
+        return GetDocumentOrThrow(result);
+    }
+
+    /// <summary>Saves the document as EML, MSG, OFT, or TNEF, inferred from the destination filename.</summary>
+    public EmailWriteResult Save(string filePath, EmailWriterOptions? options = null) =>
+        Save(filePath, InferOutputFormat(filePath), options);
+
+    /// <summary>
+    /// Saves the document as EML, MSG, OFT, or TNEF, inferred from the destination filename,
+    /// using a strict atomic destination conflict policy.
+    /// </summary>
+    public EmailWriteResult SaveWithConflictPolicy(string filePath, EmailFileConflictPolicy conflictPolicy,
+        EmailWriterOptions? options = null) =>
+        SaveWithConflictPolicy(filePath, InferOutputFormat(filePath), conflictPolicy, options);
+
+    /// <summary>Saves the document in the explicitly selected artifact format.</summary>
+    public EmailWriteResult Save(string filePath, EmailFileFormat format, EmailWriterOptions? options = null) {
+        if (filePath == null) throw new ArgumentNullException(nameof(filePath));
+        return SaveToPath(filePath, format, OfficeFileCommit.ConflictPolicy.Replace, options,
+            requireAtomicCommit: false);
+    }
+
+    /// <summary>
+    /// Saves the document in the explicitly selected artifact format using a strict atomic destination conflict policy.
+    /// </summary>
+    public EmailWriteResult SaveWithConflictPolicy(string filePath, EmailFileFormat format,
+        EmailFileConflictPolicy conflictPolicy, EmailWriterOptions? options = null) {
+        if (filePath == null) throw new ArgumentNullException(nameof(filePath));
+        OfficeFileCommit.ConflictPolicy commitPolicy = GetCommitConflictPolicy(conflictPolicy);
+        return SaveToPath(filePath, format, commitPolicy, options, requireAtomicCommit: true);
+    }
+
+    private EmailWriteResult SaveToPath(string filePath, EmailFileFormat format,
+        OfficeFileCommit.ConflictPolicy commitPolicy, EmailWriterOptions? options,
+        bool requireAtomicCommit) {
+        EmailDocumentWriter writer = new EmailDocumentWriter(options ?? EmailWriterOptions.Default);
+        string stagingPath = string.Empty;
+        try {
+            EmailWriteResult result;
+            using (FileStream staging = OfficeFileCommit.CreateTemporaryFile(
+                       filePath, FileOptions.SequentialScan, out stagingPath)) {
+                result = writer.Write(this, staging, format);
+                EnsureWriteSucceeded(result);
+            }
+            if (requireAtomicCommit) {
+                OfficeFileCommit.CommitTemporaryFileAtomically(stagingPath, filePath, commitPolicy);
+            } else {
+                OfficeFileCommit.CommitTemporaryFile(stagingPath, filePath, commitPolicy);
+            }
+            stagingPath = string.Empty;
+            return result;
+        } finally {
+            DeleteStagedFile(stagingPath);
+        }
+    }
+
+    /// <summary>Saves the document to a stream without closing it.</summary>
+    public EmailWriteResult Save(Stream stream, EmailFileFormat format = EmailFileFormat.Eml,
+        EmailWriterOptions? options = null) {
+        if (stream == null) throw new ArgumentNullException(nameof(stream));
+        if (!stream.CanWrite) throw new ArgumentException("The stream must be writable.", nameof(stream));
+        EmailDocumentWriter writer = new EmailDocumentWriter(options ?? EmailWriterOptions.Default);
+        using FileStream staging = OfficeTemporaryFile.Create(
+            "officeimo-email-write-", ".tmp", FileOptions.SequentialScan, out _);
+        EmailWriteResult result = writer.Write(this, staging, format);
+        EnsureWriteSucceeded(result);
+        OfficeStreamWriter.Write(stream, output => CopyStagedOutput(staging, output));
+        return result;
+    }
+
+    /// <summary>Asynchronously saves the document, inferring the format from the destination filename.</summary>
+    public Task<EmailWriteResult> SaveAsync(string filePath, EmailWriterOptions? options = null,
+        CancellationToken cancellationToken = default) =>
+        SaveAsync(filePath, InferOutputFormat(filePath), options, cancellationToken);
+
+    /// <summary>
+    /// Asynchronously saves the document, inferring the format from the destination filename and using the requested
+    /// strict atomic destination conflict policy.
+    /// </summary>
+    public Task<EmailWriteResult> SaveWithConflictPolicyAsync(string filePath,
+        EmailFileConflictPolicy conflictPolicy, EmailWriterOptions? options = null,
+        CancellationToken cancellationToken = default) =>
+        SaveWithConflictPolicyAsync(filePath, InferOutputFormat(filePath), conflictPolicy, options,
+            cancellationToken);
+
+    /// <summary>Asynchronously saves the document in the explicitly selected artifact format.</summary>
+    public async Task<EmailWriteResult> SaveAsync(string filePath, EmailFileFormat format,
+        EmailWriterOptions? options = null, CancellationToken cancellationToken = default) {
+        if (filePath == null) throw new ArgumentNullException(nameof(filePath));
+        return await SaveToPathAsync(filePath, format, OfficeFileCommit.ConflictPolicy.Replace, options,
+            requireAtomicCommit: false, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Asynchronously saves the document in the explicitly selected artifact format using the requested destination
+    /// conflict policy.
+    /// </summary>
+    public async Task<EmailWriteResult> SaveWithConflictPolicyAsync(string filePath, EmailFileFormat format,
+        EmailFileConflictPolicy conflictPolicy, EmailWriterOptions? options = null,
+        CancellationToken cancellationToken = default) {
+        if (filePath == null) throw new ArgumentNullException(nameof(filePath));
+        OfficeFileCommit.ConflictPolicy commitPolicy = GetCommitConflictPolicy(conflictPolicy);
+        return await SaveToPathAsync(filePath, format, commitPolicy, options,
+            requireAtomicCommit: true, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<EmailWriteResult> SaveToPathAsync(string filePath, EmailFileFormat format,
+        OfficeFileCommit.ConflictPolicy commitPolicy, EmailWriterOptions? options,
+        bool requireAtomicCommit, CancellationToken cancellationToken) {
+        cancellationToken.ThrowIfCancellationRequested();
+        EmailDocumentWriter writer = new EmailDocumentWriter(options ?? EmailWriterOptions.Default);
+        string stagingPath = string.Empty;
+        try {
+            EmailWriteResult result;
+            using (FileStream staging = OfficeFileCommit.CreateTemporaryFile(
+                       filePath, FileOptions.Asynchronous | FileOptions.SequentialScan, out stagingPath)) {
+                result = await writer.WriteAsync(this, staging, format, cancellationToken)
+                    .ConfigureAwait(false);
+                EnsureWriteSucceeded(result);
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            if (requireAtomicCommit) {
+                OfficeFileCommit.CommitTemporaryFileAtomically(stagingPath, filePath, commitPolicy);
+            } else {
+                OfficeFileCommit.CommitTemporaryFile(stagingPath, filePath, commitPolicy);
+            }
+            stagingPath = string.Empty;
+            return result;
+        } finally {
+            DeleteStagedFile(stagingPath);
+        }
+    }
+
+    /// <summary>Asynchronously saves the document to a stream without closing it.</summary>
+    public async Task<EmailWriteResult> SaveAsync(Stream stream, EmailFileFormat format = EmailFileFormat.Eml,
+        EmailWriterOptions? options = null, CancellationToken cancellationToken = default) {
+        if (stream == null) throw new ArgumentNullException(nameof(stream));
+        if (!stream.CanWrite) throw new ArgumentException("The stream must be writable.", nameof(stream));
+        cancellationToken.ThrowIfCancellationRequested();
+        EmailDocumentWriter writer = new EmailDocumentWriter(options ?? EmailWriterOptions.Default);
+        using FileStream staging = OfficeTemporaryFile.Create(
+            "officeimo-email-write-", ".tmp",
+            FileOptions.Asynchronous | FileOptions.SequentialScan, out _);
+        EmailWriteResult result = await writer.WriteAsync(this, staging, format, cancellationToken)
+            .ConfigureAwait(false);
+        EnsureWriteSucceeded(result);
+        await OfficeStreamWriter.WriteAsync(stream,
+            (output, token) => CopyStagedOutputAsync(staging, output, token), cancellationToken)
+            .ConfigureAwait(false);
+        return result;
+    }
+
+    /// <summary>Serializes the document to memory.</summary>
+    public byte[] ToBytes(EmailFileFormat format = EmailFileFormat.Eml, EmailWriterOptions? options = null) {
+        EmailDocumentWriter writer = new EmailDocumentWriter(options ?? EmailWriterOptions.Default);
+        byte[] data = writer.ToBytes(this, format, out EmailWriteResult result);
+        EnsureWriteSucceeded(result);
+        return data;
+    }
+
+    /// <summary>Serializes the document to a new writable memory stream positioned at the beginning.</summary>
+    public MemoryStream ToStream(EmailFileFormat format = EmailFileFormat.Eml, EmailWriterOptions? options = null) =>
+        new MemoryStream(ToBytes(format, options));
+
+    private static EmailDocument GetDocumentOrThrow(EmailReadResult result) {
+        if (!result.HasErrors) return result.Document;
+        throw CreateDiagnosticException("The email artifact could not be loaded", result.Diagnostics);
+    }
+
+    private static void EnsureWriteSucceeded(EmailWriteResult result) {
+        if (result.HasErrors) {
+            throw CreateDiagnosticException("The email artifact could not be saved", result.Diagnostics);
+        }
+    }
+
+    private static InvalidDataException CreateDiagnosticException(string message,
+        IReadOnlyList<EmailDiagnostic> diagnostics) {
+        foreach (EmailDiagnostic diagnostic in diagnostics) {
+            if (diagnostic.Severity == EmailDiagnosticSeverity.Error) {
+                return new InvalidDataException(string.Concat(message, ": ", diagnostic.Code, ": ", diagnostic.Message));
+            }
+        }
+        return new InvalidDataException(message + ".");
+    }
+
+    private static void DeleteStagedFile(string path) {
+        if (string.IsNullOrEmpty(path)) return;
+        try { File.Delete(path); }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
+    private static void CopyStagedOutput(Stream source, Stream destination) {
+        source.Position = 0;
+        var buffer = new byte[81920];
+        while (true) {
+            int read = source.Read(buffer, 0, buffer.Length);
+            if (read == 0) return;
+            destination.Write(buffer, 0, read);
+        }
+    }
+
+    private static OfficeFileCommit.ConflictPolicy GetCommitConflictPolicy(
+        EmailFileConflictPolicy conflictPolicy) {
+        switch (conflictPolicy) {
+            case EmailFileConflictPolicy.FailIfExists:
+                return OfficeFileCommit.ConflictPolicy.FailIfExists;
+            case EmailFileConflictPolicy.Replace:
+                return OfficeFileCommit.ConflictPolicy.Replace;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(conflictPolicy), conflictPolicy,
+                    "The email file conflict policy is not supported.");
+        }
+    }
+
+    private static async Task CopyStagedOutputAsync(Stream source, Stream destination,
+        CancellationToken cancellationToken) {
+        source.Position = 0;
+        var buffer = new byte[81920];
+        while (true) {
+            int read = await source.ReadAsync(buffer, 0, buffer.Length, cancellationToken)
+                .ConfigureAwait(false);
+            if (read == 0) return;
+            await destination.WriteAsync(buffer, 0, read, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static EmailFileFormat InferOutputFormat(string filePath) {
+        if (filePath == null) throw new ArgumentNullException(nameof(filePath));
+        string fileName = Path.GetFileName(filePath);
+        string extension = Path.GetExtension(fileName);
+        if (extension.Equals(".eml", StringComparison.OrdinalIgnoreCase) ||
+            extension.Equals(".mime", StringComparison.OrdinalIgnoreCase)) {
+            return EmailFileFormat.Eml;
+        }
+        if (extension.Equals(".msg", StringComparison.OrdinalIgnoreCase)) return EmailFileFormat.OutlookMsg;
+        if (extension.Equals(".oft", StringComparison.OrdinalIgnoreCase)) return EmailFileFormat.OutlookTemplate;
+        if (extension.Equals(".tnef", StringComparison.OrdinalIgnoreCase) ||
+            fileName.Equals("winmail.dat", StringComparison.OrdinalIgnoreCase)) {
+            return EmailFileFormat.Tnef;
+        }
+        throw new NotSupportedException(
+            "Cannot infer the email format from the destination filename. Use .eml, .msg, .oft, .tnef, or winmail.dat, or call Save with an explicit EmailFileFormat.");
+    }
+}

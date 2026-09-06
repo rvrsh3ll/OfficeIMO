@@ -6,6 +6,8 @@ using System.Threading.Tasks;
 using DocumentFormat.OpenXml.Wordprocessing;
 using OfficeIMO.Word;
 
+namespace OfficeIMO.Examples.Word;
+
 internal static partial class Paragraphs {
 
     internal static void Example_BasicParagraphStyles(string folderPath, bool openWord) {
@@ -15,11 +17,12 @@ internal static partial class Paragraphs {
             var listOfStyles = (WordParagraphStyles[])Enum.GetValues(typeof(WordParagraphStyles));
             foreach (var style in listOfStyles) {
                 var paragraph = document.AddParagraph(style.ToString());
-                paragraph.ParagraphAlignment = JustificationValues.Center;
+                paragraph.ParagraphAlignment = WordParagraphAlignment.Center;
                 paragraph.Style = style;
             }
 
-            document.Save(openWord);
+            document.Save();
+            if (openWord) document.OpenInApplication();
         }
     }
 

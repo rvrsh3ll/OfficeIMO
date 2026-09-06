@@ -1,0 +1,557 @@
+# OfficeIMO.Core - shared document, security, data, and drawing primitives
+
+[![nuget version](https://img.shields.io/nuget/v/OfficeIMO.Core)](https://www.nuget.org/packages/OfficeIMO.Core)
+[![nuget downloads](https://img.shields.io/nuget/dt/OfficeIMO.Core?label=nuget%20downloads)](https://www.nuget.org/packages/OfficeIMO.Core)
+
+`OfficeIMO.Core` is the zero-dependency shared foundation for OfficeIMO packages. It owns common document lifecycle and package-safety contracts, neutral tabular row mapping, color conversion, image metadata, font and text measurement, vector scenes, reusable ink and math models, chart snapshots, SVG, raster canvases, PNG/JPEG/TIFF/WebP encoding, and drawing-quality primitives. Format packages keep their file-format behavior while reusing these document-agnostic models and renderers.
+
+The assembly was previously named `OfficeIMO.Drawing`. Drawing became the original shared foundation because keeping these primitives together avoided a separate Core → Drawing → format dependency chain. As lifecycle, security, package, and data contracts accumulated, the package name stopped describing its actual responsibility. That same single zero-dependency foundation is now named `OfficeIMO.Core`; it was not split into another runtime dependency. Actual drawing APIs remain in `OfficeIMO.Drawing`, neutral data and flattening contracts use `OfficeIMO.Data`, security APIs remain in `OfficeIMO.Security`, and cross-document lifecycle, compatibility, capability, and conversion-report contracts use the root `OfficeIMO` namespace.
+
+## Install
+
+```powershell
+dotnet add package OfficeIMO.Core
+```
+
+## Quick start
+
+### Document lifecycle policy
+
+```csharp
+using OfficeIMO;
+
+var loadOptions = new DocumentLoadOptions {
+    AccessMode = DocumentAccessMode.ReadOnly,
+    PersistenceMode = DocumentPersistenceMode.Explicit
+};
+```
+
+Word, Excel, and PowerPoint expose format-specific options derived from these shared contracts.
+
+### Shared operation and conversion results
+
+OfficeIMO format packages keep their typed diagnostics while sharing a small result contract from
+`OfficeIMO.Core`:
+
+```csharp
+using OfficeIMO;
+
+IOfficeResult operation = result;
+if (!operation.Succeeded) {
+    // Inspect the concrete result for its typed failure details.
+}
+
+IOfficeResult<MyDocument> documentResult = result;
+MyDocument document = documentResult.RequireValue();
+
+IOfficeConversionResult<MyDocument, MyConversionReport> conversion = result;
+MyDocument losslessDocument = conversion.RequireNoLoss();
+```
+
+`IOfficeResult<T>` standardizes `Succeeded`, `Value`, and `RequireValue()`.
+`IOfficeConversionResult<TValue, TReport>` also exposes `Report`, `HasLoss`, and
+`RequireNoLoss()`. Concrete results continue to expose format-specific diagnostics, warnings,
+or exceptions; the shared interface does not reduce them to an untyped error string.
+
+### Portable AES for restricted hosts
+
+Browser WebAssembly and other hosts without synchronous platform AES can explicitly supply the dependency-free managed
+AES-CBC provider to a format API that accepts `IOfficeAesCryptographyProvider`. Desktop and server applications should
+normally keep using their native platform AES implementation.
+
+```csharp
+using OfficeIMO.Security;
+
+IOfficeAesCryptographyProvider aes = OfficeManagedAesCryptographyProvider.Default;
+```
+
+### Colors and vector intent
+
+```csharp
+using OfficeIMO.Drawing;
+
+OfficeColor accent = OfficeColor.Parse("#336699");
+OfficeColor printBlue = OfficeColorSpaceConverter.FromCmyk(1, 0.45, 0, 0.15);
+OfficeImageFit fit = OfficeImageFit.Contain;
+
+var badge = OfficeShape.RoundedRectangle(120, 32, 8);
+badge.FillColor = OfficeColor.WhiteSmoke;
+badge.StrokeColor = accent;
+badge.Shadow = new OfficeShadow(OfficeColor.Black, 0.18, 3, 4);
+```
+
+Use `OfficeIccColorProfile` when an application already has embedded ICC profile bytes and needs the
+same bounded, dependency-free conversion used by OfficeIMO renderers:
+
+```csharp
+using OfficeIMO.Drawing;
+
+byte[] profileBytes = File.ReadAllBytes("display.icc");
+if (OfficeIccColorProfile.TryCreate(profileBytes, out OfficeIccColorProfile? profile) &&
+    profile.TryConvert(new[] { 0.25D, 0.5D, 0.75D }, out OfficeColor converted)) {
+    Console.WriteLine(converted.ToHex());
+}
+
+if (profile?.HasOutputTransform == true &&
+    profile.TryConvertToDevice(OfficeColor.CornflowerBlue, OfficeIccRenderingIntent.RelativeColorimetric, out double[] deviceColor) &&
+    profile.TrySoftProof(OfficeColor.CornflowerBlue, OfficeIccRenderingIntent.RelativeColorimetric, out OfficeColor proofed)) {
+    Console.WriteLine($"Device channels: {string.Join(", ", deviceColor)}; proof: {proofed.ToHex()}");
+}
+```
+
+The managed contract accepts bounded RGB and Gray matrix/TRC input-device and display-device profiles
+plus RGB or CMYK LUT8 input transforms with a Lab profile connection space and RGB or CMYK LUT16
+input transforms with an XYZ or Lab profile connection space. For LUT and ICC v4 `mAB` profiles,
+conversion selects `A2B1` for relative or absolute colorimetric intent and `A2B2` for saturation intent,
+falling back to `A2B0` when the intent-specific transform is absent. It also accepts bounded ICC v4
+RGB and CMYK A2B `mAB` input transforms and B2A `mBA` output transforms using the
+specification-defined curve, variable-grid CLUT, matrix, and offset combinations. Output conversion is
+available through a valid `B2A0` transform or
+the synthesized inverse of a supported RGB matrix/TRC profile; optional intent-specific tags fall back
+to `B2A0` when that transform is present. `TryCreate` returns `false` for unsupported
+input profile classes and transform types, while malformed or unsupported optional output transforms
+leave `HasOutputTransform` false so the caller can choose an explicit color-management provider or
+fallback instead of receiving a silent approximation.
+
+### Image metadata and complete-content validation
+
+`OfficeRasterImageDecoder` preserves encoded color channels and applies supported image orientation.
+It does not automatically normalize embedded ICC profiles, PNG gamma, or chromaticities. Applications
+that require color-managed pixels must perform that conversion explicitly before using the decoded
+image. The profile APIs above provide bounded color conversion; metadata validation alone does not
+mean a raster image has been converted to sRGB.
+
+The SVG drawing reader supports a single rectangle, rounded rectangle, circle, ellipse, polygon, or
+path inside a `userSpaceOnUse` clip path, including transforms and even-odd filling. Compound clip
+unions, `objectBoundingBox` clips, and referenced or text clip geometry report unsupported features.
+Shape geometry crossing a nested SVG or symbol viewBox is retained until the viewport clip is applied.
+
+```csharp
+using OfficeIMO.Drawing;
+
+OfficeImageInfo info = OfficeImageReader.Identify("logo.png");
+Console.WriteLine($"{info.Width}x{info.Height} {info.MimeType}");
+
+// Use content verification when an extension must not identify invalid bytes.
+byte[] bytes = File.ReadAllBytes("upload.svg");
+bool verified = OfficeImageReader.TryIdentifyByContent(bytes, "upload.svg", out OfficeImageInfo upload);
+
+OfficeImageFit fit = OfficeImageFit.Contain;
+```
+
+`TryIdentify(...)` retains the metadata reader's extension fallback. `TryIdentifyByContent(...)`
+may use a file name to select the SVG parser, but succeeds only when the bytes match a supported format.
+
+Use `TryValidateContent(...)` at ingestion and export boundaries that must reject incomplete or
+corrupt image bodies. It applies the shared encoded-payload limit, validates the complete known
+container, decodes supported raster bodies, and validates every ICO entry. Both byte-array and
+stream overloads return the validated metadata; seekable streams are restored to their original
+position.
+
+```csharp
+using System.IO;
+using OfficeIMO.Drawing;
+
+byte[] upload = File.ReadAllBytes("upload.png");
+bool validBytes = OfficeImageReader.TryValidateContent(upload, "upload.png", out OfficeImageInfo byteInfo);
+
+using Stream input = File.OpenRead("upload.png");
+bool validStream = OfficeImageReader.TryValidateContent(input, "upload.png", out OfficeImageInfo streamInfo);
+```
+
+### Bounded SVG safety checks
+
+Use `IsWithinSafetyLimits(...)` before sending untrusted SVG to the ChartForgeX raster fallback. The predicate models the packaged ChartForgeX rasterizer's resource, reference, style, and work behavior; it is not a general safety approval for arbitrary SVG renderers:
+
+```csharp
+using OfficeIMO.Drawing;
+
+byte[] svg = File.ReadAllBytes("upload.svg");
+var limits = new OfficeSvgDrawingReaderOptions {
+    MaximumElements = 10_000,
+    MaximumViewportDimension = 8_192,
+    MaximumViewportPixels = 16 * 1024 * 1024
+};
+
+if (!OfficeSvgDrawingReader.IsWithinSafetyLimits(svg, limits)) {
+    throw new InvalidDataException("The SVG exceeds the accepted safety profile.");
+}
+```
+
+A `true` result means the payload is well-formed SVG and stays within the input, XML nesting, viewport, path-command, element, rendered-reference, rendered-payload, projected raster-paint, and filter-work ceilings enforced for the ChartForgeX fallback. It does not authorize network access or external resource loading by another renderer, and it does not mean every SVG feature can be projected into an `OfficeDrawing`. Apply renderer-specific resource and execution policies before using another SVG engine. `TryRead(...)` performs OfficeIMO's vector projection and reports unsupported features; use it when the drawing result is required.
+
+`MaximumElements`, `MaximumViewportDimension`, and `MaximumViewportPixels` can be lowered for an application policy or raised for trusted input up to their documented hard maxima. They do not relax the fixed 8 MiB input, nesting, path-command, transform, reference-depth, conservative stylesheet/reference, or 256-viewport raster-work checks. Raster work includes projected paint bounds and the estimated cost of blur, morphology, convolution, and turbulence filter parameters.
+### Inspect and remove provenance carriers
+
+`OfficeIMO.Provenance` inspects C2PA Content Credentials and IPTC Digital Source Type declarations without loading a cryptographic provider. The bounded parsers understand the format-native carriers used by JPEG, PNG, WebP, GIF, TIFF, SVG, ZIP-based document packages, and structured or variation-selector text.
+
+```csharp
+using OfficeIMO.Provenance;
+
+OfficeProvenanceReport report = OfficeProvenanceInspector.InspectFile("generated-image.png");
+Console.WriteLine($"C2PA: {report.HasC2paManifest}");
+Console.WriteLine($"Generative AI declaration: {report.HasGenerativeAiDeclaration}");
+
+OfficeProvenanceRemovalResult removal = OfficeProvenanceRemover.RemoveFile(
+    "generated-image.png",
+    "clean-image.png");
+
+foreach (OfficeProvenanceChange change in removal.Changes) {
+    Console.WriteLine($"{change.Carrier}: {change.Location}");
+}
+```
+
+Removal is selective. It removes structurally valid C2PA carriers and AI-specific `trainedAlgorithmicMedia` or `compositeWithTrainedAlgorithmicMedia` declarations while preserving unrelated metadata and non-AI source declarations. The generic Core API blocks signed ZIP packages because rewriting the package invalidates its signatures; callers that own the complete document save must handle signature invalidation separately.
+
+Structural inspection does not claim that a manifest is authentic or trusted. Install `OfficeIMO.Security` and use its optional C2PA verifier when content binding, signature mathematics, and certificate trust must be checked.
+
+For an evidence-oriented result, combine structural carriers, optional cryptographic verification, exact Unicode findings, and vendor-specific detectors without collapsing them into an unreliable universal AI verdict:
+
+```csharp
+OfficeProvenanceAssessmentReport assessment =
+    OfficeProvenanceAssessment.InspectFile("article.md");
+
+Console.WriteLine($"Verified credential: {assessment.HasVerifiedContentCredential}");
+foreach (OfficeProvenanceSignalResult signal in assessment.ProviderSignals) {
+    Console.WriteLine($"{signal.ProviderName}: {signal.Status}");
+}
+```
+
+`IOfficeProvenanceSignalDetector` is deliberately provider-specific. A detector reports its own durable-media watermark, statistical-text watermark, visible disclosure, or deterministic artifact and keeps `NotDetected`, `Inconclusive`, `ProviderUnavailable`, and `Error` distinct. OfficeIMO does not turn the absence of one vendor's signal into “human-authored.”
+
+Existing detector and verifier implementations remain valid. Providers that perform long-running work can additionally implement `ICancellableOfficeProvenanceSignalDetector` or `ICancellableOfficeProvenanceVerifier`; cancellation-aware assessment and workflow calls pass their token to those providers and fall back to the original contracts for compatibility.
+
+Use `OfficeTextIntegrityInspector` to report exact invisible and context-sensitive Unicode code points. It reports offsets, code points, and risk; it does not call those characters an AI watermark. Format content-safety reports also mirror these as selectable `NonPrintingUnicode` findings when the owning adapter can verify and rewrite the exact native text node. Cleanup has no blanket mode: callers pass only reviewed finding IDs, so legitimate joiners, variation selectors, and typographic spaces are not silently normalized.
+
+### Inspect concealed content before model ingestion
+
+`OfficeIMO.ContentSafety` is separate from provenance. It reports native hidden text, white-on-white or otherwise low-contrast text, tiny or zero-size text, off-canvas/clipped content, notes/comments/alternative text, and exact Unicode evidence through the format package that understands the file. Concealment can be legitimate accessibility, review, layout, or metadata content; it is not an AI watermark or an authorship verdict.
+
+```csharp
+using OfficeIMO.ContentSafety;
+using OfficeIMO.Word;
+
+OfficeContentSafetyReport report = WordDocument.InspectContentSafety("candidate.docx");
+foreach (OfficeContentSafetyFinding finding in report.Findings) {
+    Console.WriteLine($"{finding.Risk}: {finding.Kind} at {finding.Location}");
+}
+
+OfficeContentSafetyFinding[] reviewed = report.Findings
+    .Where(item => item.IsInstructionLike)
+    .ToArray();
+
+WordDocument.RemoveSelectedContent(
+    "candidate.docx",
+    "candidate.cleaned.docx",
+    new OfficeContentCleanupSelection(reviewed.Select(item => item.Id)));
+```
+
+Cleanup is always selection-based and stale-evidence checked. The adapter reopens and reinspects the rewritten artifact; it does not provide a blanket “remove anything unusual” switch. See the [content safety support matrix](../Docs/officeimo.content-safety-support-matrix.md) for exact format coverage and renderer boundaries.
+
+Transformations can make an existing Content Credential invalid. `OfficeProvenanceLifecycle.FinalizeFile` makes the disposition explicit:
+
+```csharp
+var disposition = new OfficeProvenanceTransformationOptions {
+    Policy = OfficeProvenanceTransformationPolicy.PreserveIfUnchanged
+};
+
+OfficeProvenanceTransformationResult audit = OfficeProvenanceLifecycle.FinalizeFile(
+    sourcePath: "source.png",
+    candidatePath: "resized.png",
+    outputPath: "final.png",
+    options: disposition);
+```
+
+The default blocks a changed credentialed source. Applications must explicitly select `RemoveInvalidated` for auditable carrier removal or `SignAsDerived` with an `IOfficeProvenanceSigner`, which records the source as the parent ingredient. Package-owned Word, Excel, PowerPoint, Visio, OpenDocument, EPUB, and PDF removal adapters remain the correct surfaces when package signatures also need safe disposition.
+
+The [provenance support matrix](../Docs/officeimo.provenance-support-matrix.md) records the exact carriers, strict-removal behavior, verification boundary, and known limits.
+
+### Encode common raster formats
+
+```csharp
+using OfficeIMO.Drawing;
+
+var image = new OfficeRasterImage(320, 180, OfficeColor.White);
+var options = new OfficeRasterEncodingOptions {
+    Jpeg = new OfficeJpegEncodeOptions { Quality = 90 },
+    Tiff = new OfficeTiffEncodeOptions {
+        Compression = OfficeTiffCompression.Lzw,
+        Predictor = OfficeTiffPredictor.Horizontal
+    }
+};
+
+byte[] jpeg = OfficeRasterImageEncoder.Encode(image, OfficeImageExportFormat.Jpeg, options);
+byte[] tiff = OfficeRasterImageEncoder.Encode(image, OfficeImageExportFormat.Tiff, options);
+byte[] webp = OfficeRasterImageEncoder.Encode(image, OfficeImageExportFormat.Webp, options);
+```
+
+The same encoder can write directly to a caller-owned stream when materializing another complete output array would be wasteful. On .NET 8 and later, the codecs also accept `IBufferWriter<byte>` without adding a package dependency to `OfficeIMO.Core`:
+
+```csharp
+using System.Buffers;
+
+using (Stream output = File.Create("photo.webp")) {
+    OfficeRasterImageEncoder.EncodeTo(image, OfficeImageExportFormat.Webp, output, options);
+}
+
+var writer = new ArrayBufferWriter<byte>();
+OfficeRasterImageEncoder.EncodeTo(image, OfficeImageExportFormat.Png, writer, options);
+ReadOnlyMemory<byte> png = writer.WrittenMemory;
+```
+
+The stream overload leaves the destination open. The byte-array WebP encoder deterministically chooses bounded prediction, subtract-green, LZ77, and Huffman coding when that is smaller than the literal lossless VP8L form; direct streaming keeps the low-copy literal form. TIFF output is a classic RGBA image with uncompressed, LZW, PackBits, or Deflate strips; LZW and Deflate use horizontal prediction by default. Use `OfficeTiffCodec.EncodePages(...)` when the output needs more than one page. JPEG uses the managed quality, subsampling, progressive, metadata, and transparency-flattening settings.
+
+### Inspect and select frames or pages
+
+`OfficeRasterContainerInspector` exposes one bounded inventory for static images, GIF and APNG frames, TIFF pages, and WebP frame metadata. The inventory includes canvas size, count, timing, offsets, disposal, blending, loop count, and the backwards-compatible default image. Decode accepts either bytes or a readable stream; a seekable stream is restored to its original position.
+
+```csharp
+using var input = File.OpenRead("pages.tiff");
+var decodeOptions = new OfficeRasterDecodeOptions {
+    FrameIndex = 1,
+    FrameLossPolicy = OfficeRasterFrameLossPolicy.UseSelectedFrame,
+    MaximumEncodedBytes = 32 * 1024 * 1024,
+    MaximumDecodedPixels = 20_000_000,
+    CancellationToken = cancellationToken
+};
+
+if (OfficeRasterImageDecoder.TryDecode(input, decodeOptions, out var page, out var decodeInfo)) {
+    Console.WriteLine($"Selected {decodeInfo.SelectedFrameIndex + 1} of {decodeInfo.FrameCount}");
+}
+```
+
+Set `FrameLossPolicy` to `RejectMultipleFrames` when a static result must not discard animation frames or document pages. Animated WebP pixel composition remains a caller-codec boundary, but its frame inventory is still available for a fail-closed decision.
+
+### Optimize encoded images for a placement
+
+`OfficeImageOptimizer` resizes and re-encodes a static raster image for the pixel bounds where it will be used:
+
+```csharp
+using OfficeIMO.Drawing;
+
+byte[] source = File.ReadAllBytes("photo.jpg");
+var request = new OfficeImageOptimizationRequest(1200, 800) {
+    OutputFormat = OfficeImageFormat.Jpeg,
+    JpegQuality = 82,
+    JpegSubsampling = OfficeJpegSubsampling.Y420,
+    JpegProgressive = true,
+    JpegOptimizeHuffman = true,
+    ResamplingMode = OfficeRasterResamplingMode.Lanczos3,
+    ResamplingColorSpace = OfficeRasterResamplingColorSpace.LinearLight,
+    MetadataPolicy = OfficeImageMetadataPolicy.SelectiveCopy,
+    MetadataSelection = OfficeImageMetadataKinds.Exif |
+                        OfficeImageMetadataKinds.Xmp |
+                        OfficeImageMetadataKinds.Icc |
+                        OfficeImageMetadataKinds.Orientation |
+                        OfficeImageMetadataKinds.Resolution
+};
+
+OfficeImageOptimizationResult result = OfficeImageOptimizer.Optimize(source, request, "photo.jpg");
+File.WriteAllBytes("photo.optimized.jpg", result.Bytes);
+Console.WriteLine($"{result.Status}: {result.BytesSaved} bytes saved");
+Console.WriteLine($"Metadata lost: {result.Metadata.Lost}");
+```
+
+The request preserves aspect ratio, avoids upscaling, keeps the original when re-encoding is not smaller, and retains source DPI by default. `ResamplingMode` defaults to premultiplied-alpha bilinear sampling; choose `Area` for coverage-correct downsampling or `Lanczos3` for a sharper high-quality filter. Filtering remains in encoded sRGB by default. Select `LinearLight` when the workload benefits from physically linear color averaging and accepts its additional cost. Set `OutputDpiX` and `OutputDpiY` to override density. Output can be PNG, JPEG, TIFF, or WebP; use `PngCompression`, the JPEG quality/subsampling/progressive/Huffman settings, or `TiffCompression` and `TiffPredictor` for the selected format.
+
+`MetadataPolicy` can preserve, strip, or selectively copy EXIF, XMP, ICC, orientation, comments, and resolution categories. A JPEG-to-JPEG rewrite preserves selected EXIF, standard single-packet XMP, and ICC bytes, applies embedded orientation to pixels, and neutralizes the copied orientation value. Adobe extended XMP is not copied during re-encoding; when selected XMP includes extension segments, the result reports XMP in `Lost`. The result reports `PolicyApplied`, `Preserved`, `Normalized`, `Stripped`, and `Lost`; unsupported or undecodable input returns the original bytes with `PolicyApplied = false`, and a required strip or selective-copy rewrite is never replaced by the metadata-bearing original merely because it is smaller. Metadata that has no safe output carrier is reported as loss rather than silently claimed as preserved; OfficeIMO does not currently perform ICC color conversion. Animated and multi-page input is rejected so optimization never silently drops frames or pages.
+
+`OfficeRasterExportPlanner` is the shared pre-allocation owner for image export. It combines the caller's `MaximumRasterPixels` with renderer and encoder dimension/pixel limits, then either reduces scale with `IMAGE_RASTER_SCALE_REDUCED` or throws `OfficeImageExportLimitException`, according to `RasterOverflowBehavior`. The returned plan also owns the effective encoding settings: `CreateEncodingOptions()` reduces encoded density with the raster scale so safety limits preserve the document's physical size. Explicit top-level `DpiX`/`DpiY` values apply across formats; when those values are not assigned, format-specific PNG, JPEG, and TIFF density remains authoritative. Drawing's managed PNG and APNG, JPEG, classic 8-bit grayscale/palette/RGB/RGBA/device-CMYK TIFF, uncompressed BMP, composited GIF, and ordinary lossless VP8L WebP paths enforce encoded-payload and decoded-pixel guards. TIFF accepts chunky or planar strips and tiles with uncompressed, LZW, PackBits, or Deflate payloads and horizontal prediction; arbitrary page selection and bounded multi-page writing use the same page contract. JPEG-in-TIFF, floating-point TIFF, BigTIFF, lossy or animated WebP pixel decoding, and uncommon encoders remain caller-codec boundaries. `OfficeRasterImageFallbackCodec` can wrap an application codec at the final raster boundary. It reports `IMAGE_SOURCE_DECODED_BY_CALLER_CODEC` when that codec succeeds; if neither Drawing nor the application can decode a source image, it returns a visible placeholder and `IMAGE_SOURCE_DECODE_FALLBACK` instead of allowing the renderer to omit the image silently.
+
+Every format package builds on the same fluent export contract. `FitWithin(width, height)`, `FitWithinWidth(...)`, and `FitWithinHeight(...)` cap both raster and SVG output without enlarging smaller content. `ConfigureOptions(...)` exposes the complete provider-specific option object when no dedicated fluent shortcut exists. Batch limits, cancellation, progress, and `WithRenderTimeout(...)` apply to the complete operation, including streaming saves. Each batch result reports its zero-based `SequenceIndex`; `SequenceCount` is populated when the total is known before streaming or after a fluent builder materializes the complete result list.
+
+For raster complex text, set `TextShapingProvider` and optionally `TextShapingLanguage` on any shared image-export options or use `WithTextShaping(...)` on a fluent builder. `OfficeManagedTextShapingProvider.Instance` is the dependency-light built-in provider for the proven core-Arabic/TrueType-outline subset. Drawing passes the selected TrueType font bytes, base direction, language, cancellation token, and Unicode source mapping to any provider, then caches the resolved run for measurement and painting. The built-in provider deliberately declines CFF fonts and scripts that require broader GSUB/GPOS behavior. If no provider accepts a complex run, the managed core-Arabic and bounded bidirectional fallback keeps common text visible and adds `IMAGE_TEXT_SHAPING_FALLBACK` as an approximation. Set `Policy.RequireNoLoss = true` when that fallback is not acceptable.
+
+### Deterministic text measurement
+
+```csharp
+using OfficeIMO.Drawing;
+
+var measurer = OfficeTextMeasurer.Create();
+var style = measurer.CreateStyle(new OfficeFontInfo("Aptos", 11, OfficeFontStyle.Regular));
+OfficeTextMetrics metrics = measurer.Measure("Quarterly report", style);
+
+if (metrics.WidthPixels > 240) {
+    Console.WriteLine("The label needs wrapping or a smaller font.");
+}
+```
+
+### Reusable ink
+
+```csharp
+using OfficeIMO.Drawing;
+
+var stroke = new OfficeInkStroke {
+    Color = OfficeColor.Crimson,
+    Width = 2.2,
+    Height = 2.2,
+    Bias = OfficeInkBias.Handwriting,
+    RecognizedText = "hello"
+};
+stroke.AddPoint(8, 30, 0.35)
+      .AddPoint(60, 12, 1.0)
+      .AddPoint(120, 36, 0.55);
+
+var ink = new OfficeInkDocument().Add(stroke);
+OfficeDrawing inkDrawing = OfficeInkRenderer.Render(ink, width: 140, height: 60);
+```
+
+The model keeps sampled geometry, normalized pressure, pen dimensions and tip shape, transforms, handwriting/drawing bias, language, and recognition alternatives. A format adapter decides how those values map to native storage.
+
+### Structured math
+
+```csharp
+using OfficeIMO.Drawing;
+
+OfficeMathExpression expression = OfficeMath.Fraction(
+    OfficeMath.Row(
+        OfficeMath.Identifier("x"),
+        OfficeMath.Operator("+"),
+        OfficeMath.Number("1")),
+    OfficeMath.Radical(OfficeMath.Identifier("y")));
+
+string mathMl = OfficeMathMarkup.ToMathMl(expression);
+string latex = OfficeMathMarkup.ToLatex(expression);
+OfficeDrawing mathDrawing = OfficeMathRenderer.Render(expression);
+```
+
+The same immutable expression tree feeds native OneNote math and Word OMML adapters. The shared model includes right and left scripts, centered upper/lower limits, built-up and slashed fractions, delimiter lists, stacks, matrices, equation arrays, n-ary operators, accents, bars, boxes, and phantoms. OneNote maps all of those structures natively. Word maps the lossless OMML subset; `Stack` and `StretchStack` fail with `NotSupportedException` because OMML has no equivalent, and callers can choose `EquationArray` explicitly when that projection is intended. Drawing owns the AST, portable markup, measurement, and visual layout; each document package owns only its native codec. MathML and LaTeX parsing default to a nesting limit of 128 and expose bounded overloads; excessive nesting fails with `OfficeMathParseException.Code == "DRAWING_MATH_DEPTH"`.
+
+## Find a conversion package
+
+Use `OfficeConversionCapabilityCatalog` when an application needs to discover the package and public API for a source-to-target conversion. Each route includes accepted extensions, its fidelity model, the result type that carries diagnostics, and whether the route is available in the browser converter.
+
+```csharp
+using OfficeIMO;
+
+foreach (OfficeConversionCapability route in
+         OfficeConversionCapabilityCatalog.FindBySourceExtension(".docx")) {
+    Console.WriteLine($"{route.Id}: {route.PackageId} -> {route.TargetExtension}");
+}
+```
+
+`OfficeIMO.Core` describes these routes but does not execute them. Add the package named by `PackageId`, call the API shown by `Api`, and inspect the returned result or report before accepting the output.
+
+## Examples
+
+### Build a reusable vector scene
+
+```csharp
+using OfficeIMO.Drawing;
+
+var drawing = new OfficeDrawing(width: 420, height: 180)
+    .AddShape(new OfficeShape {
+        Kind = OfficeShapeKind.Rectangle,
+        Width = 420,
+        Height = 180,
+        FillGradient = OfficeLinearGradient.Horizontal(
+            OfficeColor.Parse("#F8FBFF"),
+            OfficeColor.Parse("#EAF4FF")),
+        StrokeColor = OfficeColor.Parse("#B7D7F5"),
+        StrokeWidth = 1
+    }, x: 0, y: 0)
+    .AddText("OfficeIMO.Drawing", 20, 18, 380, 32,
+        new OfficeFontInfo("Aptos", 18, OfficeFontStyle.Bold),
+        OfficeColor.Parse("#1F2937"),
+        OfficeTextAlignment.Left)
+    .AddShape(OfficeShape.RoundedRectangle(140, 44, 10), 20, 86)
+    .AddText("Shared vector intent", 34, 98, 240, 24);
+
+OfficeDrawingQualityReport report = OfficeDrawingQualityAnalyzer.Analyze(drawing);
+if (report.HasIssues) {
+    foreach (var issue in report.Issues) {
+        Console.WriteLine($"{issue.Kind}: {issue.Message}");
+    }
+}
+```
+
+### Render a chart snapshot to drawing primitives
+
+```csharp
+using OfficeIMO.Drawing;
+
+var snapshot = new OfficeChartSnapshot(
+    name: "RevenueChart",
+    title: "Revenue by quarter",
+    chartKind: OfficeChartKind.ColumnClustered,
+    data: new OfficeChartData(
+        new[] { "Q1", "Q2", "Q3", "Q4" },
+        new[] {
+            new OfficeChartSeries("Revenue", new[] { 10d, 18d, 24d, 30d }),
+            new OfficeChartSeries("Forecast", new[] { 12d, 19d, 25d, 33d })
+        }),
+    widthPoints: 420,
+    heightPoints: 260);
+
+OfficeChartRenderingResult rendered = OfficeChartDrawingRenderer.RenderWithQuality(snapshot);
+OfficeDrawing chartDrawing = rendered.Drawing;
+
+foreach (var issue in rendered.QualityReport.Issues) {
+    Console.WriteLine(issue.Message);
+}
+```
+
+### Load first-party font programs for renderers
+
+```csharp
+using System.Collections.Generic;
+using System.IO;
+using OfficeIMO.Drawing;
+
+OfficeTrueTypeFont? font = OfficeTrueTypeFont.TryLoadDefault(out string? path);
+if (font != null) {
+    Console.WriteLine($"Loaded {path}");
+}
+
+var embedded = new OfficeFontFaceCollection {
+    FontVariationResolver = request => request.FamilyName == "Report Variable"
+        ? new Dictionary<string, float> { ["wght"] = 720 }
+        : null
+};
+embedded.Add("Report Variable", File.ReadAllBytes("ReportVariable.ttf"));
+```
+
+`OfficeFontFaceCollection` accepts TrueType-glyf OpenType, WOFF 1, CFF/CFF2, and TrueType or CFF2 variable fonts. Single-face WOFF 2 decoding is available on .NET 8 and newer; extract and register individual faces from WOFF 2 font collections. The engine is part of `OfficeIMO.Core`; it does not require another font-program package or a license key.
+
+## What it provides
+
+- `DocumentAccessMode`, `DocumentPersistenceMode`, `DocumentCreateOptions`, and `DocumentLoadOptions` for one lifecycle vocabulary across document packages.
+- Dependency-free `IOfficeSecurityProvider`, CMS/X.509/XML-signature requests, options, findings, and results under the `OfficeIMO.Security` namespace. The same layer owns bounded OPC, VBA, and ODF/EPUB XML package-signature structure and atomic commit policy. The optional `OfficeIMO.Security` package supplies the concrete cryptographic provider.
+- Dependency-free provenance inspection and selective removal contracts under `OfficeIMO.Provenance`, including exact C2PA carriers and IPTC AI-source declarations. Optional cryptographic verification remains in `OfficeIMO.Security`.
+- `OfficeColor` immutable RGBA values with named colors and hex parsing.
+- `OfficeColorSpaceConverter` for dependency-free CMYK, CIE Lab/XYZ, calibrated gray, and calibrated RGB conversion to sRGB.
+- `OfficeImageReader` and `OfficeImageInfo` for dependency-free image inspection where supported.
+- `OfficeImageFit` for shared stretch, contain, and cover intent.
+- `OfficeFontInfo`, `OfficeFontStyle`, `OfficeTextMeasurer`, and `OfficeTextMetrics` for deterministic layout estimates.
+- `OfficeTrueTypeFont` and `OfficeFontFaceCollection` for first-party static and variable font measurement, glyph contours, and bounded renderer integration.
+- `OfficeInkDocument`, `OfficeInkStroke`, sampled pressure/style metadata, recognition alternatives, and `OfficeInkRenderer` for reusable ink capture and projection.
+- `OfficeMathExpression`, `OfficeMath`, MathML/LaTeX conversion, deterministic measurement, and `OfficeMathRenderer` for reusable structured equations.
+- `OfficeShape`, `OfficeDrawing`, gradients, shadows, transforms, clipping, and vector descriptors that format-specific packages can map into their own coordinate systems.
+- `OfficeChartSnapshot` and chart rendering primitives shared by PDF and Office exporters.
+- `OfficeRasterImage`, `OfficeRasterCanvas`, `OfficeRasterRenderTarget`, and `OfficeDrawingRasterRenderer` for shared dependency-free raster rendering.
+- `OfficePngReader`, `OfficePngWriter`, and `OfficeJpegCodec` for PNG/JPEG paths that should not be reimplemented by document packages.
+- `OfficeTiffCodec`, `OfficeWebpCodec`, and `OfficeRasterImageEncoder` for shared bounded TIFF, lossless WebP, and format-neutral raster output.
+- Shared SVG formatting, primitive writing, image projection, text-block rendering, hatch-pattern, data-bar, and sparkline helpers.
+- Drawing quality diagnostics for canvas bounds and text overlap checks.
+
+## Boundaries
+
+- This package owns shared lifecycle contracts, persistence mechanics, drawing intent, ink/math models and renderers, raster buffers, SVG and raster encoding primitives, image projection, text layout helpers, chart drawing, and document-agnostic visual diagnostics.
+- Security contracts live here so format packages can expose strongly typed opt-in APIs without depending on the optional cryptographic package. Core includes only the portable AES-CBC compatibility provider; CMS, XML DSig, certificate-chain, and private-key operations remain in `OfficeIMO.Security`.
+- Word, Excel, PowerPoint, Visio, and PDF packages own source-document semantics: package parsing, layout policy, coordinate systems, style/theme resolution, and user-facing export APIs.
+- Document packages should not add private ink or math ASTs, pixel engines, image encoders/decoders, SVG primitive writers, text wrapping engines, or duplicate image-transform loops when the behavior can reasonably live here.
+- PDF keeps PDF-stream and page-writer behavior in `OfficeIMO.Pdf`; when it needs generic image-like drawing, vector descriptors, colors, chart snapshots, PNG helpers, or raster visual QA, it should use `OfficeIMO.Core` and the `OfficeIMO.Drawing` namespace.
+- Unsupported or approximate source features belong in stable diagnostics from the adapter, not as silent omissions in a renderer.
+
+## Targets and license
+
+- Targets: `netstandard2.0`, `net8.0`, `net10.0`.
+- License: MIT.
+- Repository: [EvotecIT/OfficeIMO](https://github.com/EvotecIT/OfficeIMO)
+
+## Dependency footprint
+
+- **External:** None.
+- **OfficeIMO:** This is the shared foundation; it does not depend on another OfficeIMO runtime package.
+
+See the [complete OfficeIMO package map](../README.md) for related formats and conversion paths.

@@ -1,0 +1,162 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Globalization;
+using OfficeIMO.GoogleWorkspace;
+using OfficeIMO.PowerPoint;
+using DocumentFormat.OpenXml;
+using A = DocumentFormat.OpenXml.Drawing;
+
+namespace OfficeIMO.PowerPoint.GoogleSlides {
+    public sealed class GoogleSlidesDiffItem {
+        public GoogleSlidesDiffItem(GoogleWorkspaceDiffKind kind, string path, string message) { Kind = kind; Path = path; Message = message; }
+        public GoogleWorkspaceDiffKind Kind { get; }
+        public string Path { get; }
+        public string Message { get; }
+    }
+    public sealed class GoogleSlidesSyncCheckpoint {
+        public string? RevisionId { get; set; }
+        public long? DriveVersion { get; set; }
+        public IDictionary<string, string> ContentHashes { get; } = new Dictionary<string, string>(StringComparer.Ordinal);
+    }
+    public sealed class GoogleSlidesDiffPlan {
+        internal GoogleSlidesDiffPlan(GooglePresentationReference remote, IReadOnlyList<GoogleSlidesDiffItem> items, TranslationReport report) { Remote = remote; Items = items; Report = report; }
+        public GooglePresentationReference Remote { get; }
+        public IReadOnlyList<GoogleSlidesDiffItem> Items { get; }
+        public TranslationReport Report { get; }
+        public bool HasConflicts => Items.Any(item => item.Kind == GoogleWorkspaceDiffKind.Conflict);
+        public bool HasLossyActions => Items.Any(item => item.Kind == GoogleWorkspaceDiffKind.LossyAction);
+        public bool CanApply => !HasConflicts && !Report.HasErrors;
+    }
+    public static class GoogleSlidesDiffPlanner {
+        public static GoogleSlidesSyncCheckpoint CreateCheckpoint(PowerPointPresentation presentation, string? revisionId = null, long? driveVersion = null) {
+            if (presentation == null) throw new ArgumentNullException(nameof(presentation));
+            var checkpoint = new GoogleSlidesSyncCheckpoint { RevisionId = revisionId, DriveVersion = driveVersion };
+            foreach (KeyValuePair<string, string> pair in Hashes(presentation)) checkpoint.ContentHashes[pair.Key] = pair.Value;
+            return checkpoint;
+        }
+        public static async Task<GoogleSlidesDiffPlan> BuildAsync(PowerPointPresentation source, string presentationId, GoogleWorkspaceSession session, GoogleSlidesSyncCheckpoint? checkpoint = null, CancellationToken cancellationToken = default) {
+            GoogleSlidesImportResult imported = await new GoogleSlidesImporter().ImportAsync(presentationId, session, new GoogleSlidesImportOptions { Mode = GoogleWorkspaceImportMode.Native }, cancellationToken).ConfigureAwait(false);
+            using (imported.Presentation) {
+                List<GoogleSlidesDiffItem> items = Compare(Hashes(source), Hashes(imported.Presentation), checkpoint);
+                foreach (TranslationNotice notice in imported.Report.Notices.Where(notice => notice.Severity >= TranslationSeverity.Warning)) items.Add(new GoogleSlidesDiffItem(GoogleWorkspaceDiffKind.LossyAction, notice.TargetId ?? notice.Feature, notice.Message));
+                if (checkpoint?.RevisionId != null && imported.Source.RevisionId != null && !string.Equals(checkpoint.RevisionId, imported.Source.RevisionId, StringComparison.Ordinal)) items.Add(new GoogleSlidesDiffItem(GoogleWorkspaceDiffKind.RemoteChange, "presentation/revision", "The Google presentation revision changed after the checkpoint."));
+                if (checkpoint?.DriveVersion != null && imported.Source.DriveVersion != null && checkpoint.DriveVersion != imported.Source.DriveVersion) items.Add(new GoogleSlidesDiffItem(GoogleWorkspaceDiffKind.RemoteChange, "presentation/driveVersion", "The Google presentation Drive version changed after the checkpoint."));
+                return new GoogleSlidesDiffPlan(imported.Source, items, imported.Report);
+            }
+        }
+        internal static List<GoogleSlidesDiffItem> Compare(IReadOnlyDictionary<string, string> source, IReadOnlyDictionary<string, string> remote, GoogleSlidesSyncCheckpoint? checkpoint) {
+            var result = new List<GoogleSlidesDiffItem>();
+            foreach (string path in source.Keys.Concat(remote.Keys).Concat(checkpoint?.ContentHashes.Keys ?? Array.Empty<string>()).Distinct(StringComparer.Ordinal).OrderBy(path => path, StringComparer.Ordinal)) {
+                source.TryGetValue(path, out string? local); remote.TryGetValue(path, out string? target); string? baseline = null; checkpoint?.ContentHashes.TryGetValue(path, out baseline);
+                bool localChanged = checkpoint == null ? !string.Equals(local, target, StringComparison.Ordinal) : !string.Equals(local, baseline, StringComparison.Ordinal);
+                bool remoteChanged = checkpoint == null ? !string.Equals(target, local, StringComparison.Ordinal) : !string.Equals(target, baseline, StringComparison.Ordinal);
+                if (!localChanged && !remoteChanged) continue;
+                if (localChanged && remoteChanged && !string.Equals(local, target, StringComparison.Ordinal)) result.Add(new GoogleSlidesDiffItem(GoogleWorkspaceDiffKind.Conflict, path, "The OfficeIMO source and Google presentation changed this item differently."));
+                else if (localChanged) result.Add(new GoogleSlidesDiffItem(GoogleWorkspaceDiffKind.SourceChange, path, "The OfficeIMO source changed this item."));
+                else result.Add(new GoogleSlidesDiffItem(GoogleWorkspaceDiffKind.RemoteChange, path, "The Google presentation changed this item."));
+            }
+            return result;
+        }
+        private static IReadOnlyDictionary<string, string> Hashes(PowerPointPresentation presentation) {
+            var result = new Dictionary<string, string>(StringComparer.Ordinal) { ["presentation/size"] = Hash($"{presentation.SlideSize.WidthPoints}|{presentation.SlideSize.HeightPoints}") };
+            for (int index = 0; index < presentation.Slides.Count; index++) {
+                PowerPointSlide slide = presentation.Slides[index]; string root = $"slide/{index + 1}";
+                PowerPointSlideBackground background = slide.GetBackground(); result[root] = Hash($"{slide.Hidden}|{BackgroundFingerprint(background)}");
+                foreach (PowerPointShape shape in slide.Shapes.OrderBy(shape => shape.DrawingOrder)) {
+                    string text = shape is PowerPointTextBox box ? ProjectedText(box.Paragraphs, box.TextBody?.ListStyle, box.MasterTextStyle)
+                        : shape is PowerPointTable table ? string.Join("|", table.RowItems.SelectMany((row, rowIndex) => row.Cells.Select((cell, columnIndex) =>
+                            ProjectedText(cell.Paragraphs, cell.Cell.TextBody?.ListStyle, ResolveTableMasterTextStyle(cell),
+                                PowerPointSlideImageRenderer.ResolveTableCellTextStylesForExport(table, rowIndex, columnIndex)))))
+                        : string.Empty;
+                    string geometry = shape switch {
+                        PowerPointTextBox textBox when textBox.ShapeType.HasValue => ((DocumentFormat.OpenXml.IEnumValue)textBox.ShapeType.Value.ToOpenXml()).Value,
+                        PowerPointAutoShape autoShape when autoShape.ShapeType.HasValue => ((DocumentFormat.OpenXml.IEnumValue)autoShape.ShapeType.Value.ToOpenXml()).Value,
+                        _ => string.Empty,
+                    };
+                    string textStyle = TextStyleFingerprint(shape);
+                    string picture = shape is PowerPointPicture image
+                        ? $"{image.ContentType}|{Hash(image.GetImageBytes())}|{image.CropLeftRatio}|{image.CropTopRatio}|{image.CropRightRatio}|{image.CropBottomRatio}"
+                        : string.Empty;
+                    string shapeStyle = $"{shape.FillColor}|{shape.FillTransparency}|{shape.OutlineColor}|{shape.OutlineWidthPoints}";
+                    result[$"{root}/element/{shape.DrawingOrder}"] = Hash($"{shape.ShapeContentType}|{shape.Name}|{shape.LeftPoints}|{shape.TopPoints}|{shape.WidthPoints}|{shape.HeightPoints}|{shape.Rotation}|{shape.HorizontalFlip}|{shape.VerticalFlip}|{geometry}|{text}|{textStyle}|{picture}|{shapeStyle}");
+                }
+                if (slide.Notes.TryGetExistingText(out string notes)) result[root + "/notes"] = Hash(notes);
+            }
+            return result;
+        }
+        private static string TextStyleFingerprint(PowerPointShape shape) {
+            var result = new StringBuilder();
+            if (shape is PowerPointTextBox textBox) {
+                AppendParagraphFingerprint(result, textBox.Paragraphs, textBox.TextBody?.ListStyle, textBox.MasterTextStyle);
+            } else if (shape is PowerPointTable table) {
+                AppendFingerprintValue(result, table.RowItems.Count);
+                for (int rowIndex = 0; rowIndex < table.RowItems.Count; rowIndex++) {
+                    PowerPointTableRow row = table.RowItems[rowIndex];
+                    AppendFingerprintValue(result, row.Cells.Count);
+                    for (int columnIndex = 0; columnIndex < row.Cells.Count; columnIndex++) {
+                        PowerPointTableCell cell = row.Cells[columnIndex];
+                        AppendParagraphFingerprint(result, cell.Paragraphs, cell.Cell.TextBody?.ListStyle, ResolveTableMasterTextStyle(cell),
+                            PowerPointSlideImageRenderer.ResolveTableCellTextStylesForExport(table, rowIndex, columnIndex));
+                    }
+                }
+            }
+            return result.ToString();
+        }
+        private static string ProjectedText(
+            IReadOnlyList<PowerPointParagraph> paragraphs,
+            A.ListStyle? listStyle,
+            OpenXmlCompositeElement? masterTextStyle,
+            IReadOnlyList<A.TableCellTextStyle>? tableTextStyles = null) => string.Join(
+                "\n", paragraphs.Select(paragraph => string.Concat(paragraph.InlineNodes.Select(node =>
+                    GoogleSlidesBatchCompiler.GetGoogleInlineText(node, paragraph, listStyle, masterTextStyle, tableTextStyles)))));
+        private static void AppendParagraphFingerprint(
+            StringBuilder result,
+            IReadOnlyList<PowerPointParagraph> paragraphs,
+            A.ListStyle? listStyle,
+            OpenXmlCompositeElement? masterTextStyle,
+            IReadOnlyList<A.TableCellTextStyle>? tableTextStyles = null) {
+            AppendFingerprintValue(result, paragraphs.Count);
+            foreach (PowerPointParagraph paragraph in paragraphs) {
+                AppendFingerprintValue(result, paragraph.InlineNodes.Count);
+                foreach (PowerPointParagraphInline node in paragraph.InlineNodes) {
+                    AppendFingerprintValue(result, node.Kind);
+                    AppendFingerprintValue(result, GoogleSlidesBatchCompiler.GetGoogleInlineText(node, paragraph, listStyle, masterTextStyle, tableTextStyles));
+                    AppendFingerprintValue(result, node.FieldId);
+                    AppendFingerprintValue(result, node.FieldType);
+                    if (node.Run == null) continue;
+                    PowerPointTextRun run = node.Run;
+                    GoogleSlidesBatchCompiler.EffectiveGoogleRunStyle effective =
+                        GoogleSlidesBatchCompiler.ResolveEffectiveRunStyle(run, paragraph, listStyle, masterTextStyle, tableTextStyles);
+                    AppendFingerprintValue(result, effective.Bold);
+                    AppendFingerprintValue(result, effective.Italic);
+                    AppendFingerprintValue(result, effective.Underline);
+                    AppendFingerprintValue(result, effective.Strikethrough);
+                    AppendFingerprintValue(result,
+                        effective.Capitalization == PowerPointCapitalization.SmallCaps);
+                    AppendFingerprintValue(result,
+                        GoogleSlidesBatchCompiler.ToGoogleBaselineOffset(effective.BaselinePercent));
+                    AppendFingerprintValue(result, effective.FontSizePoints.HasValue
+                        ? (int?)Math.Round(effective.FontSizePoints.Value, MidpointRounding.AwayFromZero)
+                        : null);
+                    AppendFingerprintValue(result, effective.FontName);
+                    AppendFingerprintValue(result, GoogleSlidesBatchCompiler.NormalizeColorHex(effective.Color));
+                    AppendFingerprintValue(result, GoogleSlidesBatchCompiler.ToGoogleHyperlink(run.Hyperlink));
+                }
+            }
+        }
+        private static OpenXmlCompositeElement? ResolveTableMasterTextStyle(PowerPointTableCell cell) =>
+            cell.SlidePart?.SlideLayoutPart?.SlideMasterPart?.SlideMaster?.TextStyles?.OtherStyle;
+        private static void AppendFingerprintValue(StringBuilder target, object? value) {
+            string text = Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
+            target.Append(text.Length).Append(':').Append(text).Append('|');
+        }
+        private static string BackgroundFingerprint(PowerPointSlideBackground background) => background.Kind switch {
+            PowerPointSlideBackgroundKind.Image => $"{background.Kind}|{Hash(background.ImageBytes ?? Array.Empty<byte>())}|{background.ImageContentType}|{background.ImageCropLeft}|{background.ImageCropTop}|{background.ImageCropRight}|{background.ImageCropBottom}",
+            PowerPointSlideBackgroundKind.LinearGradient => $"{background.Kind}|{background.GradientStartColor}|{background.GradientEndColor}|{background.GradientAngleDegrees}",
+            PowerPointSlideBackgroundKind.Unsupported => $"{background.Kind}|{background.UnsupportedReason}",
+            _ => $"{background.Kind}|{background.Color}",
+        };
+        private static string Hash(string value) { using SHA256 sha = SHA256.Create(); return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(value ?? string.Empty))).Replace("-", string.Empty); }
+        private static string Hash(byte[] value) { using SHA256 sha = SHA256.Create(); return BitConverter.ToString(sha.ComputeHash(value ?? Array.Empty<byte>())).Replace("-", string.Empty); }
+    }
+}

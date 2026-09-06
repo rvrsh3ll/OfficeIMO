@@ -1,0 +1,72 @@
+using System.Globalization;
+using OfficeIMO.Drawing;
+
+namespace OfficeIMO.Pdf;
+
+internal static partial class PdfWriter {
+    private sealed partial class LayoutContext {
+        private void ProcessBlocks(System.Collections.Generic.IEnumerable<IPdfBlock> sequence) {
+            var blockList = sequence as System.Collections.Generic.IList<IPdfBlock> ?? sequence.ToList();
+            for (int blockIndex = 0; blockIndex < blockList.Count; blockIndex++) {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (stopDocumentFlow) {
+                    break;
+                }
+
+                var block = blockList[blockIndex];
+                IPdfBlock? nextBlock = blockIndex + 1 < blockList.Count ? blockList[blockIndex + 1] : null;
+                if (block is PageBlock pageBlock) {
+                    FlushPage(pageDirty || HasCurrentPageNonContentObjects());
+                    optionsStack.Push(pageBlock.Options);
+                    pageGroupStack.Push(currentPageGroupId);
+                    currentOpts = pageBlock.Options;
+                    currentPageGroupId = nextPageGroupId++;
+                    currentPage = null;
+                    StartPage(currentOpts);
+                    ProcessBlocks(pageBlock.Blocks);
+                    FlushPage(force: true);
+                    optionsStack.Pop();
+                    currentPageGroupId = pageGroupStack.Pop();
+                    currentOpts = optionsStack.Peek();
+                    currentPage = null;
+                    continue;
+                }
+
+                EnsurePage();
+
+                if (block is SemanticBlock semantic) { RenderSemanticBlock(semantic); continue; }
+                if (block is SectionBlock section) { RenderSectionBlock(section); continue; }
+                if (block is TableOfContentsBlock tableOfContents) { RenderTableOfContentsBlock(tableOfContents); continue; }
+                if (block is FlowBlock flow) { RenderFlowBlock(flow); continue; }
+                if (block is LayerBlock layer) { RenderLayerBlock(layer); continue; }
+                if (block is MultiColumnBlock columns) { RenderMultiColumnBlock(columns); continue; }
+                if (block is ContainerBlock container) { RenderContainerBlock(container, nextBlock, blockList, blockIndex); continue; }
+                if (block is ColumnBreakBlock) { throw new InvalidOperationException("ColumnBreak can only be used inside a Columns block."); }
+                if (block is PageBreakBlock) { NewPage(); continue; }
+                if (block is BookmarkBlock bookmark) { AddNamedDestination(bookmark, y); continue; }
+                if (block is SpacerBlock spacer) { ConsumeSpacer(spacer.Height); continue; }
+                if (block is HeadingBlock heading) { RenderHeadingFlowBlock(heading, nextBlock, blockList, blockIndex); continue; }
+                if (block is RichParagraphBlock paragraph) { RenderRichParagraphFlowBlock(paragraph, nextBlock, blockList, blockIndex); continue; }
+                if (block is BulletListBlock bulletList) { RenderBulletListFlowBlock(bulletList, nextBlock, blockList, blockIndex); continue; }
+                if (block is NumberedListBlock numberedList) { RenderNumberedListFlowBlock(numberedList, nextBlock, blockList, blockIndex); continue; }
+                if (block is TableBlock table) { RenderTableFlowBlock(table, nextBlock, blockList, blockIndex); continue; }
+                if (block is DeferredTableBlock deferredTable) { RenderDeferredTableFlowBlock(deferredTable, nextBlock, blockList, blockIndex); continue; }
+                if (block is HorizontalRuleBlock horizontalRule) { RenderHorizontalRuleFlowBlock(horizontalRule, nextBlock, blockList, blockIndex); continue; }
+                if (block is TextFieldBlock textField) { RenderTextFieldBlock(textField, currentOpts.MarginLeft, width); continue; }
+                if (block is CheckBoxBlock checkBox) { RenderCheckBoxBlock(checkBox, currentOpts.MarginLeft, width); continue; }
+                if (block is ChoiceFieldBlock choice) { RenderChoiceFieldBlock(choice, currentOpts.MarginLeft, width); continue; }
+                if (block is RadioButtonGroupBlock radioButtonGroup) { RenderRadioButtonGroupBlock(radioButtonGroup, currentOpts.MarginLeft, width); continue; }
+                if (block is TextAnnotationBlock textAnnotation) { RenderTextAnnotationFlowBlock(textAnnotation); continue; }
+                if (block is FreeTextAnnotationBlock freeTextAnnotation) { RenderFreeTextAnnotationFlowBlock(freeTextAnnotation); continue; }
+                if (block is HighlightAnnotationBlock highlightAnnotation) { RenderHighlightAnnotationFlowBlock(highlightAnnotation); continue; }
+                if (block is PdfCanvasBlock canvas) { RenderCanvasBlock(canvas); continue; }
+                if (block is ShapeBlock shape) { RenderShapeFlowBlock(shape, nextBlock, blockList, blockIndex); continue; }
+                if (block is DrawingBlock drawing) { RenderDrawingFlowBlock(drawing, nextBlock, blockList, blockIndex); continue; }
+                if (block is RowBlock row) { RenderRowFlowBlock(row, nextBlock, blockList, blockIndex); continue; }
+                if (block is ImageBlock image) { RenderImageFlowBlock(image, nextBlock, blockList, blockIndex); continue; }
+                throw new NotSupportedException("PDF flow does not support block type " + block.GetType().Name + ".");
+            }
+        }
+
+    }
+}

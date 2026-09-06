@@ -1,128 +1,115 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Wordprocessing;
 
 namespace OfficeIMO.Word {
+    /// <summary>
+    /// Provides a rich API for configuring the borders of a
+    /// <see cref="WordTableCell"/>.  Every edge of the cell—including the
+    /// diagonals—has properties for style, color, spacing and size so that
+    /// callers can individually tailor each side of a cell.
+    /// </summary>
     public class WordTableCellBorder {
         private readonly WordTableCell _wordTableCell;
         private readonly WordTableRow _wordTableRow;
         private readonly WordTable _wordTable;
         private readonly WordDocument _document;
-        private readonly TableCellProperties _tableCellProperties;
+        // Do not force-create TableCellProperties on construction; keep read-only access non-mutating.
+        // All writes ensure properties exist via helpers below.
+        private TableCellProperties? TcPr => _wordTableCell._tableCellProperties;
+        private TableCellProperties EnsurePr() {
+            if (_wordTableCell._tableCellProperties == null) {
+                _wordTableCell.AddTableCellProperties();
+            }
+            return _wordTableCell._tableCellProperties!;
+        }
+        private TableCellBorders? BordersOrNull => TcPr?.TableCellBorders;
+        private TableCellBorders EnsureBorders() {
+            var pr = EnsurePr();
+            if (pr.TableCellBorders == null) {
+                pr.TableCellBorders = new TableCellBorders();
+                _wordTableCell.NormalizeTableCellPropertiesOrder();
+            }
+
+            return pr.TableCellBorders;
+        }
+        private LeftBorder EnsureLeft() { var b = EnsureBorders(); return b.LeftBorder ??= new LeftBorder(); }
+        private RightBorder EnsureRight() { var b = EnsureBorders(); return b.RightBorder ??= new RightBorder(); }
+        private TopBorder EnsureTop() { var b = EnsureBorders(); return b.TopBorder ??= new TopBorder(); }
+        private BottomBorder EnsureBottom() { var b = EnsureBorders(); return b.BottomBorder ??= new BottomBorder(); }
+        private InsideHorizontalBorder EnsureInsideHorizontal() { var b = EnsureBorders(); return b.InsideHorizontalBorder ??= new InsideHorizontalBorder(); }
+        private InsideVerticalBorder EnsureInsideVertical() { var b = EnsureBorders(); return b.InsideVerticalBorder ??= new InsideVerticalBorder(); }
+        private StartBorder EnsureStart() { var b = EnsureBorders(); return b.StartBorder ??= new StartBorder(); }
+        private EndBorder EnsureEnd() { var b = EnsureBorders(); return b.EndBorder ??= new EndBorder(); }
+        private TopLeftToBottomRightCellBorder EnsureTLBR() { var b = EnsureBorders(); return b.TopLeftToBottomRightCellBorder ??= new TopLeftToBottomRightCellBorder(); }
+        private TopRightToBottomLeftCellBorder EnsureTRBL() { var b = EnsureBorders(); return b.TopRightToBottomLeftCellBorder ??= new TopRightToBottomLeftCellBorder(); }
 
         internal WordTableCellBorder(WordDocument wordDocument, WordTable wordTable, WordTableRow wordTableRow, WordTableCell wordTableCell) {
             _document = wordDocument;
             _wordTable = wordTable;
             _wordTableRow = wordTableRow;
             _wordTableCell = wordTableCell;
-            _tableCellProperties = wordTableCell._tableCellProperties;
+            // Intentionally do not create TableCellProperties here.
         }
 
         /// <summary>
         /// Get or set left table cell border style
         /// </summary>
-        public BorderValues? LeftStyle {
+        public WordBorderStyle? LeftStyle {
             get {
-                if (_tableCellProperties.TableCellBorders != null && _tableCellProperties.TableCellBorders.LeftBorder != null) {
-                    return _tableCellProperties.TableCellBorders.LeftBorder.Val;
-                }
-                return null;
+                return BordersOrNull?.LeftBorder?.Val?.Value.ToOfficeEnum();
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.LeftBorder == null) {
-                    _tableCellProperties.TableCellBorders.LeftBorder = new LeftBorder();
-                }
-                _tableCellProperties.TableCellBorders.LeftBorder.Val = value;
+                var lb = EnsureLeft();
+                lb.Val = value.HasValue ? value.Value.ToOpenXml() : null;
             }
         }
 
         /// <summary>
         /// Get or set left table cell border color using hex color codes
         /// </summary>
-        public string LeftColorHex {
+        public string? LeftColorHex {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.LeftBorder != null
-                    && _tableCellProperties.TableCellBorders.LeftBorder.Color != null
-                    && _tableCellProperties.TableCellBorders.LeftBorder.Color.Value != null) {
-                    return _tableCellProperties.TableCellBorders.LeftBorder.Color.Value.Replace("#", "");
-                }
-                return null;
+                return BordersOrNull?.LeftBorder?.Color?.Value is string color ? Helpers.NormalizeOpenXmlColor(color) : null;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.LeftBorder == null) {
-                    _tableCellProperties.TableCellBorders.LeftBorder = new LeftBorder();
-                }
-                _tableCellProperties.TableCellBorders.LeftBorder.Color = value.Replace("#", "");
+                var lb = EnsureLeft();
+                lb.Color = Helpers.NormalizeOpenXmlColor(value);
             }
         }
 
         /// <summary>
         /// Get or set left table cell border color using named colors
         /// </summary>
-        public SixLabors.ImageSharp.Color LeftColor {
-            get { return SixLabors.ImageSharp.Color.Parse("#" + LeftColorHex); }
-            set { this.LeftColorHex = value.ToHexColor(); }
+        public OfficeIMO.Drawing.OfficeColor LeftColor {
+            get {
+                var hex = LeftColorHex;
+                return Helpers.ParseColor(hex ?? throw new InvalidOperationException("LeftColorHex is null"));
+            }
+            set { this.LeftColorHex = value.ToRgbHex(); }
         }
 
         /// <summary>
         /// Get or set left table cell border space
         /// </summary>
-        public UInt32Value LeftSpace {
+        public uint? LeftSpace {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.LeftBorder != null
-                    && _tableCellProperties.TableCellBorders.LeftBorder.Space != null) {
-                    return _tableCellProperties.TableCellBorders.LeftBorder.Space;
-                }
-                return null;
+                return BordersOrNull?.LeftBorder?.Space?.Value;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.LeftBorder == null) {
-                    _tableCellProperties.TableCellBorders.LeftBorder = new LeftBorder();
-                }
-
-                _tableCellProperties.TableCellBorders.LeftBorder.Space = value;
+                var lb = EnsureLeft();
+                lb.Space = value;
             }
         }
 
         /// <summary>
         /// Get or set left table cell border size
         /// </summary>
-        public UInt32Value LeftSize {
+        public uint? LeftSize {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.LeftBorder != null
-                    && _tableCellProperties.TableCellBorders.LeftBorder.Size != null) {
-                    return _tableCellProperties.TableCellBorders.LeftBorder.Size;
-                }
-
-                return null;
+                return BordersOrNull?.LeftBorder?.Size?.Value;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.LeftBorder == null) {
-                    _tableCellProperties.TableCellBorders.LeftBorder = new LeftBorder();
-                }
-
-                _tableCellProperties.TableCellBorders.LeftBorder.Size = value;
+                var lb = EnsureLeft();
+                lb.Size = value;
             }
         }
 
@@ -130,106 +117,63 @@ namespace OfficeIMO.Word {
         /// <summary>
         /// Get or set right table cell border style
         /// </summary>
-        public BorderValues? RightStyle {
+        public WordBorderStyle? RightStyle {
             get {
-                if (_tableCellProperties.TableCellBorders != null && _tableCellProperties.TableCellBorders.RightBorder != null) {
-                    return _tableCellProperties.TableCellBorders.RightBorder.Val;
-                }
-                return null;
+                return BordersOrNull?.RightBorder?.Val?.Value.ToOfficeEnum();
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.RightBorder == null) {
-                    _tableCellProperties.TableCellBorders.RightBorder = new RightBorder();
-                }
-                _tableCellProperties.TableCellBorders.RightBorder.Val = value;
+                var rb = EnsureRight();
+                rb.Val = value.HasValue ? value.Value.ToOpenXml() : null;
             }
         }
 
         /// <summary>
         /// Get or set right table cell border color using hex color codes
         /// </summary>
-        public string RightColorHex {
+        public string? RightColorHex {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.RightBorder != null
-                    && _tableCellProperties.TableCellBorders.RightBorder.Color != null
-                    && _tableCellProperties.TableCellBorders.RightBorder.Color.Value != null) {
-                    return _tableCellProperties.TableCellBorders.RightBorder.Color.Value.Replace("#", "");
-                }
-                return null;
+                return BordersOrNull?.RightBorder?.Color?.Value is string color ? Helpers.NormalizeOpenXmlColor(color) : null;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.RightBorder == null) {
-                    _tableCellProperties.TableCellBorders.RightBorder = new RightBorder();
-                }
-                _tableCellProperties.TableCellBorders.RightBorder.Color = value.Replace("#", "");
+                var rb = EnsureRight();
+                rb.Color = Helpers.NormalizeOpenXmlColor(value);
             }
         }
 
         /// <summary>
         /// Get or set right table cell border color using named colors
         /// </summary>
-        public SixLabors.ImageSharp.Color RightColor {
-            get { return SixLabors.ImageSharp.Color.Parse("#" + RightColorHex); }
-            set { this.RightColorHex = value.ToHexColor(); }
+        public OfficeIMO.Drawing.OfficeColor RightColor {
+            get {
+                var hex = RightColorHex;
+                return Helpers.ParseColor(hex ?? throw new InvalidOperationException("RightColorHex is null"));
+            }
+            set { this.RightColorHex = value.ToRgbHex(); }
         }
 
         /// <summary>
         /// Get or set right table cell border space
         /// </summary>
-        public UInt32Value RightSpace {
+        public uint? RightSpace {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.RightBorder != null
-                    && _tableCellProperties.TableCellBorders.RightBorder.Space != null) {
-                    return _tableCellProperties.TableCellBorders.RightBorder.Space;
-                }
-                return null;
+                return BordersOrNull?.RightBorder?.Space?.Value;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.RightBorder == null) {
-                    _tableCellProperties.TableCellBorders.RightBorder = new RightBorder();
-                }
-
-                _tableCellProperties.TableCellBorders.RightBorder.Space = value;
+                var rb = EnsureRight();
+                rb.Space = value;
             }
         }
 
         /// <summary>
         /// Get or set right table cell border size
         /// </summary>
-        public UInt32Value RightSize {
+        public uint? RightSize {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.RightBorder != null
-                    && _tableCellProperties.TableCellBorders.RightBorder.Size != null) {
-                    return _tableCellProperties.TableCellBorders.RightBorder.Size;
-                }
-
-                return null;
+                return BordersOrNull?.RightBorder?.Size?.Value;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.RightBorder == null) {
-                    _tableCellProperties.TableCellBorders.RightBorder = new RightBorder();
-                }
-
-                _tableCellProperties.TableCellBorders.RightBorder.Size = value;
+                var rb = EnsureRight();
+                rb.Size = value;
             }
         }
 
@@ -239,106 +183,63 @@ namespace OfficeIMO.Word {
         /// <summary>
         /// Get or set top table cell border style
         /// </summary>
-        public BorderValues? TopStyle {
+        public WordBorderStyle? TopStyle {
             get {
-                if (_tableCellProperties.TableCellBorders != null && _tableCellProperties.TableCellBorders.TopBorder != null) {
-                    return _tableCellProperties.TableCellBorders.TopBorder.Val;
-                }
-                return null;
+                return BordersOrNull?.TopBorder?.Val?.Value.ToOfficeEnum();
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.TopBorder == null) {
-                    _tableCellProperties.TableCellBorders.TopBorder = new TopBorder();
-                }
-                _tableCellProperties.TableCellBorders.TopBorder.Val = value;
+                var tb = EnsureTop();
+                tb.Val = value.HasValue ? value.Value.ToOpenXml() : null;
             }
         }
 
         /// <summary>
         /// Get or set top table cell border color using hex color codes
         /// </summary>
-        public string TopColorHex {
+        public string? TopColorHex {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.TopBorder != null
-                    && _tableCellProperties.TableCellBorders.TopBorder.Color != null
-                    && _tableCellProperties.TableCellBorders.TopBorder.Color.Value != null) {
-                    return _tableCellProperties.TableCellBorders.TopBorder.Color.Value.Replace("#", "");
-                }
-                return null;
+                return BordersOrNull?.TopBorder?.Color?.Value is string color ? Helpers.NormalizeOpenXmlColor(color) : null;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.TopBorder == null) {
-                    _tableCellProperties.TableCellBorders.TopBorder = new TopBorder();
-                }
-                _tableCellProperties.TableCellBorders.TopBorder.Color = value.Replace("#", "");
+                var tb = EnsureTop();
+                tb.Color = Helpers.NormalizeOpenXmlColor(value);
             }
         }
 
         /// <summary>
         /// Get or set top table cell border color using named colors
         /// </summary>
-        public SixLabors.ImageSharp.Color TopColor {
-            get { return SixLabors.ImageSharp.Color.Parse("#" + TopColorHex); }
-            set { this.TopColorHex = value.ToHexColor(); }
+        public OfficeIMO.Drawing.OfficeColor TopColor {
+            get {
+                var hex = TopColorHex;
+                return Helpers.ParseColor(hex ?? throw new InvalidOperationException("TopColorHex is null"));
+            }
+            set { this.TopColorHex = value.ToRgbHex(); }
         }
 
         /// <summary>
         /// Get or set top table cell border space
         /// </summary>
-        public UInt32Value TopSpace {
+        public uint? TopSpace {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.TopBorder != null
-                    && _tableCellProperties.TableCellBorders.TopBorder.Space != null) {
-                    return _tableCellProperties.TableCellBorders.TopBorder.Space;
-                }
-                return null;
+                return BordersOrNull?.TopBorder?.Space?.Value;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.TopBorder == null) {
-                    _tableCellProperties.TableCellBorders.TopBorder = new TopBorder();
-                }
-
-                _tableCellProperties.TableCellBorders.TopBorder.Space = value;
+                var tb = EnsureTop();
+                tb.Space = value;
             }
         }
 
         /// <summary>
         /// Get or set top table cell border size
         /// </summary>
-        public UInt32Value TopSize {
+        public uint? TopSize {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.TopBorder != null
-                    && _tableCellProperties.TableCellBorders.TopBorder.Size != null) {
-                    return _tableCellProperties.TableCellBorders.TopBorder.Size;
-                }
-
-                return null;
+                return BordersOrNull?.TopBorder?.Size?.Value;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.TopBorder == null) {
-                    _tableCellProperties.TableCellBorders.TopBorder = new TopBorder();
-                }
-
-                _tableCellProperties.TableCellBorders.TopBorder.Size = value;
+                var tb = EnsureTop();
+                tb.Size = value;
             }
         }
 
@@ -351,106 +252,63 @@ namespace OfficeIMO.Word {
         /// <summary>
         /// Get or set bottom table cell border style
         /// </summary>
-        public BorderValues? BottomStyle {
+        public WordBorderStyle? BottomStyle {
             get {
-                if (_tableCellProperties.TableCellBorders != null && _tableCellProperties.TableCellBorders.BottomBorder != null) {
-                    return _tableCellProperties.TableCellBorders.BottomBorder.Val;
-                }
-                return null;
+                return BordersOrNull?.BottomBorder?.Val?.Value.ToOfficeEnum();
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.BottomBorder == null) {
-                    _tableCellProperties.TableCellBorders.BottomBorder = new BottomBorder();
-                }
-                _tableCellProperties.TableCellBorders.BottomBorder.Val = value;
+                var bb = EnsureBottom();
+                bb.Val = value.HasValue ? value.Value.ToOpenXml() : null;
             }
         }
 
         /// <summary>
         /// Get or set bottom table cell border color using hex color codes
         /// </summary>
-        public string BottomColorHex {
+        public string? BottomColorHex {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.BottomBorder != null
-                    && _tableCellProperties.TableCellBorders.BottomBorder.Color != null
-                    && _tableCellProperties.TableCellBorders.BottomBorder.Color.Value != null) {
-                    return _tableCellProperties.TableCellBorders.BottomBorder.Color.Value.Replace("#", "");
-                }
-                return null;
+                return BordersOrNull?.BottomBorder?.Color?.Value is string color ? Helpers.NormalizeOpenXmlColor(color) : null;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.BottomBorder == null) {
-                    _tableCellProperties.TableCellBorders.BottomBorder = new BottomBorder();
-                }
-                _tableCellProperties.TableCellBorders.BottomBorder.Color = value.Replace("#", "");
+                var bb = EnsureBottom();
+                bb.Color = Helpers.NormalizeOpenXmlColor(value);
             }
         }
 
         /// <summary>
         /// Get or set bottom table cell border color using named colors
         /// </summary>
-        public SixLabors.ImageSharp.Color BottomColor {
-            get { return SixLabors.ImageSharp.Color.Parse("#" + BottomColorHex); }
-            set { this.BottomColorHex = value.ToHexColor(); }
+        public OfficeIMO.Drawing.OfficeColor BottomColor {
+            get {
+                var hex = BottomColorHex;
+                return Helpers.ParseColor(hex ?? throw new InvalidOperationException("BottomColorHex is null"));
+            }
+            set { this.BottomColorHex = value.ToRgbHex(); }
         }
 
         /// <summary>
         /// Get or set bottom table cell border space
         /// </summary>
-        public UInt32Value BottomSpace {
+        public uint? BottomSpace {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.BottomBorder != null
-                    && _tableCellProperties.TableCellBorders.BottomBorder.Space != null) {
-                    return _tableCellProperties.TableCellBorders.BottomBorder.Space;
-                }
-                return null;
+                return BordersOrNull?.BottomBorder?.Space?.Value;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.BottomBorder == null) {
-                    _tableCellProperties.TableCellBorders.BottomBorder = new BottomBorder();
-                }
-
-                _tableCellProperties.TableCellBorders.BottomBorder.Space = value;
+                var bb = EnsureBottom();
+                bb.Space = value;
             }
         }
 
         /// <summary>
         /// Get or set bottom table cell border size
         /// </summary>
-        public UInt32Value BottomSize {
+        public uint? BottomSize {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.BottomBorder != null
-                    && _tableCellProperties.TableCellBorders.BottomBorder.Size != null) {
-                    return _tableCellProperties.TableCellBorders.BottomBorder.Size;
-                }
-
-                return null;
+                return BordersOrNull?.BottomBorder?.Size?.Value;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.BottomBorder == null) {
-                    _tableCellProperties.TableCellBorders.BottomBorder = new BottomBorder();
-                }
-
-                _tableCellProperties.TableCellBorders.BottomBorder.Size = value;
+                var bb = EnsureBottom();
+                bb.Size = value;
             }
         }
 
@@ -465,106 +323,63 @@ namespace OfficeIMO.Word {
         /// <summary>
         /// Get or set inside horizontal table cell border style
         /// </summary>
-        public BorderValues? InsideHorizontalStyle {
+        public WordBorderStyle? InsideHorizontalStyle {
             get {
-                if (_tableCellProperties.TableCellBorders != null && _tableCellProperties.TableCellBorders.InsideHorizontalBorder != null) {
-                    return _tableCellProperties.TableCellBorders.InsideHorizontalBorder.Val;
-                }
-                return null;
+                return BordersOrNull?.InsideHorizontalBorder?.Val?.Value.ToOfficeEnum();
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.InsideHorizontalBorder == null) {
-                    _tableCellProperties.TableCellBorders.InsideHorizontalBorder = new InsideHorizontalBorder();
-                }
-                _tableCellProperties.TableCellBorders.InsideHorizontalBorder.Val = value;
+                var hb = EnsureInsideHorizontal();
+                hb.Val = value.HasValue ? value.Value.ToOpenXml() : null;
             }
         }
 
         /// <summary>
         /// Get or set inside horizontal table cell border color using hex color codes
         /// </summary>
-        public string InsideHorizontalColorHex {
+        public string? InsideHorizontalColorHex {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.InsideHorizontalBorder != null
-                    && _tableCellProperties.TableCellBorders.InsideHorizontalBorder.Color != null
-                    && _tableCellProperties.TableCellBorders.InsideHorizontalBorder.Color.Value != null) {
-                    return _tableCellProperties.TableCellBorders.InsideHorizontalBorder.Color.Value.Replace("#", "");
-                }
-                return null;
+                return BordersOrNull?.InsideHorizontalBorder?.Color?.Value is string color ? Helpers.NormalizeOpenXmlColor(color) : null;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.InsideHorizontalBorder == null) {
-                    _tableCellProperties.TableCellBorders.InsideHorizontalBorder = new InsideHorizontalBorder();
-                }
-                _tableCellProperties.TableCellBorders.InsideHorizontalBorder.Color = value.Replace("#", "");
+                var hb = EnsureInsideHorizontal();
+                hb.Color = Helpers.NormalizeOpenXmlColor(value);
             }
         }
 
         /// <summary>
         /// Get or set inside horizontal table cell border color using named colors
         /// </summary>
-        public SixLabors.ImageSharp.Color InsideHorizontalColor {
-            get { return SixLabors.ImageSharp.Color.Parse("#" + InsideHorizontalColorHex); }
-            set { this.InsideHorizontalColorHex = value.ToHexColor(); }
+        public OfficeIMO.Drawing.OfficeColor InsideHorizontalColor {
+            get {
+                var hex = InsideHorizontalColorHex;
+                return Helpers.ParseColor(hex ?? throw new InvalidOperationException("InsideHorizontalColorHex is null"));
+            }
+            set { this.InsideHorizontalColorHex = value.ToRgbHex(); }
         }
 
         /// <summary>
         /// Get or set inside horizontal table cell border space
         /// </summary>
-        public UInt32Value InsideHorizontalSpace {
+        public uint? InsideHorizontalSpace {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.InsideHorizontalBorder != null
-                    && _tableCellProperties.TableCellBorders.InsideHorizontalBorder.Space != null) {
-                    return _tableCellProperties.TableCellBorders.InsideHorizontalBorder.Space;
-                }
-                return null;
+                return BordersOrNull?.InsideHorizontalBorder?.Space?.Value;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.InsideHorizontalBorder == null) {
-                    _tableCellProperties.TableCellBorders.InsideHorizontalBorder = new InsideHorizontalBorder();
-                }
-
-                _tableCellProperties.TableCellBorders.InsideHorizontalBorder.Space = value;
+                var hb = EnsureInsideHorizontal();
+                hb.Space = value;
             }
         }
 
         /// <summary>
         /// Get or set inside horizontal table cell border size
         /// </summary>
-        public UInt32Value InsideHorizontalSize {
+        public uint? InsideHorizontalSize {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.InsideHorizontalBorder != null
-                    && _tableCellProperties.TableCellBorders.InsideHorizontalBorder.Size != null) {
-                    return _tableCellProperties.TableCellBorders.InsideHorizontalBorder.Size;
-                }
-
-                return null;
+                return BordersOrNull?.InsideHorizontalBorder?.Size?.Value;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.InsideHorizontalBorder == null) {
-                    _tableCellProperties.TableCellBorders.InsideHorizontalBorder = new InsideHorizontalBorder();
-                }
-
-                _tableCellProperties.TableCellBorders.InsideHorizontalBorder.Size = value;
+                var hb = EnsureInsideHorizontal();
+                hb.Size = value;
             }
         }
 
@@ -579,106 +394,63 @@ namespace OfficeIMO.Word {
         /// <summary>
         /// Get or set inside vertical table cell border style
         /// </summary>
-        public BorderValues? InsideVerticalStyle {
+        public WordBorderStyle? InsideVerticalStyle {
             get {
-                if (_tableCellProperties.TableCellBorders != null && _tableCellProperties.TableCellBorders.InsideVerticalBorder != null) {
-                    return _tableCellProperties.TableCellBorders.InsideVerticalBorder.Val;
-                }
-                return null;
+                return BordersOrNull?.InsideVerticalBorder?.Val?.Value.ToOfficeEnum();
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.InsideVerticalBorder == null) {
-                    _tableCellProperties.TableCellBorders.InsideVerticalBorder = new InsideVerticalBorder();
-                }
-                _tableCellProperties.TableCellBorders.InsideVerticalBorder.Val = value;
+                var vb = EnsureInsideVertical();
+                vb.Val = value.HasValue ? value.Value.ToOpenXml() : null;
             }
         }
 
         /// <summary>
         /// Get or set inside vertical table cell border color using hex color codes
         /// </summary>
-        public string InsideVerticalColorHex {
+        public string? InsideVerticalColorHex {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.InsideVerticalBorder != null
-                    && _tableCellProperties.TableCellBorders.InsideVerticalBorder.Color != null
-                    && _tableCellProperties.TableCellBorders.InsideVerticalBorder.Color.Value != null) {
-                    return _tableCellProperties.TableCellBorders.InsideVerticalBorder.Color.Value.Replace("#", "");
-                }
-                return null;
+                return BordersOrNull?.InsideVerticalBorder?.Color?.Value is string color ? Helpers.NormalizeOpenXmlColor(color) : null;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.InsideVerticalBorder == null) {
-                    _tableCellProperties.TableCellBorders.InsideVerticalBorder = new InsideVerticalBorder();
-                }
-                _tableCellProperties.TableCellBorders.InsideVerticalBorder.Color = value.Replace("#", "");
+                var vb = EnsureInsideVertical();
+                vb.Color = Helpers.NormalizeOpenXmlColor(value);
             }
         }
 
         /// <summary>
         /// Get or set inside vertical table cell border color using named colors
         /// </summary>
-        public SixLabors.ImageSharp.Color InsideVerticalColor {
-            get { return SixLabors.ImageSharp.Color.Parse("#" + InsideVerticalColorHex); }
-            set { this.InsideVerticalColorHex = value.ToHexColor(); }
+        public OfficeIMO.Drawing.OfficeColor InsideVerticalColor {
+            get {
+                var hex = InsideVerticalColorHex;
+                return Helpers.ParseColor(hex ?? throw new InvalidOperationException("InsideVerticalColorHex is null"));
+            }
+            set { this.InsideVerticalColorHex = value.ToRgbHex(); }
         }
 
         /// <summary>
         /// Get or set inside vertical table cell border space
         /// </summary>
-        public UInt32Value InsideVerticalSpace {
+        public uint? InsideVerticalSpace {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.InsideVerticalBorder != null
-                    && _tableCellProperties.TableCellBorders.InsideVerticalBorder.Space != null) {
-                    return _tableCellProperties.TableCellBorders.InsideVerticalBorder.Space;
-                }
-                return null;
+                return BordersOrNull?.InsideVerticalBorder?.Space?.Value;
             }
-            set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.InsideVerticalBorder == null) {
-                    _tableCellProperties.TableCellBorders.InsideVerticalBorder = new InsideVerticalBorder();
-                }
-
-                _tableCellProperties.TableCellBorders.InsideVerticalBorder.Space = value;
+                set {
+                var vb = EnsureInsideVertical();
+                vb.Space = value;
             }
         }
 
         /// <summary>
         /// Get or set inside vertical table cell border size
         /// </summary>
-        public UInt32Value InsideVerticalSize {
+        public uint? InsideVerticalSize {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.InsideVerticalBorder != null
-                    && _tableCellProperties.TableCellBorders.InsideVerticalBorder.Size != null) {
-                    return _tableCellProperties.TableCellBorders.InsideVerticalBorder.Size;
-                }
-
-                return null;
+                return BordersOrNull?.InsideVerticalBorder?.Size?.Value;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.InsideVerticalBorder == null) {
-                    _tableCellProperties.TableCellBorders.InsideVerticalBorder = new InsideVerticalBorder();
-                }
-
-                _tableCellProperties.TableCellBorders.InsideVerticalBorder.Size = value;
+                var vb = EnsureInsideVertical();
+                vb.Size = value;
             }
         }
 
@@ -690,106 +462,63 @@ namespace OfficeIMO.Word {
         /// <summary>
         /// Get or set start table cell border style
         /// </summary>
-        public BorderValues? StartStyle {
+        public WordBorderStyle? StartStyle {
             get {
-                if (_tableCellProperties.TableCellBorders != null && _tableCellProperties.TableCellBorders.StartBorder != null) {
-                    return _tableCellProperties.TableCellBorders.StartBorder.Val;
-                }
-                return null;
+                return BordersOrNull?.StartBorder?.Val?.Value.ToOfficeEnum();
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.StartBorder == null) {
-                    _tableCellProperties.TableCellBorders.StartBorder = new StartBorder();
-                }
-                _tableCellProperties.TableCellBorders.StartBorder.Val = value;
+                var sb = EnsureStart();
+                sb.Val = value.HasValue ? value.Value.ToOpenXml() : null;
             }
         }
 
         /// <summary>
         /// Get or set start table cell border color using hex color codes
         /// </summary>
-        public string StartColorHex {
+        public string? StartColorHex {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.StartBorder != null
-                    && _tableCellProperties.TableCellBorders.StartBorder.Color != null
-                    && _tableCellProperties.TableCellBorders.StartBorder.Color.Value != null) {
-                    return _tableCellProperties.TableCellBorders.StartBorder.Color.Value.Replace("#", "");
-                }
-                return null;
+                return BordersOrNull?.StartBorder?.Color?.Value is string color ? Helpers.NormalizeOpenXmlColor(color) : null;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.StartBorder == null) {
-                    _tableCellProperties.TableCellBorders.StartBorder = new StartBorder();
-                }
-                _tableCellProperties.TableCellBorders.StartBorder.Color = value.Replace("#", "");
+                var sb = EnsureStart();
+                sb.Color = Helpers.NormalizeOpenXmlColor(value);
             }
         }
 
         /// <summary>
         /// Get or set start table cell border color using named colors
         /// </summary>
-        public SixLabors.ImageSharp.Color StartColor {
-            get { return SixLabors.ImageSharp.Color.Parse("#" + StartColorHex); }
-            set { this.StartColorHex = value.ToHexColor(); }
+        public OfficeIMO.Drawing.OfficeColor StartColor {
+            get {
+                var hex = StartColorHex;
+                return Helpers.ParseColor(hex ?? throw new InvalidOperationException("StartColorHex is null"));
+            }
+            set { this.StartColorHex = value.ToRgbHex(); }
         }
 
         /// <summary>
         /// Get or set start table cell border space
         /// </summary>
-        public UInt32Value StartSpace {
+        public uint? StartSpace {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.StartBorder != null
-                    && _tableCellProperties.TableCellBorders.StartBorder.Space != null) {
-                    return _tableCellProperties.TableCellBorders.StartBorder.Space;
-                }
-                return null;
+                return BordersOrNull?.StartBorder?.Space?.Value;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.StartBorder == null) {
-                    _tableCellProperties.TableCellBorders.StartBorder = new StartBorder();
-                }
-
-                _tableCellProperties.TableCellBorders.StartBorder.Space = value;
+                var sb = EnsureStart();
+                sb.Space = value;
             }
         }
 
         /// <summary>
         /// Get or set start table cell border size
         /// </summary>
-        public UInt32Value StartSize {
+        public uint? StartSize {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.StartBorder != null
-                    && _tableCellProperties.TableCellBorders.StartBorder.Size != null) {
-                    return _tableCellProperties.TableCellBorders.StartBorder.Size;
-                }
-
-                return null;
+                return BordersOrNull?.StartBorder?.Size?.Value;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.StartBorder == null) {
-                    _tableCellProperties.TableCellBorders.StartBorder = new StartBorder();
-                }
-
-                _tableCellProperties.TableCellBorders.StartBorder.Size = value;
+                var sb = EnsureStart();
+                sb.Size = value;
             }
         }
 
@@ -801,106 +530,63 @@ namespace OfficeIMO.Word {
         /// <summary>
         /// Get or set end table cell border style
         /// </summary>
-        public BorderValues? EndStyle {
+        public WordBorderStyle? EndStyle {
             get {
-                if (_tableCellProperties.TableCellBorders != null && _tableCellProperties.TableCellBorders.EndBorder != null) {
-                    return _tableCellProperties.TableCellBorders.EndBorder.Val;
-                }
-                return null;
+                return BordersOrNull?.EndBorder?.Val?.Value.ToOfficeEnum();
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.EndBorder == null) {
-                    _tableCellProperties.TableCellBorders.EndBorder = new EndBorder();
-                }
-                _tableCellProperties.TableCellBorders.EndBorder.Val = value;
+                var eb = EnsureEnd();
+                eb.Val = value.HasValue ? value.Value.ToOpenXml() : null;
             }
         }
 
         /// <summary>
         /// Get or set end table cell border color using hex color codes
         /// </summary>
-        public string EndColorHex {
+        public string? EndColorHex {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.EndBorder != null
-                    && _tableCellProperties.TableCellBorders.EndBorder.Color != null
-                    && _tableCellProperties.TableCellBorders.EndBorder.Color.Value != null) {
-                    return _tableCellProperties.TableCellBorders.EndBorder.Color.Value.Replace("#", "");
-                }
-                return null;
+                return BordersOrNull?.EndBorder?.Color?.Value is string color ? Helpers.NormalizeOpenXmlColor(color) : null;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.EndBorder == null) {
-                    _tableCellProperties.TableCellBorders.EndBorder = new EndBorder();
-                }
-                _tableCellProperties.TableCellBorders.EndBorder.Color = value.Replace("#", "");
+                var eb = EnsureEnd();
+                eb.Color = Helpers.NormalizeOpenXmlColor(value);
             }
         }
 
         /// <summary>
         /// Get or set end table cell border color using named colors
         /// </summary>
-        public SixLabors.ImageSharp.Color EndColor {
-            get { return SixLabors.ImageSharp.Color.Parse("#" + EndColorHex); }
-            set { this.EndColorHex = value.ToHexColor(); }
+        public OfficeIMO.Drawing.OfficeColor EndColor {
+            get {
+                var hex = EndColorHex;
+                return Helpers.ParseColor(hex ?? throw new InvalidOperationException("EndColorHex is null"));
+            }
+            set { this.EndColorHex = value.ToRgbHex(); }
         }
 
         /// <summary>
         /// Get or set end table cell border space
         /// </summary>
-        public UInt32Value EndSpace {
+        public uint? EndSpace {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.EndBorder != null
-                    && _tableCellProperties.TableCellBorders.EndBorder.Space != null) {
-                    return _tableCellProperties.TableCellBorders.EndBorder.Space;
-                }
-                return null;
+                return BordersOrNull?.EndBorder?.Space?.Value;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.EndBorder == null) {
-                    _tableCellProperties.TableCellBorders.EndBorder = new EndBorder();
-                }
-
-                _tableCellProperties.TableCellBorders.EndBorder.Space = value;
+                var eb = EnsureEnd();
+                eb.Space = value;
             }
         }
 
         /// <summary>
         /// Get or set end table cell border size
         /// </summary>
-        public UInt32Value EndSize {
+        public uint? EndSize {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.EndBorder != null
-                    && _tableCellProperties.TableCellBorders.EndBorder.Size != null) {
-                    return _tableCellProperties.TableCellBorders.EndBorder.Size;
-                }
-
-                return null;
+                return BordersOrNull?.EndBorder?.Size?.Value;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.EndBorder == null) {
-                    _tableCellProperties.TableCellBorders.EndBorder = new EndBorder();
-                }
-
-                _tableCellProperties.TableCellBorders.EndBorder.Size = value;
+                var eb = EnsureEnd();
+                eb.Size = value;
             }
         }
 
@@ -919,106 +605,63 @@ namespace OfficeIMO.Word {
         /// <summary>
         /// Get or set top left to bottom right table cell border style
         /// </summary>
-        public BorderValues? TopLeftToBottomRightStyle {
+        public WordBorderStyle? TopLeftToBottomRightStyle {
             get {
-                if (_tableCellProperties.TableCellBorders != null && _tableCellProperties.TableCellBorders.TopLeftToBottomRightCellBorder != null) {
-                    return _tableCellProperties.TableCellBorders.TopLeftToBottomRightCellBorder.Val;
-                }
-                return null;
+                return BordersOrNull?.TopLeftToBottomRightCellBorder?.Val?.Value.ToOfficeEnum();
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.TopLeftToBottomRightCellBorder == null) {
-                    _tableCellProperties.TableCellBorders.TopLeftToBottomRightCellBorder = new TopLeftToBottomRightCellBorder();
-                }
-                _tableCellProperties.TableCellBorders.TopLeftToBottomRightCellBorder.Val = value;
+                var d = EnsureTLBR();
+                d.Val = value.HasValue ? value.Value.ToOpenXml() : null;
             }
         }
 
         /// <summary>
         /// Get or set top left to bottom right table cell border color using hex color codes
         /// </summary>
-        public string TopLeftToBottomRightColorHex {
+        public string? TopLeftToBottomRightColorHex {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.TopLeftToBottomRightCellBorder != null
-                    && _tableCellProperties.TableCellBorders.TopLeftToBottomRightCellBorder.Color != null
-                    && _tableCellProperties.TableCellBorders.TopLeftToBottomRightCellBorder.Color.Value != null) {
-                    return _tableCellProperties.TableCellBorders.TopLeftToBottomRightCellBorder.Color.Value.Replace("#", "");
-                }
-                return null;
+                return BordersOrNull?.TopLeftToBottomRightCellBorder?.Color?.Value is string color ? Helpers.NormalizeOpenXmlColor(color) : null;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.TopLeftToBottomRightCellBorder == null) {
-                    _tableCellProperties.TableCellBorders.TopLeftToBottomRightCellBorder = new TopLeftToBottomRightCellBorder();
-                }
-                _tableCellProperties.TableCellBorders.TopLeftToBottomRightCellBorder.Color = value.Replace("#", "");
+                var d = EnsureTLBR();
+                d.Color = Helpers.NormalizeOpenXmlColor(value);
             }
         }
 
         /// <summary>
         /// Get or set top left to bottom right table cell border color using named colors
         /// </summary>
-        public SixLabors.ImageSharp.Color TopLeftToBottomRightColor {
-            get { return SixLabors.ImageSharp.Color.Parse("#" + TopLeftToBottomRightColorHex); }
-            set { this.TopLeftToBottomRightColorHex = value.ToHexColor(); }
+        public OfficeIMO.Drawing.OfficeColor TopLeftToBottomRightColor {
+            get {
+                var hex = TopLeftToBottomRightColorHex;
+                return Helpers.ParseColor(hex ?? throw new InvalidOperationException("TopLeftToBottomRightColorHex is null"));
+            }
+            set { this.TopLeftToBottomRightColorHex = value.ToRgbHex(); }
         }
 
         /// <summary>
         /// Get or set top left to bottom right table cell border space
         /// </summary>
-        public UInt32Value TopLeftToBottomRightSpace {
+        public uint? TopLeftToBottomRightSpace {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.TopLeftToBottomRightCellBorder != null
-                    && _tableCellProperties.TableCellBorders.TopLeftToBottomRightCellBorder.Space != null) {
-                    return _tableCellProperties.TableCellBorders.TopLeftToBottomRightCellBorder.Space;
-                }
-                return null;
+                return BordersOrNull?.TopLeftToBottomRightCellBorder?.Space?.Value;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.TopLeftToBottomRightCellBorder == null) {
-                    _tableCellProperties.TableCellBorders.TopLeftToBottomRightCellBorder = new TopLeftToBottomRightCellBorder();
-                }
-
-                _tableCellProperties.TableCellBorders.TopLeftToBottomRightCellBorder.Space = value;
+                var d = EnsureTLBR();
+                d.Space = value;
             }
         }
 
         /// <summary>
         /// Get or set top left to bottom right table cell border size
         /// </summary>
-        public UInt32Value TopLeftToBottomRightSize {
+        public uint? TopLeftToBottomRightSize {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.TopLeftToBottomRightCellBorder != null
-                    && _tableCellProperties.TableCellBorders.TopLeftToBottomRightCellBorder.Size != null) {
-                    return _tableCellProperties.TableCellBorders.TopLeftToBottomRightCellBorder.Size;
-                }
-
-                return null;
+                return BordersOrNull?.TopLeftToBottomRightCellBorder?.Size?.Value;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.TopLeftToBottomRightCellBorder == null) {
-                    _tableCellProperties.TableCellBorders.TopLeftToBottomRightCellBorder = new TopLeftToBottomRightCellBorder();
-                }
-
-                _tableCellProperties.TableCellBorders.TopLeftToBottomRightCellBorder.Size = value;
+                var d = EnsureTLBR();
+                d.Size = value;
             }
         }
 
@@ -1028,106 +671,63 @@ namespace OfficeIMO.Word {
         /// <summary>
         /// Get or set top right to bottom left table cell border style
         /// </summary>
-        public BorderValues? TopRightToBottomLeftStyle {
+        public WordBorderStyle? TopRightToBottomLeftStyle {
             get {
-                if (_tableCellProperties.TableCellBorders != null && _tableCellProperties.TableCellBorders.TopRightToBottomLeftCellBorder != null) {
-                    return _tableCellProperties.TableCellBorders.TopRightToBottomLeftCellBorder.Val;
-                }
-                return null;
+                return BordersOrNull?.TopRightToBottomLeftCellBorder?.Val?.Value.ToOfficeEnum();
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.TopRightToBottomLeftCellBorder == null) {
-                    _tableCellProperties.TableCellBorders.TopRightToBottomLeftCellBorder = new TopRightToBottomLeftCellBorder();
-                }
-                _tableCellProperties.TableCellBorders.TopRightToBottomLeftCellBorder.Val = value;
+                var d = EnsureTRBL();
+                d.Val = value.HasValue ? value.Value.ToOpenXml() : null;
             }
         }
 
         /// <summary>
         /// Get or set top right to bottom left table cell border color using hex color codes
         /// </summary>
-        public string TopRightToBottomLeftColorHex {
+        public string? TopRightToBottomLeftColorHex {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.TopRightToBottomLeftCellBorder != null
-                    && _tableCellProperties.TableCellBorders.TopRightToBottomLeftCellBorder.Color != null
-                    && _tableCellProperties.TableCellBorders.TopRightToBottomLeftCellBorder.Color.Value != null) {
-                    return _tableCellProperties.TableCellBorders.TopRightToBottomLeftCellBorder.Color.Value.Replace("#", "");
-                }
-                return null;
+                return BordersOrNull?.TopRightToBottomLeftCellBorder?.Color?.Value is string color ? Helpers.NormalizeOpenXmlColor(color) : null;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.TopRightToBottomLeftCellBorder == null) {
-                    _tableCellProperties.TableCellBorders.TopRightToBottomLeftCellBorder = new TopRightToBottomLeftCellBorder();
-                }
-                _tableCellProperties.TableCellBorders.TopRightToBottomLeftCellBorder.Color = value.Replace("#", "");
+                var d = EnsureTRBL();
+                d.Color = Helpers.NormalizeOpenXmlColor(value);
             }
         }
 
         /// <summary>
         /// Get or set top right to bottom left table cell border color using named colors
         /// </summary>
-        public SixLabors.ImageSharp.Color TopRightToBottomLeftColor {
-            get { return SixLabors.ImageSharp.Color.Parse("#" + TopRightToBottomLeftColorHex); }
-            set { this.TopRightToBottomLeftColorHex = value.ToHexColor(); }
+        public OfficeIMO.Drawing.OfficeColor TopRightToBottomLeftColor {
+            get {
+                var hex = TopRightToBottomLeftColorHex;
+                return Helpers.ParseColor(hex ?? throw new InvalidOperationException("TopRightToBottomLeftColorHex is null"));
+            }
+            set { this.TopRightToBottomLeftColorHex = value.ToRgbHex(); }
         }
 
         /// <summary>
         /// Get or set top right to bottom left table cell border space
         /// </summary>
-        public UInt32Value TopRightToBottomLeftSpace {
+        public uint? TopRightToBottomLeftSpace {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.TopRightToBottomLeftCellBorder != null
-                    && _tableCellProperties.TableCellBorders.TopRightToBottomLeftCellBorder.Space != null) {
-                    return _tableCellProperties.TableCellBorders.TopRightToBottomLeftCellBorder.Space;
-                }
-                return null;
+                return BordersOrNull?.TopRightToBottomLeftCellBorder?.Space?.Value;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.TopRightToBottomLeftCellBorder == null) {
-                    _tableCellProperties.TableCellBorders.TopRightToBottomLeftCellBorder = new TopRightToBottomLeftCellBorder();
-                }
-
-                _tableCellProperties.TableCellBorders.TopRightToBottomLeftCellBorder.Space = value;
+                var d = EnsureTRBL();
+                d.Space = value;
             }
         }
 
         /// <summary>
         /// Get or set top right to bottom left table cell border size
         /// </summary>
-        public UInt32Value TopRightToBottomLeftSize {
+        public uint? TopRightToBottomLeftSize {
             get {
-                if (_tableCellProperties.TableCellBorders != null
-                    && _tableCellProperties.TableCellBorders.TopRightToBottomLeftCellBorder != null
-                    && _tableCellProperties.TableCellBorders.TopRightToBottomLeftCellBorder.Size != null) {
-                    return _tableCellProperties.TableCellBorders.TopRightToBottomLeftCellBorder.Size;
-                }
-
-                return null;
+                return BordersOrNull?.TopRightToBottomLeftCellBorder?.Size?.Value;
             }
             set {
-                if (_tableCellProperties.TableCellBorders == null) {
-                    _tableCellProperties.TableCellBorders = new TableCellBorders();
-                }
-
-                if (_tableCellProperties.TableCellBorders.TopRightToBottomLeftCellBorder == null) {
-                    _tableCellProperties.TableCellBorders.TopRightToBottomLeftCellBorder = new TopRightToBottomLeftCellBorder();
-                }
-
-                _tableCellProperties.TableCellBorders.TopRightToBottomLeftCellBorder.Size = value;
+                var d = EnsureTRBL();
+                d.Size = value;
             }
         }
 

@@ -1,0 +1,646 @@
+using System;
+using System.IO;
+using System.IO.Compression;
+using System.Linq;
+using System.Xml.Linq;
+using OfficeIMO.Drawing;
+using OfficeIMO.Visio;
+using OfficeIMO.Visio.Fluent;
+using OfficeIMO.Visio.Stencils;
+using Xunit;
+using VisioBounds = OfficeIMO.Visio.VisioShapeBounds;
+
+namespace OfficeIMO.Tests {
+    public class VisioRoutingTests {
+        [Fact]
+        public void ExplicitConnectorWaypointsAreWrittenToVsdxGeometry() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx");
+            VisioDocument document = VisioDocument.Create(filePath);
+            VisioPage page = document.AddPage("Routes");
+            VisioShape source = page.AddStencilShape(VisioStencils.BasicShapes.Get("rectangle"), "source", 2, 5, "Source");
+            VisioShape target = page.AddStencilShape(VisioStencils.BasicShapes.Get("rectangle"), "target", 7, 3, "Target");
+            VisioConnector connector = page.AddConnector(source, target, ConnectorKind.Dynamic, VisioSide.Right, VisioSide.Left)
+                .RouteThrough(
+                    VisioConnectorWaypoint.At(4.5, 5),
+                    VisioConnectorWaypoint.At(4.5, 3));
+            connector.EndArrow = EndArrow.Triangle;
+            connector.Label = "manual route";
+
+            Assert.Equal(ConnectorKind.RightAngle, connector.Kind);
+            Assert.Equal(2, connector.Waypoints.Count);
+
+            document.Save();
+
+            Assert.Empty(VisioValidator.Validate(filePath));
+
+            XDocument pageXml = ReadPageXml(filePath);
+            XNamespace ns = "http://schemas.microsoft.com/office/visio/2012/main";
+            XElement connectorShape = pageXml
+                .Descendants(ns + "Shape")
+                .Single(shape =>
+                    string.Equals((string?)shape.Attribute("NameU"), "Connector", StringComparison.Ordinal) ||
+                    string.Equals((string?)shape.Attribute("NameU"), "Dynamic connector", StringComparison.Ordinal));
+            XElement geometry = connectorShape
+                .Elements(ns + "Section")
+                .Single(section => string.Equals((string?)section.Attribute("N"), "Geometry", StringComparison.Ordinal));
+            var lineToRows = geometry
+                .Elements(ns + "Row")
+                .Where(row => string.Equals((string?)row.Attribute("T"), "LineTo", StringComparison.Ordinal))
+                .ToArray();
+
+            Assert.Equal(3, lineToRows.Length);
+            Assert.Equal("4.5", CellValue(lineToRows[0], ns, "X"));
+            Assert.Equal("5", CellValue(lineToRows[0], ns, "Y"));
+            Assert.Equal("4.5", CellValue(lineToRows[1], ns, "X"));
+            Assert.Equal("3", CellValue(lineToRows[1], ns, "Y"));
+
+            VisioDocument loaded = VisioDocument.Load(filePath);
+            VisioConnector loadedConnector = loaded.Pages[0].Connectors.Single();
+            Assert.Equal(ConnectorKind.RightAngle, loadedConnector.Kind);
+            Assert.Equal(2, loadedConnector.Waypoints.Count);
+            Assert.Equal(4.5, loadedConnector.Waypoints[0].X, 6);
+            Assert.Equal(5, loadedConnector.Waypoints[0].Y, 6);
+            Assert.Equal(4.5, loadedConnector.Waypoints[1].X, 6);
+            Assert.Equal(3, loadedConnector.Waypoints[1].Y, 6);
+
+            loaded.Save();
+            Assert.Empty(VisioValidator.Validate(filePath));
+            VisioConnector roundTrippedConnector = VisioDocument.Load(filePath).Pages[0].Connectors.Single();
+            Assert.Equal(2, roundTrippedConnector.Waypoints.Count);
+        }
+
+        [Fact]
+        public void OrthogonalRoutingWorksFromModelSelectionAndFluentApi() {
+            VisioDocument document = VisioDocument.Create(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx"));
+            VisioPage page = document.AddPage("Route editing");
+            VisioShape intake = page.AddStencilShape(VisioStencils.Flowchart.Get("process"), "intake", 2, 5, "Intake");
+            VisioShape review = page.AddStencilShape(VisioStencils.Flowchart.Get("process"), "review", 6, 5, "Review");
+            VisioShape archive = page.AddStencilShape(VisioStencils.Flowchart.Get("data"), "archive", 6, 2, "Archive");
+            VisioConnector first = page.AddConnector(intake, review, ConnectorKind.Dynamic, VisioSide.Right, VisioSide.Left);
+            VisioConnector second = page.AddConnector(review, archive, ConnectorKind.Dynamic, VisioSide.Bottom, VisioSide.Top);
+
+            first.RouteOrthogonal(VisioConnectorRouteStyle.HorizontalThenVertical, 0.25);
+            page.SelectOutgoingConnectors(review)
+                .RouteOrthogonal(VisioConnectorRouteStyle.VerticalThenHorizontal, -0.2)
+                .EndArrow(EndArrow.Triangle);
+
+            Assert.Equal(2, first.Waypoints.Count);
+            Assert.Equal(2, second.Waypoints.Count);
+            Assert.Equal(ConnectorKind.RightAngle, first.Kind);
+            Assert.Equal(ConnectorKind.RightAngle, second.Kind);
+            Assert.Equal(EndArrow.Triangle, second.EndArrow);
+
+            first.ClearRoute();
+
+            Assert.Empty(first.Waypoints);
+            Assert.Equal(ConnectorKind.Dynamic, first.Kind);
+
+            VisioDocument fluentDocument = VisioDocument.Create(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx"));
+            fluentDocument.AsFluent()
+                .Page("Fluent routes", pageBuilder => pageBuilder
+                    .Rect("a", 1, 1, 1.5, 0.8, "A")
+                    .Rect("b", 5, 4, 1.5, 0.8, "B")
+                    .Connect("a", "b", VisioSide.Right, VisioSide.Left, connector => connector
+                        .RouteThrough(VisioConnectorWaypoint.At(3, 1), VisioConnectorWaypoint.At(3, 4))
+                        .ArrowEnd(EndArrow.Triangle)
+                        .Label("routed")))
+                .End();
+
+            VisioConnector fluentConnector = fluentDocument.Pages[0].Connectors.Single();
+            Assert.Equal(2, fluentConnector.Waypoints.Count);
+            Assert.Equal("routed", fluentConnector.Label);
+        }
+
+        [Fact]
+        public void ObstacleAwareOrthogonalRoutingAvoidsUnrelatedShapes() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx");
+            VisioDocument document = VisioDocument.Create(filePath);
+            VisioPage page = document.AddPage("Obstacle routes", 8, 5);
+            VisioShape source = page.AddRectangle(1, 2.5, 0.8, 0.5, "Source");
+            VisioShape obstacle = page.AddRectangle(4, 2.5, 1.2, 1.0, "Obstacle");
+            VisioShape target = page.AddRectangle(7, 2.5, 0.8, 0.5, "Target");
+            VisioConnector connector = page.AddConnector(source, target, ConnectorKind.Straight, VisioSide.Right, VisioSide.Left);
+
+            Assert.Contains(page.AnalyzeVisualQuality(new VisioDiagramQualityOptions {
+                CheckShapeOverlaps = false,
+                CheckConnectorLabels = false
+            }), issue => issue.Kind == "ConnectorCrossesShape" && issue.ShapeId == obstacle.Id && issue.ConnectorId == connector.Id);
+
+            page.RouteConnectorsOrthogonalAroundShapes(padding: 0.12D, maxLanes: 16);
+
+            Assert.Equal(ConnectorKind.RightAngle, connector.Kind);
+            Assert.Equal(2, connector.Waypoints.Count);
+            Assert.DoesNotContain(page.AnalyzeVisualQuality(new VisioDiagramQualityOptions {
+                CheckShapeOverlaps = false,
+                CheckConnectorLabels = false
+            }), issue => issue.Kind == "ConnectorCrossesShape" && issue.ShapeId == obstacle.Id && issue.ConnectorId == connector.Id);
+
+            document.Save();
+            Assert.Empty(VisioValidator.Validate(filePath));
+        }
+
+        [Fact]
+        public void ObstacleAwareRoutingScoresImplicitRightAngleBends() {
+            VisioDocument document = VisioDocument.Create(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx"));
+            VisioPage page = document.AddPage("Implicit right angle", 7, 5);
+            VisioShape source = page.AddRectangle(1, 4, 0.8, 0.5, "Source");
+            VisioShape obstacle = page.AddRectangle(1.4, 3, 0.5, 0.5, "Obstacle");
+            VisioShape target = page.AddRectangle(5, 2, 0.8, 0.5, "Target");
+            VisioConnector connector = page.AddConnector(source, target, ConnectorKind.RightAngle, VisioSide.Right, VisioSide.Left);
+
+            connector.RouteOrthogonalAroundShapes(page.Shapes, new VisioConnectorRoutingOptions {
+                Padding = 0.05D,
+                MaxLanes = 16
+            });
+
+            Assert.Equal(ConnectorKind.RightAngle, connector.Kind);
+            Assert.NotEmpty(connector.Waypoints);
+            Assert.DoesNotContain(GetRouteSegments(connector), segment => SegmentIntersectsBounds(segment.Start, segment.End, Inflate(obstacle.GetShapeBounds(), 0.05D)));
+        }
+
+        [Fact]
+        public void ObstacleAwareRoutingAvoidsUserTextBoxesByDefault() {
+            VisioDocument document = VisioDocument.Create(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx"));
+            VisioPage page = document.AddPage("Text obstacle routes", 7, 5);
+            VisioShape source = page.AddRectangle(1, 2.5, 0.8, 0.5, "Source");
+            VisioShape note = page.AddTextBox("user-note", 3, 2.5, 1.1, 0.4, "User note");
+            VisioShape target = page.AddRectangle(5, 2.5, 0.8, 0.5, "Target");
+            VisioConnector connector = page.AddConnector(source, target, ConnectorKind.Straight, VisioSide.Right, VisioSide.Left);
+
+            connector.RouteOrthogonalAroundShapes(page.Shapes, new VisioConnectorRoutingOptions {
+                Padding = 0.08D,
+                MaxLanes = 16
+            });
+
+            Assert.True(note.IsDiagramAdornment);
+            Assert.False(VisioSemanticUserCells.IsGeneratedDiagramAdornment(note));
+            Assert.Equal(ConnectorKind.RightAngle, connector.Kind);
+            Assert.NotEmpty(connector.Waypoints);
+            Assert.DoesNotContain(GetRouteSegments(connector), segment => SegmentIntersectsBounds(segment.Start, segment.End, Inflate(note.GetShapeBounds(), 0.08D)));
+        }
+
+        [Fact]
+        public void ObstacleAwareRoutingCanAvoidUnrelatedBackgroundZones() {
+            VisioDocument document = VisioDocument.Create(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx"));
+            VisioPage page = document.AddPage("Zone routes", 8, 5);
+            VisioShape source = page.AddRectangle(1, 2.5, 0.8, 0.5, "Source");
+            VisioShape zone = page.AddRectangle(4, 2.5, 2.0, 1.0, "Restricted zone");
+            zone.SetUserCell(VisioSemanticUserCells.Kind, VisioSemanticUserCells.BackgroundSurfaceKind, "STR");
+            VisioShape target = page.AddRectangle(7, 2.5, 0.8, 0.5, "Target");
+            VisioConnector connector = page.AddConnector(source, target, ConnectorKind.Straight, VisioSide.Right, VisioSide.Left);
+
+            connector.RouteOrthogonalAroundShapes(page.Shapes);
+
+            Assert.Empty(connector.Waypoints);
+            Assert.Equal(ConnectorKind.Straight, connector.Kind);
+
+            connector.RouteOrthogonalAroundShapes(page.Shapes, new VisioConnectorRoutingOptions {
+                IncludeBackgroundSurfaces = true,
+                Padding = 0.15D,
+                MaxLanes = 16
+            });
+
+            Assert.Equal(ConnectorKind.RightAngle, connector.Kind);
+            Assert.Equal(2, connector.Waypoints.Count);
+            VisioBounds paddedZone = Inflate(zone.GetShapeBounds(), 0.15D);
+            Assert.DoesNotContain(connector.Waypoints, waypoint =>
+                waypoint.X > paddedZone.Left &&
+                waypoint.X < paddedZone.Right &&
+                waypoint.Y > paddedZone.Bottom &&
+                waypoint.Y < paddedZone.Top);
+            Assert.DoesNotContain(GetRouteSegments(connector), segment => SegmentIntersectsBounds(segment.Start, segment.End, paddedZone));
+        }
+
+        [Fact]
+        public void PolishDiagramCanRouteConnectorsAroundBackgroundZonesWhenRequested() {
+            VisioDocument document = VisioDocument.Create(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx"));
+            VisioPage page = document.AddPage("Zone polish", 8, 5);
+            VisioShape source = page.AddRectangle(1, 2.5, 0.8, 0.5, "Source");
+            VisioShape zone = page.AddRectangle(4, 2.5, 2.0, 1.0, "Restricted zone");
+            zone.SetUserCell(VisioSemanticUserCells.Kind, VisioSemanticUserCells.BackgroundSurfaceKind, "STR");
+            VisioShape target = page.AddRectangle(7, 2.5, 0.8, 0.5, "Target");
+            VisioConnector connector = page.AddConnector(source, target, ConnectorKind.Straight, VisioSide.Right, VisioSide.Left);
+
+            page.PolishDiagram(new VisioDiagramPolishOptions {
+                ResolveConnectorShapeIntersections = true,
+                ConnectorRoutingAvoidBackgroundSurfaces = true,
+                ConnectorRoutingMaxLanes = 16,
+                FitToContent = false
+            });
+
+            Assert.Equal(ConnectorKind.RightAngle, connector.Kind);
+            Assert.Equal(2, connector.Waypoints.Count);
+            Assert.DoesNotContain(GetRouteSegments(connector), segment => SegmentIntersectsBounds(segment.Start, segment.End, Inflate(zone.GetShapeBounds(), 0.15D)));
+        }
+
+        [Fact]
+        public void ObstacleAwareRoutingCanAvoidSiblingShapesInsideEndpointGroup() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx");
+            VisioDocument document = VisioDocument.Create(filePath);
+            VisioPage page = document.AddPage("Group routes", 9, 5);
+            VisioShape source = page.AddRectangle(1.2, 2.5, 0.8, 0.5, "Source");
+            VisioShape group = page.AddRectangle(5.1, 2.5, 4.4, 2.2, "Service group");
+            VisioShape blocker = new("member-blocker", 2.2, 1.1, 1.0, 0.9, "Blocker");
+            VisioShape target = new("member-target", 4.2, 1.1, 0.8, 0.5, "Target");
+            group.Children.Add(blocker);
+            group.Children.Add(target);
+            VisioConnector connector = page.AddConnector(source, target, ConnectorKind.Straight, VisioSide.Right, VisioSide.Left);
+
+            connector.RouteOrthogonalAroundShapes(page.Shapes, new VisioConnectorRoutingOptions {
+                Padding = 0.12D,
+                MaxLanes = 16
+            });
+
+            Assert.Empty(connector.Waypoints);
+            Assert.Equal(ConnectorKind.Straight, connector.Kind);
+
+            connector.RouteOrthogonalAroundShapes(page.Shapes, new VisioConnectorRoutingOptions {
+                IncludeGroupChildren = true,
+                Padding = 0.12D,
+                MaxLanes = 16
+            });
+
+            Assert.Equal(ConnectorKind.RightAngle, connector.Kind);
+            Assert.Equal(2, connector.Waypoints.Count);
+            Assert.DoesNotContain(GetRouteSegments(connector), segment => SegmentIntersectsBounds(segment.Start, segment.End, Inflate(new VisioBounds(4.6, 2.05, 5.6, 2.95), 0.12D)));
+
+            document.Save();
+            Assert.Empty(VisioValidator.Validate(filePath));
+        }
+
+        [Fact]
+        public void ObstacleAwareRoutingUsesPageBoundsForGroupedChildObstacles() {
+            VisioDocument document = VisioDocument.Create(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx"));
+            VisioPage page = document.AddPage("Offset group routes", 9, 5);
+            VisioShape source = page.AddRectangle(1, 3.5, 0.8, 0.5, "Source");
+            VisioShape target = page.AddRectangle(8, 3.5, 0.8, 0.5, "Target");
+            VisioShape group = new("group") {
+                Type = "Group",
+                PinX = 5,
+                PinY = 10,
+                Width = 1,
+                Height = 1,
+                LocPinX = 0.5,
+                LocPinY = 0.5
+            };
+            VisioShape child = new("group-child", 0.5, -6, 1, 1, "Child obstacle");
+            group.Children.Add(child);
+            page.Shapes.Add(group);
+            VisioConnector connector = page.AddConnector(source, target, ConnectorKind.Straight, VisioSide.Right, VisioSide.Left);
+
+            connector.RouteOrthogonalAroundShapes(page.Shapes, new VisioConnectorRoutingOptions {
+                IncludeGroupChildren = true,
+                Padding = 0.12D,
+                MaxLanes = 16
+            });
+
+            Assert.Equal(ConnectorKind.RightAngle, connector.Kind);
+            Assert.Equal(2, connector.Waypoints.Count);
+            Assert.DoesNotContain(GetRouteSegments(connector), segment =>
+                SegmentIntersectsBounds(segment.Start, segment.End, Inflate(new VisioBounds(4.5, 3.0, 5.5, 4.0), 0.12D)));
+        }
+
+        [Fact]
+        public void PolishDiagramCanRouteAroundGroupChildrenWhenRequested() {
+            VisioDocument document = VisioDocument.Create(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx"));
+            VisioPage page = document.AddPage("Group polish", 9, 5);
+            VisioShape source = page.AddRectangle(1.2, 2.5, 0.8, 0.5, "Source");
+            VisioShape group = page.AddRectangle(5.1, 2.5, 4.4, 2.2, "Service group");
+            VisioShape blocker = new("member-blocker", 2.2, 1.1, 1.0, 0.9, "Blocker");
+            VisioShape target = new("member-target", 4.2, 1.1, 0.8, 0.5, "Target");
+            group.Children.Add(blocker);
+            group.Children.Add(target);
+            VisioConnector connector = page.AddConnector(source, target, ConnectorKind.Straight, VisioSide.Right, VisioSide.Left);
+
+            page.PolishDiagram(new VisioDiagramPolishOptions {
+                ResolveConnectorShapeIntersections = true,
+                ConnectorRoutingAvoidGroupChildren = true,
+                ConnectorRoutingMaxLanes = 16,
+                FitToContent = false
+            });
+
+            Assert.Equal(ConnectorKind.RightAngle, connector.Kind);
+            Assert.Equal(2, connector.Waypoints.Count);
+            Assert.DoesNotContain(GetRouteSegments(connector), segment => SegmentIntersectsBounds(segment.Start, segment.End, Inflate(new VisioBounds(4.6, 2.05, 5.6, 2.95), 0.15D)));
+        }
+
+        [Fact]
+        public void ObstacleAwareRoutingCanReduceConnectorCrossingsWhenRequested() {
+            VisioDocument document = VisioDocument.Create(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx"));
+            VisioPage page = document.AddPage("Crossing routes", 8, 6);
+            VisioShape left = page.AddRectangle(1, 3, 0.8, 0.5, "Left");
+            VisioShape right = page.AddRectangle(7, 3, 0.8, 0.5, "Right");
+            VisioShape top = page.AddRectangle(4, 5, 0.8, 0.5, "Top");
+            VisioShape bottom = page.AddRectangle(4, 1, 0.8, 0.5, "Bottom");
+            VisioConnector horizontal = page.AddConnector(left, right, ConnectorKind.Straight, VisioSide.Right, VisioSide.Left);
+            VisioConnector vertical = page.AddConnector(top, bottom, ConnectorKind.Straight, VisioSide.Bottom, VisioSide.Top);
+
+            Assert.True(CountRouteCrossings(vertical, horizontal) > 0);
+
+            vertical.RouteOrthogonalAroundShapes(page.Shapes, new VisioConnectorRoutingOptions {
+                AvoidConnectorCrossings = true,
+                ConnectorCrossingReferences = page.Connectors,
+                PageOptimizationPasses = 3,
+                Padding = 0.15D,
+                MaxLanes = 24
+            });
+
+            Assert.Equal(ConnectorKind.RightAngle, vertical.Kind);
+            Assert.Equal(2, vertical.Waypoints.Count);
+            Assert.Equal(0, CountRouteCrossings(vertical, horizontal));
+        }
+
+        [Fact]
+        public void PolishDiagramCanReduceConnectorCrossingsWhenRequested() {
+            VisioDocument document = VisioDocument.Create(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx"));
+            VisioPage page = document.AddPage("Crossing polish", 8, 6);
+            VisioShape left = page.AddRectangle(1, 3, 0.8, 0.5, "Left");
+            VisioShape right = page.AddRectangle(7, 3, 0.8, 0.5, "Right");
+            VisioShape top = page.AddRectangle(4, 5, 0.8, 0.5, "Top");
+            VisioShape bottom = page.AddRectangle(4, 1, 0.8, 0.5, "Bottom");
+            VisioConnector horizontal = page.AddConnector(left, right, ConnectorKind.Straight, VisioSide.Right, VisioSide.Left);
+            VisioConnector vertical = page.AddConnector(top, bottom, ConnectorKind.Straight, VisioSide.Bottom, VisioSide.Top);
+
+            Assert.True(CountRouteCrossings(vertical, horizontal) > 0);
+
+            page.PolishDiagram(new VisioDiagramPolishOptions {
+                ResolveConnectorShapeIntersections = true,
+                ConnectorRoutingAvoidConnectorCrossings = true,
+                ConnectorRoutingPageOptimizationPasses = 3,
+                ConnectorRoutingMaxLanes = 24,
+                FitToContent = false
+            });
+
+            Assert.Equal(0, CountRouteCrossings(vertical, horizontal));
+        }
+
+        [Fact]
+        public void PageRoutingCanUseDoglegCandidatesForDenseCrossingReduction() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx");
+            VisioDocument document = VisioDocument.Create(filePath);
+            VisioPage page = document.AddPage("Dense crossing polish", 10, 7);
+            VisioShape left = page.AddRectangle(1, 3.5, 0.8, 0.5, "Left");
+            VisioShape right = page.AddRectangle(9, 3.5, 0.8, 0.5, "Right");
+            VisioShape top = page.AddRectangle(5, 6, 0.8, 0.5, "Top");
+            VisioShape bottom = page.AddRectangle(5, 1, 0.8, 0.5, "Bottom");
+            VisioShape upperLeft = page.AddRectangle(1.4, 5.8, 0.8, 0.5, "Upper left");
+            VisioShape lowerRight = page.AddRectangle(8.6, 1.2, 0.8, 0.5, "Lower right");
+            VisioShape lowerLeft = page.AddRectangle(1.4, 1.2, 0.8, 0.5, "Lower left");
+            VisioShape upperRight = page.AddRectangle(8.6, 5.8, 0.8, 0.5, "Upper right");
+            page.AddConnector(left, right, ConnectorKind.Straight, VisioSide.Right, VisioSide.Left);
+            page.AddConnector(top, bottom, ConnectorKind.Straight, VisioSide.Bottom, VisioSide.Top);
+            page.AddConnector(upperLeft, lowerRight, ConnectorKind.Straight, VisioSide.Right, VisioSide.Left);
+            page.AddConnector(lowerLeft, upperRight, ConnectorKind.Straight, VisioSide.Right, VisioSide.Left);
+
+            int before = CountPageRouteCrossings(page);
+
+            page.RouteConnectorsOrthogonalAroundShapes(new VisioConnectorRoutingOptions {
+                AvoidConnectorCrossings = true,
+                PageOptimizationPasses = 4,
+                Padding = 0.18D,
+                MaxLanes = 28
+            });
+
+            int after = CountPageRouteCrossings(page);
+            Assert.True(after < before, $"Expected page routing to reduce crossings from {before}, but found {after}.");
+            Assert.Contains(page.Connectors, connector => connector.Kind == ConnectorKind.RightAngle && connector.Waypoints.Count > 2);
+
+            document.Save();
+            Assert.Empty(VisioValidator.Validate(filePath));
+        }
+
+        [Fact]
+        public void PolishDiagramValidatesConnectorRoutingOptimizationPasses() {
+            VisioDocument document = VisioDocument.Create(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx"));
+            VisioPage page = document.AddPage("Invalid polish");
+
+            Assert.Throws<ArgumentOutOfRangeException>(() => page.PolishDiagram(new VisioDiagramPolishOptions {
+                ResolveConnectorShapeIntersections = true,
+                ConnectorRoutingPageOptimizationPasses = 0
+            }));
+        }
+
+        [Fact]
+        public void ConnectorLabelPlacementIsWrittenLoadedAndAvailableThroughSelectionsAndFluentApi() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx");
+            VisioDocument document = VisioDocument.Create(filePath);
+            VisioPage page = document.AddPage("Labels");
+            VisioShape source = page.AddStencilShape(VisioStencils.Flowchart.Get("process"), "source", 2, 5, "Source");
+            VisioShape decision = page.AddStencilShape(VisioStencils.Flowchart.Get("decision"), "decision", 6, 5, "Decision");
+            VisioConnector connector = page.AddConnector(source, decision, ConnectorKind.Dynamic, VisioSide.Right, VisioSide.Left)
+                .RouteOrthogonal()
+                .PlaceLabelAt(4.25, 5.35, width: 1.4, height: 0.35);
+            connector.Label = "approved";
+
+            page.SelectConnectedConnectors(source)
+                .LabelPosition(0.6, offsetY: 0.2, width: 1.5, height: 0.4);
+            connector.PlaceLabelAt(4.25, 5.35, width: 1.4, height: 0.35);
+
+            document.Save();
+
+            Assert.Empty(VisioValidator.Validate(filePath));
+
+            XDocument pageXml = ReadPageXml(filePath);
+            XNamespace ns = "http://schemas.microsoft.com/office/visio/2012/main";
+            XElement connectorShape = pageXml
+                .Descendants(ns + "Shape")
+                .Single(shape =>
+                    string.Equals((string?)shape.Attribute("NameU"), "Connector", StringComparison.Ordinal) ||
+                    string.Equals((string?)shape.Attribute("NameU"), "Dynamic connector", StringComparison.Ordinal));
+
+            Assert.Equal("4.25", ShapeCellValue(connectorShape, ns, "TxtPinX"));
+            Assert.Equal("5.35", ShapeCellValue(connectorShape, ns, "TxtPinY"));
+            Assert.Equal("1.4", ShapeCellValue(connectorShape, ns, "TxtWidth"));
+            Assert.Equal("0.35", ShapeCellValue(connectorShape, ns, "TxtHeight"));
+            Assert.Equal("0.7", ShapeCellValue(connectorShape, ns, "TxtLocPinX"));
+            Assert.Equal("0.175", ShapeCellValue(connectorShape, ns, "TxtLocPinY"));
+
+            VisioDocument loaded = VisioDocument.Load(filePath);
+            VisioConnector loadedConnector = loaded.Pages[0].Connectors.Single();
+            Assert.Equal("approved", loadedConnector.Label);
+            Assert.NotNull(loadedConnector.LabelPlacement);
+            Assert.Equal(4.25, loadedConnector.LabelPlacement!.AbsolutePinX);
+            Assert.Equal(5.35, loadedConnector.LabelPlacement.AbsolutePinY);
+            Assert.Equal(1.4, loadedConnector.LabelPlacement.Width);
+            Assert.Equal(0.35, loadedConnector.LabelPlacement.Height);
+
+            VisioDocument fluentDocument = VisioDocument.Create(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx"));
+            fluentDocument.AsFluent()
+                .Page("Fluent labels", pageBuilder => pageBuilder
+                    .Rect("a", 1, 1, 1.5, 0.8, "A")
+                    .Rect("b", 5, 1, 1.5, 0.8, "B")
+                    .Connect("a", "b", VisioSide.Right, VisioSide.Left, route => route
+                        .RouteOrthogonal()
+                        .Label("yes", 0.7, offsetY: 0.15)))
+                .End();
+
+            VisioConnector fluentConnector = fluentDocument.Pages[0].Connectors.Single();
+            Assert.Equal("yes", fluentConnector.Label);
+            Assert.NotNull(fluentConnector.LabelPlacement);
+            Assert.Equal(0.7, fluentConnector.LabelPlacement!.Position);
+            Assert.Equal(0.15, fluentConnector.LabelPlacement.OffsetY);
+        }
+
+        private static XDocument ReadPageXml(string filePath) {
+            using ZipArchive archive = ZipFile.OpenRead(filePath);
+            ZipArchiveEntry? entry = archive.GetEntry("visio/pages/page1.xml");
+            Assert.NotNull(entry);
+            using Stream stream = entry!.Open();
+            return XDocument.Load(stream);
+        }
+
+        private static string? CellValue(XElement row, XNamespace ns, string name) {
+            return row
+                .Elements(ns + "Cell")
+                .Single(cell => string.Equals((string?)cell.Attribute("N"), name, StringComparison.Ordinal))
+                .Attribute("V")
+                ?.Value;
+        }
+
+        private static string? ShapeCellValue(XElement shape, XNamespace ns, string name) {
+            return shape
+                .Elements(ns + "Cell")
+                .Single(cell => string.Equals((string?)cell.Attribute("N"), name, StringComparison.Ordinal))
+                .Attribute("V")
+                ?.Value;
+        }
+
+        private static RouteSegment[] GetRouteSegments(VisioConnector connector) {
+            ResolveEndpoint(connector.From, connector.To, connector.FromConnectionPoint, out RoutePoint start);
+            ResolveEndpoint(connector.To, connector.From, connector.ToConnectionPoint, out RoutePoint end);
+            List<(double X, double Y)> waypoints = connector.Waypoints
+                .Select(waypoint => (X: waypoint.X, Y: waypoint.Y))
+                .ToList();
+            List<RoutePoint> points = OfficeGeometry.BuildConnectorPolyline(
+                    (start.X, start.Y),
+                    (end.X, end.Y),
+                    waypoints,
+                    connector.Kind == ConnectorKind.RightAngle)
+                .Select(point => new RoutePoint(point.X, point.Y))
+                .ToList();
+            return points.Zip(points.Skip(1), (from, to) => new RouteSegment(from, to)).ToArray();
+        }
+
+        private static void ResolveEndpoint(VisioShape shape, VisioShape other, VisioConnectionPoint? connectionPoint, out RoutePoint point) {
+            if (connectionPoint != null) {
+                (double x, double y) = GetPagePoint(shape, connectionPoint.X, connectionPoint.Y);
+                point = new RoutePoint(x, y);
+                return;
+            }
+
+            VisioBounds shapeBounds = GetPageShapeBounds(shape);
+            VisioBounds otherBounds = GetPageShapeBounds(other);
+            double dx = otherBounds.CenterX - shapeBounds.CenterX;
+            double dy = otherBounds.CenterY - shapeBounds.CenterY;
+            if (Math.Abs(dx) >= Math.Abs(dy)) {
+                point = new RoutePoint(dx >= 0 ? shapeBounds.Right : shapeBounds.Left, shapeBounds.CenterY);
+            } else {
+                point = new RoutePoint(shapeBounds.CenterX, dy >= 0 ? shapeBounds.Top : shapeBounds.Bottom);
+            }
+        }
+
+        private static VisioBounds GetPageShapeBounds(VisioShape shape) {
+            (double x1, double y1) = GetPagePoint(shape, 0, 0);
+            (double x2, double y2) = GetPagePoint(shape, shape.Width, 0);
+            (double x3, double y3) = GetPagePoint(shape, 0, shape.Height);
+            (double x4, double y4) = GetPagePoint(shape, shape.Width, shape.Height);
+            double left = Math.Min(Math.Min(x1, x2), Math.Min(x3, x4));
+            double right = Math.Max(Math.Max(x1, x2), Math.Max(x3, x4));
+            double bottom = Math.Min(Math.Min(y1, y2), Math.Min(y3, y4));
+            double top = Math.Max(Math.Max(y1, y2), Math.Max(y3, y4));
+            return new VisioBounds(left, bottom, right, top);
+        }
+
+        private static (double X, double Y) GetPagePoint(VisioShape shape, double x, double y) {
+            (double absX, double absY) = shape.GetAbsolutePoint(x, y);
+            return shape.Parent != null
+                ? GetPagePoint(shape.Parent, absX, absY)
+                : (absX, absY);
+        }
+
+        private static bool SegmentIntersectsBounds(RoutePoint a, RoutePoint b, VisioBounds bounds) {
+            return OfficeGeometry.SegmentIntersectsRectangle(
+                (a.X, a.Y),
+                (b.X, b.Y),
+                bounds.Left,
+                bounds.Bottom,
+                bounds.Right,
+                bounds.Top);
+        }
+
+        private static int CountRouteCrossings(VisioConnector connector, params VisioConnector[] references) {
+            RouteSegment[] segments = GetRouteSegments(connector);
+            int crossings = 0;
+            foreach (RouteSegment segment in segments) {
+                foreach (VisioConnector reference in references) {
+                    foreach (RouteSegment referenceSegment in GetRouteSegments(reference)) {
+                        if (SegmentsIntersectAwayFromSharedEndpoints(segment, referenceSegment)) {
+                            crossings++;
+                        }
+                    }
+                }
+            }
+
+            return crossings;
+        }
+
+        private static int CountPageRouteCrossings(VisioPage page) {
+            int crossings = 0;
+            VisioConnector[] connectors = page.Connectors.ToArray();
+            for (int i = 0; i < connectors.Length; i++) {
+                for (int j = i + 1; j < connectors.Length; j++) {
+                    crossings += CountRouteCrossings(connectors[i], connectors[j]);
+                }
+            }
+
+            return crossings;
+        }
+
+        private static bool SegmentsIntersectAwayFromSharedEndpoints(RouteSegment segment, RouteSegment referenceSegment) {
+            return OfficeGeometry.SegmentsIntersect(
+                       (segment.Start.X, segment.Start.Y),
+                       (segment.End.X, segment.End.Y),
+                       (referenceSegment.Start.X, referenceSegment.Start.Y),
+                       (referenceSegment.End.X, referenceSegment.End.Y)) &&
+                   !PointsEqual(segment.Start, referenceSegment.Start) &&
+                   !PointsEqual(segment.Start, referenceSegment.End) &&
+                   !PointsEqual(segment.End, referenceSegment.Start) &&
+                   !PointsEqual(segment.End, referenceSegment.End);
+        }
+
+        private static bool PointsEqual(RoutePoint a, RoutePoint b) {
+            return Math.Abs(a.X - b.X) < 1e-9 &&
+                   Math.Abs(a.Y - b.Y) < 1e-9;
+        }
+
+        private static VisioBounds Inflate(VisioBounds bounds, double padding) {
+            return new VisioBounds(
+                bounds.Left - padding,
+                bounds.Bottom - padding,
+                bounds.Right + padding,
+                bounds.Top + padding);
+        }
+
+        private readonly struct RoutePoint {
+            public RoutePoint(double x, double y) {
+                X = x;
+                Y = y;
+            }
+
+            public double X { get; }
+
+            public double Y { get; }
+        }
+
+        private readonly struct RouteSegment {
+            public RouteSegment(RoutePoint start, RoutePoint end) {
+                Start = start;
+                End = end;
+            }
+
+            public RoutePoint Start { get; }
+
+            public RoutePoint End { get; }
+        }
+    }
+}

@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>Latest</LangVersion>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" Version="0.15.8" />
+    <PackageReference Include="CsvHelper" Version="33.1.0" />
+    <PackageReference Include="Dataplat.Dbatools.Csv" Version="1.1.15" />
+      <!-- Runtime APIs are benchmarked directly. The source generator targets a newer Roslyn than the repository SDK ships. -->
+      <PackageReference Include="ExcelReader.NET" Version="2.3.0" ExcludeAssets="analyzers" />
+    <PackageReference Include="LumenWorksCsvReader2" Version="4.4.0" />
+    <PackageReference Include="Sep" Version="0.17.0" />
+    <PackageReference Include="Sylvan.Data.Csv" Version="1.4.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OfficeIMO.CSV\OfficeIMO.CSV.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Benchmarks\BenchmarkProcessorAffinity.cs" Link="Shared\BenchmarkProcessorAffinity.cs" />
+    <Compile Include="..\Benchmarks\MarkPflug65KFixture.cs" Link="Shared\MarkPflug65KFixture.cs" />
+  </ItemGroup>
+
+  <Target Name="RemoveIncompatibleExcelReaderGenerator" BeforeTargets="CoreCompile">
+    <ItemGroup>
+      <Analyzer Remove="$(NuGetPackageRoot)excelreader.net\2.3.0\analyzers\dotnet\cs\ExcelReader.Generator.dll" />
+    </ItemGroup>
+  </Target>
+
+</Project>

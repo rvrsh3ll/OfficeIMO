@@ -1,0 +1,280 @@
+using System;
+using System.IO;
+using System.IO.Compression;
+using System.Threading.Tasks;
+using System.Text;
+using System.Xml;
+using System.Xml.Linq;
+using OfficeIMO.Excel;
+using Xunit;
+
+namespace OfficeIMO.Tests {
+    public partial class Excel {
+        [Fact]
+        public void Test_LoadMissingFile_ThrowsWithPath() {
+            string filePath = Path.Combine(_directoryWithFiles, "missing.xlsx");
+            var ex = Assert.Throws<FileNotFoundException>(() => ExcelDocument.Load(filePath));
+            Assert.Equal($"File '{filePath}' doesn't exist.", ex.Message);
+        }
+
+        [Fact]
+        public void Test_LoadNullPath_ThrowsArgumentNullException() {
+            var ex = Assert.Throws<ArgumentNullException>(() => ExcelDocument.Load((string)null!));
+            Assert.Equal("filePath", ex.ParamName);
+        }
+
+        [Fact]
+        public async Task Test_LoadAsyncMissingFile_ThrowsWithPath() {
+            string filePath = Path.Combine(_directoryWithFiles, "missingAsync.xlsx");
+            var ex = await Assert.ThrowsAsync<FileNotFoundException>(() => ExcelDocument.LoadAsync(filePath));
+            Assert.Equal($"File '{filePath}' doesn't exist.", ex.Message);
+        }
+
+        [Fact]
+        public async Task Test_LoadAsyncNullPath_ThrowsArgumentNullException() {
+            var ex = await Assert.ThrowsAsync<ArgumentNullException>(() => ExcelDocument.LoadAsync((string)null!));
+            Assert.Equal("filePath", ex.ParamName);
+        }
+
+        [Fact]
+        public void Test_LoadInvalidAppPropsContentType_ThrowsHelpfulIOException()
+        {
+            string sourcePath = Path.Combine(_directoryDocuments, "BasicExcel.xlsx");
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".xlsx");
+            File.Copy(sourcePath, filePath, overwrite: true);
+
+            using (var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            using (var archive = new ZipArchive(fileStream, ZipArchiveMode.Update, leaveOpen: false))
+            {
+                Assert.NotNull(archive.GetEntry("docProps/app.xml"));
+                var contentTypes = archive.GetEntry("[Content_Types].xml") ?? throw new InvalidOperationException("Missing content types.");
+                contentTypes.Delete();
+                var replacement = archive.CreateEntry("[Content_Types].xml", CompressionLevel.NoCompression);
+                using var replacementStream = replacement.Open();
+                using var writer = new StreamWriter(replacementStream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                writer.Write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+                writer.Write("<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">\n");
+                writer.Write("  <Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>\n");
+                writer.Write("  <Default Extension=\"xml\" ContentType=\"application/xml\"/>\n");
+                writer.Write("  <Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>\n");
+                writer.Write("  <Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/>\n");
+                writer.Write("  <Override PartName=\"/docProps/app.xml\" ContentType=\"application/xml\">");
+                // Intentionally omit the closing tag to mimic a corrupted declaration that still references /docProps/app.xml
+            }
+
+            var exception = Assert.Throws<IOException>(() => ExcelDocument.Load(filePath));
+            Assert.Contains("invalid content type for '/docProps/app.xml'", exception.Message);
+            Assert.IsType<XmlException>(exception.InnerException);
+        }
+
+        [Fact]
+        public void Test_ReaderOpenInvalidAppPropsContentType_ThrowsHelpfulIOException()
+        {
+            string sourcePath = Path.Combine(_directoryDocuments, "BasicExcel.xlsx");
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".xlsx");
+            File.Copy(sourcePath, filePath, overwrite: true);
+
+            using (var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            using (var archive = new ZipArchive(fileStream, ZipArchiveMode.Update, leaveOpen: false))
+            {
+                Assert.NotNull(archive.GetEntry("docProps/app.xml"));
+                var contentTypes = archive.GetEntry("[Content_Types].xml") ?? throw new InvalidOperationException("Missing content types.");
+                contentTypes.Delete();
+                var replacement = archive.CreateEntry("[Content_Types].xml", CompressionLevel.NoCompression);
+                using var replacementStream = replacement.Open();
+                using var writer = new StreamWriter(replacementStream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                writer.Write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+                writer.Write("<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">\n");
+                writer.Write("  <Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>\n");
+                writer.Write("  <Default Extension=\"xml\" ContentType=\"application/xml\"/>\n");
+                writer.Write("  <Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>\n");
+                writer.Write("  <Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/>\n");
+                writer.Write("  <Override PartName=\"/docProps/app.xml\" ContentType=\"application/xml\">");
+            }
+
+            var exception = Assert.Throws<IOException>(() => ExcelDocumentReader.Open(filePath));
+            Assert.Contains("invalid content type for '/docProps/app.xml'", exception.Message);
+            Assert.IsType<XmlException>(exception.InnerException);
+        }
+
+        [Fact]
+        public void Test_ReaderOpenInvalidAppPropsContentTypeStream_ThrowsHelpfulIOException()
+        {
+            string sourcePath = Path.Combine(_directoryDocuments, "BasicExcel.xlsx");
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".xlsx");
+            File.Copy(sourcePath, filePath, overwrite: true);
+
+            using (var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            using (var archive = new ZipArchive(fileStream, ZipArchiveMode.Update, leaveOpen: false))
+            {
+                Assert.NotNull(archive.GetEntry("docProps/app.xml"));
+                var contentTypes = archive.GetEntry("[Content_Types].xml") ?? throw new InvalidOperationException("Missing content types.");
+                contentTypes.Delete();
+                var replacement = archive.CreateEntry("[Content_Types].xml", CompressionLevel.NoCompression);
+                using var replacementStream = replacement.Open();
+                using var writer = new StreamWriter(replacementStream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                writer.Write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+                writer.Write("<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">\n");
+                writer.Write("  <Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>\n");
+                writer.Write("  <Default Extension=\"xml\" ContentType=\"application/xml\"/>\n");
+                writer.Write("  <Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>\n");
+                writer.Write("  <Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/>\n");
+                writer.Write("  <Override PartName=\"/docProps/app.xml\" ContentType=\"application/xml\">");
+            }
+
+            using var stream = new MemoryStream(File.ReadAllBytes(filePath));
+            var exception = Assert.Throws<IOException>(() => ExcelDocumentReader.Open(stream));
+            Assert.Contains("invalid content type for '/docProps/app.xml'", exception.Message);
+            Assert.IsType<XmlException>(exception.InnerException);
+        }
+
+        [Fact]
+        public void Test_LoadNormalizedPathWithAutoSave_PersistsChangesOnDispose() {
+            string sourcePath = Path.Combine(_directoryDocuments, "BasicExcel.xlsx");
+            string filePath = Path.Combine(_directoryWithFiles, "LoadNormalizedAutoSave.xlsx");
+            File.Copy(sourcePath, filePath, overwrite: true);
+
+            RewriteContentTypes(filePath, root => {
+                var appOverride = GetOrAddAppPropertiesOverride(root);
+                appOverride.SetAttributeValue("ContentType", "application/xml");
+            });
+
+            using (var document = ExcelDocument.Load(filePath, new OfficeIMO.Excel.ExcelLoadOptions { PersistenceMode = OfficeIMO.DocumentPersistenceMode.SaveOnDispose })) {
+                document.Sheets[0].CellValue(1, 1, "Normalized");
+            }
+
+            byte[] savedBytes = File.ReadAllBytes(filePath);
+            using var memory = new MemoryStream(savedBytes);
+            using (var reloaded = ExcelDocument.Load(memory)) {
+                Assert.True(reloaded.Sheets[0].TryGetCellText(1, 1, out var value));
+                Assert.Equal("Normalized", value);
+            }
+        }
+
+        [Fact]
+        public void Test_LoadWithAutoSave_PersistsSharedStringTableChangesOnDispose() {
+            string filePath = Path.Combine(_directoryWithFiles, "LoadAutoSaveSharedStrings.xlsx");
+
+            try {
+                using (var document = ExcelDocument.Create(filePath)) {
+                    var sheet = document.AddWorksheet("Data");
+                    sheet.CellValue(1, 1, "Initial");
+                    document.Save();
+                }
+
+                using (var document = ExcelDocument.Load(filePath, new OfficeIMO.Excel.ExcelLoadOptions { PersistenceMode = OfficeIMO.DocumentPersistenceMode.SaveOnDispose })) {
+                    document.Sheets[0].CellValue(1, 1, "Updated");
+                }
+
+                using var reader = ExcelDocumentReader.Open(filePath);
+                object?[,] values = reader.GetSheet("Data").ReadRange("A1:A1");
+
+                Assert.Equal("Updated", values[0, 0]);
+            } finally {
+                if (File.Exists(filePath)) {
+                    File.Delete(filePath);
+                }
+            }
+        }
+
+        [Fact]
+        public void Test_ReaderOpenNormalizedPath_CanReadWorkbook() {
+            string sourcePath = Path.Combine(_directoryDocuments, "BasicExcel.xlsx");
+            string filePath = Path.Combine(_directoryWithFiles, "ReaderOpenNormalized.xlsx");
+            File.Copy(sourcePath, filePath, overwrite: true);
+
+            RewriteContentTypes(filePath, root => {
+                var appOverride = GetOrAddAppPropertiesOverride(root);
+                appOverride.SetAttributeValue("ContentType", "application/xml");
+            });
+
+            using var reader = ExcelDocumentReader.Open(filePath);
+            var sheetNames = reader.GetSheetNames();
+            Assert.NotEmpty(sheetNames);
+        }
+
+        [Fact]
+        public void Test_ReaderOpenNormalizedStream_CanReadWorkbook() {
+            string sourcePath = Path.Combine(_directoryDocuments, "BasicExcel.xlsx");
+            string filePath = Path.Combine(_directoryWithFiles, "ReaderOpenNormalizedStream.xlsx");
+            File.Copy(sourcePath, filePath, overwrite: true);
+
+            RewriteContentTypes(filePath, root => {
+                var appOverride = GetOrAddAppPropertiesOverride(root);
+                appOverride.SetAttributeValue("ContentType", "application/xml");
+            });
+
+            using var stream = new MemoryStream(File.ReadAllBytes(filePath));
+            using var reader = ExcelDocumentReader.Open(stream);
+            var sheetNames = reader.GetSheetNames();
+            Assert.NotEmpty(sheetNames);
+        }
+
+        [Fact]
+        public void Test_LoadWithSaveOnDispose_AtomicallyReplacesSourceWhileReadHandleIsOpen() {
+            string sourcePath = Path.Combine(_directoryDocuments, "BasicExcel.xlsx");
+            string filePath = Path.Combine(_directoryWithFiles, "LoadAutoSaveCopyBackFailure.xlsx");
+            File.Copy(sourcePath, filePath, overwrite: true);
+
+            using var fileLock = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+
+            using (var document = ExcelDocument.Load(filePath, new OfficeIMO.Excel.ExcelLoadOptions {
+                PersistenceMode = OfficeIMO.DocumentPersistenceMode.SaveOnDispose
+            })) {
+                document.Sheets[0].CellValue(1, 1, "Updated");
+            }
+
+            using var reloaded = ExcelDocument.Load(filePath, new OfficeIMO.Excel.ExcelLoadOptions {
+                AccessMode = OfficeIMO.DocumentAccessMode.ReadOnly
+            });
+            Assert.True(reloaded.Sheets[0].TryGetCellText(1, 1, out string? value));
+            Assert.Equal("Updated", value);
+        }
+
+        private static void RewriteContentTypes(string filePath, Action<XElement> mutateRoot) {
+            using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            using var archive = new ZipArchive(fileStream, ZipArchiveMode.Update, leaveOpen: false);
+
+            var contentTypes = archive.GetEntry("[Content_Types].xml") ?? throw new InvalidOperationException("Missing content types.");
+
+            string xml;
+            using (var entryStream = contentTypes.Open())
+            using (var reader = new StreamReader(entryStream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false))) {
+                xml = reader.ReadToEnd();
+            }
+
+            var document = XDocument.Parse(xml, LoadOptions.PreserveWhitespace);
+            var root = document.Root ?? throw new InvalidOperationException("Missing content types root.");
+            mutateRoot(root);
+
+            contentTypes.Delete();
+            var replacement = archive.CreateEntry("[Content_Types].xml", CompressionLevel.NoCompression);
+            using var replacementStream = replacement.Open();
+            var settings = new XmlWriterSettings {
+                Encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                Indent = false,
+                OmitXmlDeclaration = false,
+                NewLineHandling = NewLineHandling.None
+            };
+            using var writer = XmlWriter.Create(replacementStream, settings);
+            document.Save(writer);
+            writer.Flush();
+        }
+
+        private static XElement GetOrAddAppPropertiesOverride(XElement root) {
+            XNamespace ns = root.Name.Namespace;
+            var appOverride = root.Elements(ns + "Override")
+                .FirstOrDefault(e => string.Equals((string?)e.Attribute("PartName"), "/docProps/app.xml", StringComparison.OrdinalIgnoreCase));
+            if (appOverride != null) {
+                return appOverride;
+            }
+
+            appOverride = new XElement(ns + "Override",
+                new XAttribute("PartName", "/docProps/app.xml"),
+                new XAttribute("ContentType", "application/vnd.openxmlformats-officedocument.extended-properties+xml"));
+            root.Add(appOverride);
+            return appOverride;
+        }
+
+    }
+}

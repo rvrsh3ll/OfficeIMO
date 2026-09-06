@@ -4,10 +4,15 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using OfficeIMO.Word;
-using SixLabors.ImageSharp;
+using Color = OfficeIMO.Drawing.OfficeColor;
 
 namespace OfficeIMO.Examples.Word {
     internal static partial class Watermark {
+        /// <summary>
+        /// Creates a document and inserts a simple text watermark.
+        /// </summary>
+        /// <param name="folderPath">Destination folder for the generated file.</param>
+        /// <param name="openWord">Whether to open the document after creation.</param>
         public static void Watermark_Sample2(string folderPath, bool openWord) {
             Console.WriteLine("[*] Creating standard document with watermark");
             string filePath = System.IO.Path.Combine(folderPath, "Basic Document with watermark.docx");
@@ -18,8 +23,8 @@ namespace OfficeIMO.Examples.Word {
 
                 document.Sections[0].SetMargins(WordMargin.Normal);
 
-                Console.WriteLine(document.Sections[0].Margins.Left.Value);
-                Console.WriteLine(document.Sections[0].Margins.Right.Value);
+                Console.WriteLine(document.Sections[0].Margins.Left);
+                Console.WriteLine(document.Sections[0].Margins.Right);
 
                 document.Sections[0].AddWatermark(WordWatermarkStyle.Text, "Confidential");
 
@@ -29,15 +34,16 @@ namespace OfficeIMO.Examples.Word {
 
                 Console.WriteLine("----");
 
-                Console.WriteLine(document.Sections[0].Margins.Left.Value);
-                Console.WriteLine(document.Sections[0].Margins.Right.Value);
+                Console.WriteLine(document.Sections[0].Margins.Left);
+                Console.WriteLine(document.Sections[0].Margins.Right);
 
-                Console.WriteLine(document.Sections[1].Margins.Left.Value);
-                Console.WriteLine(document.Sections[1].Margins.Right.Value);
+                Console.WriteLine(document.Sections[1].Margins.Left);
+                Console.WriteLine(document.Sections[1].Margins.Right);
 
                 document.Settings.SetBackgroundColor(Color.Azure);
 
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
     }

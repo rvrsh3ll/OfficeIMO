@@ -1,0 +1,94 @@
+name: "CodeQL Advanced"
+
+on:
+  push:
+    branches: [ "master" ]
+    paths-ignore:
+      - '*.md'
+      - 'Docs/**'
+      - 'Examples/**'
+      - '.gitignore'
+  pull_request:
+    branches: [ "master" ]
+    paths-ignore:
+      - '*.md'
+      - 'Docs/**'
+      - 'Examples/**'
+      - '.gitignore'
+  schedule:
+    - cron: '23 3 * * 1'
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}
+    timeout-minutes: 45
+    permissions:
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: csharp
+            build-mode: manual
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup .NET SDK
+        if: matrix.build-mode == 'manual'
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: |
+            8.0.418
+            10.0.103
+
+      - name: Cache NuGet packages
+        if: matrix.build-mode == 'manual'
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          dependency-caching: false
+          config-file: ./.github/codeql/codeql-config.yml
+
+      - name: Restore and Build
+        if: matrix.build-mode == 'manual'
+        shell: pwsh
+        run: |
+          $excludedProjects = '[\\\\/](output|bin|obj|OfficeIMO\.Examples|OfficeIMO\.Studio|OfficeIMO(\..+)?\.Tests|OfficeIMO\.VerifyTests|OfficeIMO(\..+)?\.Benchmarks(\..+)?|Build[\\\\/]PackageSmoke|Website[\\\\/]Apps[\\\\/]OfficeIMO\.Web\.Converter)[\\\\/]'
+          $projects = Get-ChildItem -Recurse -Filter *.csproj | Where-Object {
+            $_.FullName -notmatch $excludedProjects
+          } | Sort-Object FullName
+
+          $codeqlSolution = Join-Path $env:RUNNER_TEMP 'OfficeIMO.CodeQL.sln'
+          dotnet new sln --name OfficeIMO.CodeQL --output $env:RUNNER_TEMP --format sln
+          dotnet sln $codeqlSolution add @($projects.FullName)
+
+          # CodeQL needs a representative production build, not every target framework.
+          # Keep the normal test/build workflow responsible for the full TFM matrix.
+          dotnet restore $codeqlSolution -p:TargetFramework=net8.0
+          dotnet build $codeqlSolution --configuration Release --framework net8.0 --no-restore
+
+          # Studio is intentionally net10-only. Build it separately so CodeQL
+          # analyzes the desktop product without forcing it into the net8 graph.
+          dotnet restore OfficeIMO.Studio/OfficeIMO.Studio.csproj
+          dotnet build OfficeIMO.Studio/OfficeIMO.Studio.csproj --configuration Release --framework net10.0 --no-restore
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"

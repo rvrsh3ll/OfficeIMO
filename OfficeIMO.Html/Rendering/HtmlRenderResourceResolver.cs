@@ -1,0 +1,108 @@
+namespace OfficeIMO.Html;
+
+/// <summary>
+/// Asynchronously resolves a policy-approved HTML render resource without prescribing a network or storage dependency.
+/// </summary>
+/// <param name="request">Resolved resource request.</param>
+/// <param name="cancellationToken">Cancellation token covering caller cancellation and the configured resource timeout.</param>
+/// <returns>Resolved bytes and media type, or null when the caller cannot provide the resource.</returns>
+public delegate Task<HtmlResolvedResource?> HtmlRenderResourceResolver(HtmlRenderResourceRequest request, CancellationToken cancellationToken);
+
+internal delegate bool HtmlRenderSynchronousResourceResolver(
+    HtmlRenderResourceRequest request,
+    CancellationToken cancellationToken,
+    out HtmlResolvedResource? resource);
+
+internal sealed class HtmlRenderResourceByteLimitException : Exception {
+    internal HtmlRenderResourceByteLimitException(long actualBytes) {
+        ActualBytes = actualBytes;
+    }
+
+    internal long ActualBytes { get; }
+}
+
+internal sealed class HtmlRenderTotalResourceByteLimitException : Exception {
+    internal HtmlRenderTotalResourceByteLimitException(long actualBytes) {
+        ActualBytes = actualBytes;
+    }
+
+    internal long ActualBytes { get; }
+}
+
+/// <summary>
+/// Policy-approved resource request passed to an application-supplied resolver.
+/// </summary>
+public sealed class HtmlRenderResourceRequest {
+    private readonly Func<bool>? _tryReserveAdditionalRequest;
+
+    internal HtmlRenderResourceRequest(Uri uri, string source, HtmlResourceKind kind,
+        Func<bool>? tryReserveAdditionalRequest = null) {
+        Uri = uri;
+        Source = source;
+        Kind = kind;
+        _tryReserveAdditionalRequest = tryReserveAdditionalRequest;
+    }
+
+    /// <summary>Absolute URI after base-URI resolution and URL-policy evaluation.</summary>
+    public Uri Uri { get; }
+
+    /// <summary>Raw source reference from the HTML document.</summary>
+    public string Source { get; }
+
+    /// <summary>Resource kind requested by the renderer.</summary>
+    public HtmlResourceKind Kind { get; }
+
+    internal bool TryReserveAdditionalRequest() => _tryReserveAdditionalRequest?.Invoke() ?? true;
+}
+
+/// <summary>
+/// Immutable bytes returned by an application-supplied HTML resource resolver.
+/// </summary>
+public sealed class HtmlResolvedResource {
+    private readonly byte[] _bytes;
+
+    /// <summary>Creates a resolved resource snapshot.</summary>
+    public HtmlResolvedResource(byte[] bytes, string contentType)
+        : this(bytes, contentType, null, 0, hasRedirectProvenance: false) {
+    }
+
+    /// <summary>
+    /// Creates a resolved resource snapshot with optional redirect provenance. Network-backed resolvers should
+    /// report the final URI and redirect count so archive and host policies can enforce their redirect boundary.
+    /// </summary>
+    public HtmlResolvedResource(byte[] bytes, string contentType, Uri? finalUri, int redirectCount = 0)
+        : this(bytes, contentType, finalUri, redirectCount, hasRedirectProvenance: true) {
+    }
+
+    private HtmlResolvedResource(byte[] bytes, string contentType, Uri? finalUri, int redirectCount, bool hasRedirectProvenance) {
+        if (bytes == null || bytes.Length == 0) throw new ArgumentException("Resolved resources require non-empty bytes.", nameof(bytes));
+        if (redirectCount < 0) throw new ArgumentOutOfRangeException(nameof(redirectCount));
+        _bytes = (byte[])bytes.Clone();
+        ContentType = string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : contentType.Trim();
+        FinalUri = finalUri;
+        RedirectCount = redirectCount;
+        HasRedirectProvenance = hasRedirectProvenance;
+    }
+
+    /// <summary>Resolved resource bytes.</summary>
+    public byte[] Bytes => (byte[])_bytes.Clone();
+
+    // First-party consumers share the immutable snapshot instead of repeatedly cloning large
+    // image, font, and stylesheet payloads. The public boundary remains defensive.
+    internal byte[] EncodedBytes => _bytes;
+
+    /// <summary>Resolved resource length in bytes.</summary>
+    public long Length => _bytes.LongLength;
+
+    /// <summary>Declared media type.</summary>
+    public string ContentType { get; }
+
+    /// <summary>Final URI after redirects, when the resolver can report it.</summary>
+    public Uri? FinalUri { get; }
+
+    /// <summary>Number of redirects followed by the resolver.</summary>
+    public int RedirectCount { get; }
+
+    /// <summary>Whether the resolver explicitly reported final-URI and redirect metadata.</summary>
+    public bool HasRedirectProvenance { get; }
+}

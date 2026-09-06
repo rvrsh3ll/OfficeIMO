@@ -1,0 +1,126 @@
+/* OfficeIMO Prism palette.
+   Code surfaces and token colors change together so neither theme can combine
+   light-surface tokens with a dark block (or the reverse). */
+:root,
+[data-theme="light"] {
+  --imo-code-comment: #596579;
+  --imo-code-keyword: #075985;
+  --imo-code-string: #166534;
+  --imo-code-punctuation: #334155;
+  --imo-code-operator: #475569;
+  --imo-code-function: #6d28d9;
+  --imo-code-number: #9a3412;
+  --imo-code-variable: #0369a1;
+  --imo-code-important: #a83f0a;
+}
+
+[data-theme="dark"] {
+  --imo-code-comment: #9aa9bd;
+  --imo-code-keyword: #67e8f9;
+  --imo-code-string: #6ee7b7;
+  --imo-code-punctuation: #cbd5e1;
+  --imo-code-operator: #e2e8f0;
+  --imo-code-function: #c4b5fd;
+  --imo-code-number: #fbbf24;
+  --imo-code-variable: #7dd3fc;
+  --imo-code-important: #fdba74;
+}
+
+/* Base: code block background & text */
+pre[class*="language-"],
+code[class*="language-"] {
+  background: var(--imo-code-bg, #f3f6fb);
+  color: var(--imo-code-text, #172033);
+  text-shadow: none;
+  tab-size: 2;
+}
+
+pre[class*="language-"] .token,
+code[class*="language-"] .token {
+  background: transparent;
+  text-shadow: none;
+}
+
+pre[class*="language-"] {
+  border: 1px solid var(--imo-code-border, #c7d1df);
+  border-radius: var(--pf-radius-sm, 8px);
+  box-shadow: none;
+}
+
+pre[class*="language-"] ::selection,
+code[class*="language-"]::selection {
+  background: var(--imo-code-selection, #bfdbfe);
+}
+
+:not(pre) > code[class*="language-"] {
+  border-radius: 4px;
+  padding: 0.15em 0.35em;
+}
+
+/* ----- Token colors ----- */
+
+/* Comments */
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+  color: var(--imo-code-comment);
+}
+
+/* Keywords, properties, tags */
+.token.property,
+.token.tag,
+.token.constant,
+.token.symbol,
+.token.deleted,
+.token.atrule,
+.token.attr-name,
+.token.selector,
+.token.keyword {
+  color: var(--imo-code-keyword);
+}
+
+/* Strings, inserted text */
+.token.attr-value,
+.token.string,
+.token.char,
+.token.builtin,
+.token.inserted {
+  color: var(--imo-code-string);
+}
+
+/* Punctuation */
+.token.punctuation {
+  color: var(--imo-code-punctuation);
+}
+
+/* Operators, entities, URLs */
+.token.operator,
+.token.entity,
+.token.url {
+  color: var(--imo-code-operator);
+  background: transparent;
+}
+
+/* Functions, class names */
+.token.function,
+.token.class-name {
+  color: var(--imo-code-function);
+}
+
+/* Numbers, booleans */
+.token.number,
+.token.boolean {
+  color: var(--imo-code-number);
+}
+
+/* Variables */
+.token.variable {
+  color: var(--imo-code-variable);
+}
+
+/* Regex, important */
+.token.regex,
+.token.important {
+  color: var(--imo-code-important);
+}

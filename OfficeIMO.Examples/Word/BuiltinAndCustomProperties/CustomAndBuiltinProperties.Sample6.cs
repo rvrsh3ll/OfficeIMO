@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -7,12 +7,16 @@ using OfficeIMO.Word;
 
 namespace OfficeIMO.Examples.Word {
     internal partial class CustomAndBuiltinProperties {
+        /// <summary>
+        /// Reads a document and prints its custom properties.
+        /// </summary>
+        /// <param name="openWord">Whether to open the document after reading.</param>
         public static void Example_ReadWord(bool openWord) {
             Console.WriteLine("[*] Read Basic Word");
 
             string documentPaths = System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "Templates");
 
-            WordDocument document = WordDocument.Load(System.IO.Path.Combine(documentPaths, "BasicDocument.docx"), true);
+            WordDocument document = WordDocument.Load(System.IO.Path.Combine(documentPaths, "BasicDocument.docx"), new OfficeIMO.Word.WordLoadOptions { AccessMode = OfficeIMO.DocumentAccessMode.ReadOnly });
 
             Console.WriteLine("This document has " + document.Paragraphs.Count + " paragraphs. Cool right?");
             Console.WriteLine("+ Document Title: " + document.BuiltinDocumentProperties.Title);

@@ -1,11 +1,11 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using DocumentFormat.OpenXml.Wordprocessing;
 using OfficeIMO.Word;
-using Color = SixLabors.ImageSharp.Color;
+using Color = OfficeIMO.Drawing.OfficeColor;
 
 namespace OfficeIMO.Examples.Word {
     internal static partial class Tables {
@@ -14,7 +14,7 @@ namespace OfficeIMO.Examples.Word {
             string filePath = System.IO.Path.Combine(folderPath, "Document with Tables.docx");
             using (WordDocument document = WordDocument.Create(filePath)) {
                 var paragraph = document.AddParagraph("Basic paragraph - Page 4");
-                paragraph.ParagraphAlignment = JustificationValues.Center;
+                paragraph.ParagraphAlignment = WordParagraphAlignment.Center;
 
                 WordTable wordTable = document.AddTable(3, 4, WordTableStyle.PlainTable1);
                 wordTable.Rows[0].Cells[0].Paragraphs[0].Text = "Test 1";
@@ -45,7 +45,7 @@ namespace OfficeIMO.Examples.Word {
 
                 wordTable.Rows[8].Cells[1].Paragraphs[0].Text = "This should be in row 8th";
                 wordTable.Rows[1].Cells[2].Paragraphs[2].Text = "Change me";
-                wordTable.Rows[1].Cells[2].Paragraphs[2].SetColor(SixLabors.ImageSharp.Color.Green);
+                wordTable.Rows[1].Cells[2].Paragraphs[2].SetColor(OfficeIMO.Drawing.OfficeColor.Green);
                 // lets overwrite style
                 wordTable.Style = WordTableStyle.GridTable6ColorfulAccent1;
 
@@ -61,7 +61,7 @@ namespace OfficeIMO.Examples.Word {
 
                 Console.WriteLine(document.Tables.Count);
 
-                document.Save(false);
+                document.Save();
             }
 
             using (WordDocument document = WordDocument.Load(filePath)) {
@@ -90,13 +90,14 @@ namespace OfficeIMO.Examples.Word {
                 wordTable = document.AddTable(7, 4, WordTableStyle.PlainTable1);
 
                 wordTable.Rows[0].Cells[2].Paragraphs[0].Text = "Some test 0";
+                wordTable.Rows[0].Cells[0].MergeVertically(1);
                 wordTable.Rows[1].Cells[2].Paragraphs[0].Text = "Some test 1";
                 wordTable.Rows[2].Cells[2].Paragraphs[0].Text = "Some test 2";
                 wordTable.Rows[3].Cells[2].Paragraphs[0].Text = "Some test 3";
                 wordTable.Rows[0].Cells[2].MergeVertically(2, true);
 
 
-                document.AddHorizontalLine(BorderValues.Double, Color.Green);
+                document.AddHorizontalLine(WordBorderStyle.Double, Color.Green);
 
 
                 document.AddParagraph("Test");
@@ -110,9 +111,10 @@ namespace OfficeIMO.Examples.Word {
 
                 section.AddParagraph("This is a big test");
 
-                section.AddHorizontalLine(BorderValues.BalloonsHotAir, null, 24, 24);
+                section.AddHorizontalLine(WordBorderStyle.BalloonsHotAir, null, 24, 24);
 
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
     }

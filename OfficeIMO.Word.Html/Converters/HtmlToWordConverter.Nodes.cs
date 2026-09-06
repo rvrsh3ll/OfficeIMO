@@ -1,0 +1,1073 @@
+using AngleSharp;
+using AngleSharp.Css;
+using AngleSharp.Css.Dom;
+using AngleSharp.Css.Parser;
+using AngleSharp.Dom;
+using AngleSharp.Html.Dom;
+using AngleSharp.Io;
+using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Wordprocessing;
+using System.Collections.Concurrent;
+using System.Globalization;
+using System.Net;
+using System.Net.Http;
+using System.Security.Cryptography;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
+using M = DocumentFormat.OpenXml.Math;
+
+namespace OfficeIMO.Word.Html {
+    internal partial class HtmlToWordConverter {
+        private static bool HasBlockDescendant(IElement element) {
+            var stack = new Stack<IElement>();
+            stack.Push(element);
+            while (stack.Count > 0) {
+                var current = stack.Pop();
+                foreach (var child in current.Children) {
+                    if (_blockTags.Contains(child.TagName)) {
+                        return true;
+                    }
+                    stack.Push(child);
+                }
+            }
+            return false;
+        }
+
+        private void ProcessNode(INode node, WordDocument doc, WordSection section, HtmlToWordOptions options,
+            WordParagraph? currentParagraph, Stack<WordList> listStack, TextFormatting formatting, WordTableCell? cell, WordHeaderFooter? headerFooter = null, WordList? headingList = null) {
+            if (node is IElement element) {
+                ApplyCssToElement(element);
+                ReportAccessibilityDiagnostics(element);
+                switch (element.TagName.ToLowerInvariant()) {
+                    case "math": {
+                            WordParagraph paragraph = currentParagraph ?? AddParagraphInScope(section, cell, headerFooter);
+                            string? equationLabel = element.GetAttribute("aria-label");
+                            if (string.IsNullOrWhiteSpace(equationLabel) &&
+                                HtmlMathMlToOmmlConverter.TryConvert(element, out string structuredOmml)) {
+                                paragraph.AddEquation(structuredOmml);
+                            } else {
+                                string equationText = equationLabel ?? element.TextContent ?? string.Empty;
+                                var officeMath = new M.OfficeMath(new M.Run(new M.Text(equationText)));
+                                paragraph.AddEquation(officeMath.OuterXml);
+                            }
+                            break;
+                        }
+                    case "body": {
+                            var fmt = formatting;
+                            var bodyStyle = element.GetAttribute("style");
+                            if (!string.IsNullOrWhiteSpace(bodyStyle)) {
+                                ApplySpanStyles(element, ref fmt);
+                            }
+                            WordParagraph? para = currentParagraph;
+                            if (para == null && cell != null) {
+                                var existingParagraphs = cell.Paragraphs;
+                                if (existingParagraphs.Count == 1 && IsReplaceableEmptyCellParagraph(existingParagraphs[0])) {
+                                    para = existingParagraphs[0];
+                                }
+                            }
+                            foreach (var child in element.ChildNodes) {
+                                int paragraphCount = GetParagraphsInScope(section, cell, headerFooter).Count;
+                                bool standaloneResource = ShouldStartBodyResourceParagraph(child);
+                                bool startsOwnParagraph = standaloneResource ||
+                                    child is IElement childElement &&
+                                    ShouldStartContainerChildParagraph(childElement);
+                                ProcessNode(child, doc, section, options, startsOwnParagraph ? null : para, listStack, fmt, cell, headerFooter, headingList);
+                                if (startsOwnParagraph) {
+                                    para = null;
+                                } else if (para == null) {
+                                    var scopedParagraphs = GetParagraphsInScope(section, cell, headerFooter);
+                                    if (scopedParagraphs.Count > paragraphCount) {
+                                        para = scopedParagraphs[scopedParagraphs.Count - 1];
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                    case "section": {
+                            var fmt = formatting;
+                            var divStyle = element.GetAttribute("style");
+                            var mergeSectionStyleIntoChildren = !IsExportedWordSectionElement(element);
+                            if (!string.IsNullOrWhiteSpace(divStyle)) {
+                                ApplySpanStyles(element, ref fmt);
+                                PreserveBlockBackgroundAsTextBackdrop(ref fmt, formatting);
+                            }
+                            if (options.SectionTagHandling == SectionTagHandling.WordSection && cell == null) {
+                                var newSection = ShouldReuseInitialWordSection(element, doc, section) ? section : doc.AddSection();
+                                ApplyExportedSectionMetadata(element, newSection);
+                                int startIndex = newSection.Paragraphs.Count;
+                                int tableStartIndex = GetTablesInScope(newSection, null, headerFooter).Count;
+                                WordParagraph? para = null;
+                                foreach (var child in element.ChildNodes) {
+                                    if (mergeSectionStyleIntoChildren && !string.IsNullOrWhiteSpace(divStyle) && child is IElement childElement) {
+                                        ResolveComputedFontSizePixels(childElement);
+                                        var merged = MergeStyles(divStyle, childElement);
+                                        if (!string.IsNullOrEmpty(merged)) {
+                                            childElement.SetAttribute("style", merged);
+                                        }
+                                    }
+                                    ProcessNode(child, doc, newSection, options, para, listStack, fmt, null, headerFooter, headingList);
+                                    para = null;
+                                }
+                                if (mergeSectionStyleIntoChildren) {
+                                    List<WordParagraph> generatedParagraphs = GetMaterializedContainerParagraphs(
+                                        element,
+                                        newSection,
+                                        null,
+                                        headerFooter,
+                                        null,
+                                        startIndex,
+                                        tableStartIndex);
+                                    List<WordTable> generatedTables = GetGeneratedTables(newSection, null, headerFooter, tableStartIndex);
+                                    ApplyContainerFrameFromCss(element, generatedParagraphs, generatedTables);
+                                    ApplyContainerPageBreaksFromCss(element, generatedParagraphs, generatedTables);
+                                }
+                                var secId = element.GetAttribute("id");
+                                if (!string.IsNullOrEmpty(secId)) {
+                                    var paragraph = newSection.Paragraphs.Count > startIndex ? newSection.Paragraphs[startIndex] : newSection.AddParagraph("");
+                                    WordBookmark.AddBookmark(paragraph, $"section:{secId}");
+                                }
+                            } else {
+                                int startIndex = GetGeneratedParagraphStartIndex(section, cell, headerFooter);
+                                int tableStartIndex = GetTablesInScope(section, cell, headerFooter).Count;
+                                WordParagraph? para = currentParagraph;
+                                foreach (var child in element.ChildNodes) {
+                                    if (mergeSectionStyleIntoChildren && !string.IsNullOrWhiteSpace(divStyle) && child is IElement childElement) {
+                                        ResolveComputedFontSizePixels(childElement);
+                                        var merged = MergeStyles(divStyle, childElement);
+                                        if (!string.IsNullOrEmpty(merged)) {
+                                            childElement.SetAttribute("style", merged);
+                                        }
+                                    }
+                                    ProcessNode(child, doc, section, options, para, listStack, fmt, cell, headerFooter, headingList);
+                                    para = null;
+                                }
+                                if (mergeSectionStyleIntoChildren) {
+                                    List<WordParagraph> generatedParagraphs = GetMaterializedContainerParagraphs(
+                                        element,
+                                        section,
+                                        cell,
+                                        headerFooter,
+                                        currentParagraph,
+                                        startIndex,
+                                        tableStartIndex);
+                                    List<WordTable> generatedTables = GetGeneratedTables(section, cell, headerFooter, tableStartIndex);
+                                    ApplyContainerFrameFromCss(element, generatedParagraphs, generatedTables);
+                                    ApplyContainerPageBreaksFromCss(element, generatedParagraphs, generatedTables);
+                                }
+                                var secId = element.GetAttribute("id");
+                                if (!string.IsNullOrEmpty(secId)) {
+                                    var scopedParagraphs = GetParagraphsInScope(section, cell, headerFooter);
+                                    var paragraph = scopedParagraphs.Count > startIndex ? scopedParagraphs[startIndex] : AddParagraphInScope(section, cell, headerFooter);
+                                    WordBookmark.AddBookmark(paragraph, $"section:{secId}");
+                                }
+                            }
+                            break;
+                        }
+                    case "article":
+                    case "aside":
+                    case "nav":
+                    case "header":
+                    case "footer":
+                    case "main": {
+                            if (TryProcessExportedHeaderFooterRegion(element, doc, section, options, formatting, cell, headerFooter)) break;
+
+                            var fmt = formatting;
+                            var divStyle = element.GetAttribute("style");
+                            if (!string.IsNullOrWhiteSpace(divStyle)) {
+                                ApplySpanStyles(element, ref fmt);
+                                PreserveBlockBackgroundAsTextBackdrop(ref fmt, formatting);
+                            }
+                            int scopeStartIndex = GetGeneratedParagraphStartIndex(section, cell, headerFooter);
+                            int tableStartIndex = GetTablesInScope(section, cell, headerFooter).Count;
+                            WordParagraph? para = currentParagraph;
+                            foreach (var child in element.ChildNodes) {
+                                if (!string.IsNullOrWhiteSpace(divStyle) && child is IElement childElement) {
+                                    ResolveComputedFontSizePixels(childElement);
+                                    var merged = MergeStyles(divStyle, childElement);
+                                    if (!string.IsNullOrEmpty(merged)) {
+                                        childElement.SetAttribute("style", merged);
+                                    }
+                                }
+                                ProcessNode(child, doc, section, options, para, listStack, fmt, cell, headerFooter, headingList);
+                                para = null;
+                            }
+                            var id = element.GetAttribute("id");
+                            if (!string.IsNullOrEmpty(id)) {
+                                var scopedParagraphs = GetParagraphsInScope(section, cell, headerFooter);
+                                var paragraph = scopedParagraphs.Count > scopeStartIndex ? scopedParagraphs[scopeStartIndex] : AddParagraphInScope(section, cell, headerFooter);
+                                WordBookmark.AddBookmark(paragraph, $"{element.TagName.ToLowerInvariant()}:{id}");
+                            }
+                            var generatedParagraphs = GetMaterializedContainerParagraphs(
+                                element,
+                                section,
+                                cell,
+                                headerFooter,
+                                currentParagraph,
+                                scopeStartIndex,
+                                tableStartIndex);
+                            List<WordTable> generatedTables = GetGeneratedTables(section, cell, headerFooter, tableStartIndex);
+                            ApplyContainerFrameFromCss(element, generatedParagraphs, generatedTables);
+                            ApplyContainerPageBreaksFromCss(element, generatedParagraphs, generatedTables);
+                            break;
+                        }
+                    case "h1":
+                    case "h2":
+                    case "h3":
+                    case "h4":
+                    case "h5":
+                    case "h6": {
+                            int level = int.Parse(element.TagName.Substring(1));
+                            WordParagraph paragraph;
+                            if (options.SupportsHeadingNumbering && headingList != null) {
+                                WordParagraph? insertionAnchor = null;
+                                if (cell != null) {
+                                    var cellParagraphs = cell.Paragraphs;
+                                    insertionAnchor = cellParagraphs.LastOrDefault();
+                                }
+                                paragraph = insertionAnchor == null
+                                    ? headingList.AddItem("", level - 1)
+                                    : headingList.AddItemAfter("", level - 1, insertionAnchor);
+                            } else {
+                                paragraph = AddParagraphInScope(section, cell, headerFooter);
+                            }
+                            paragraph.Style = WordHeadingStyleMapper.GetHeadingStyleForLevel(level);
+                            var fmt = formatting;
+                            ApplySpanStyles(element, ref fmt);
+                            var props = ApplyParagraphStyleFromCss(paragraph, element);
+                            PreserveBlockBackgroundAsTextBackdrop(ref fmt, formatting);
+                            ApplyClassStyle(element, paragraph, options);
+                            ApplyBidiIfPresent(element, paragraph);
+                            AddBookmarkIfPresent(element, paragraph);
+                            if (props.WhiteSpace.HasValue) {
+                                fmt.WhiteSpace = props.WhiteSpace.Value;
+                            }
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, paragraph, listStack, fmt, cell, headerFooter, headingList);
+                            }
+                            ApplyParagraphFrameFromCss(paragraph, element);
+                            ApplyPageBreakAfterFromCss(paragraph, element);
+                            break;
+                        }
+                    case "p": {
+                            var paragraph = AddParagraphInScope(section, cell, headerFooter);
+                            var fmt = formatting;
+                            ApplySpanStyles(element, ref fmt);
+                            var props = ApplyParagraphStyleFromCss(paragraph, element);
+                            PreserveBlockBackgroundAsTextBackdrop(ref fmt, formatting);
+                            if (props.WhiteSpace.HasValue) {
+                                fmt.WhiteSpace = props.WhiteSpace.Value;
+                            }
+                            ApplyClassStyle(element, paragraph, options);
+                            ApplyBidiIfPresent(element, paragraph);
+                            AddBookmarkIfPresent(element, paragraph);
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, paragraph, listStack, fmt, cell, headerFooter, headingList);
+                            }
+                            ApplyParagraphFrameFromCss(paragraph, element);
+                            ApplyPageBreakAfterFromCss(paragraph, element);
+                            break;
+                        }
+                    case "dt": {
+                            var paragraph = AddParagraphInScope(section, cell, headerFooter);
+                            var fmt = formatting;
+                            ApplySpanStyles(element, ref fmt);
+                            var props = ApplyParagraphStyleFromCss(paragraph, element);
+                            PreserveBlockBackgroundAsTextBackdrop(ref fmt, formatting);
+                            if (props.WhiteSpace.HasValue) {
+                                fmt.WhiteSpace = props.WhiteSpace.Value;
+                            }
+                            ApplyClassStyle(element, paragraph, options);
+                            paragraph.SetStyleId(HtmlSemanticStyleIds.DefinitionTerm);
+                            ApplyBidiIfPresent(element, paragraph);
+                            AddBookmarkIfPresent(element, paragraph);
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, paragraph, listStack, fmt, cell, headerFooter, headingList);
+                            }
+                            ApplyParagraphFrameFromCss(paragraph, element);
+                            ApplyPageBreakAfterFromCss(paragraph, element);
+                            break;
+                        }
+                    case "dd": {
+                            var paragraph = AddParagraphInScope(section, cell, headerFooter);
+                            var fmt = formatting;
+                            ApplySpanStyles(element, ref fmt);
+                            var props = ApplyParagraphStyleFromCss(paragraph, element);
+                            PreserveBlockBackgroundAsTextBackdrop(ref fmt, formatting);
+                            if (props.WhiteSpace.HasValue) {
+                                fmt.WhiteSpace = props.WhiteSpace.Value;
+                            }
+                            ApplyClassStyle(element, paragraph, options);
+                            paragraph.SetStyleId(HtmlSemanticStyleIds.DefinitionDescription);
+                            ApplyBidiIfPresent(element, paragraph);
+                            AddBookmarkIfPresent(element, paragraph);
+                            var currentIndent = paragraph.IndentationBefore ?? 0;
+                            if (currentIndent < 720) {
+                                paragraph.IndentationBefore = 720;
+                            }
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, paragraph, listStack, fmt, cell, headerFooter, headingList);
+                            }
+                            ApplyParagraphFrameFromCss(paragraph, element);
+                            ApplyPageBreakAfterFromCss(paragraph, element);
+                            break;
+                        }
+                    case "blockquote": {
+                            var startIndex = GetGeneratedParagraphStartIndex(section, cell, headerFooter);
+                            var cite = element.GetAttribute("cite");
+                            var fmt = formatting;
+                            ApplySpanStyles(element, ref fmt);
+                            PreserveBlockBackgroundAsTextBackdrop(ref fmt, formatting);
+                            WordParagraph? firstPara = null;
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, firstPara, listStack, fmt, cell, headerFooter, headingList);
+                                var scopedParagraphs = GetParagraphsInScope(section, cell, headerFooter);
+                                if (firstPara == null && scopedParagraphs.Count > startIndex) {
+                                    firstPara = scopedParagraphs[startIndex];
+                                }
+                            }
+                            if (firstPara == null) {
+                                firstPara = AddParagraphInScope(section, cell, headerFooter);
+                            }
+                            var blockquoteParagraphs = GetParagraphsInScope(section, cell, headerFooter);
+                            var endIndex = blockquoteParagraphs.Count;
+                            for (int i = startIndex; i < endIndex; i++) {
+                                var para = blockquoteParagraphs[i];
+                                if (doc.StyleExists("Quote")) {
+                                    para.SetStyleId("Quote");
+                                }
+                                para.IndentationBefore = 720;
+                                ApplyParagraphStyleFromCss(
+                                    para,
+                                    element,
+                                    applyVerticalBoxSpacing: false);
+                                ApplyClassStyle(element, para, options);
+                                ApplyBidiIfPresent(element, para);
+                                if (para == firstPara) {
+                                    AddBookmarkIfPresent(element, para);
+                                }
+                            }
+                            List<WordParagraph> generatedBlockquoteParagraphs =
+                                blockquoteParagraphs.Skip(startIndex).Take(endIndex - startIndex).ToList();
+                            ApplyContainerFrameFromCss(
+                                element,
+                                generatedBlockquoteParagraphs,
+                                applyContainerSpacing: false);
+                            ApplyContainerVerticalSpacingFromCss(
+                                element,
+                                generatedBlockquoteParagraphs,
+                                Array.Empty<WordTable>());
+                            if (!string.IsNullOrEmpty(cite)) {
+                                HtmlSemanticMetadata.SetBlockquoteCite(firstPara!, cite);
+                                var noteRef = AddNoteReference(firstPara!, cite ?? string.Empty, options);
+                                noteRef.SetCharacterStyleId(HtmlSemanticStyleIds.BlockquoteCite);
+                                TryLinkNoteReference(noteRef, cite ?? string.Empty, options);
+                            }
+                            break;
+                        }
+                    case "svg": {
+                            WordParagraph? svgParagraph = currentParagraph;
+                            int cellParagraphCount = cell?.Paragraphs.Count ?? 0;
+                            bool createdSvgParagraph = false;
+                            if (svgParagraph == null && cell != null) {
+                                svgParagraph = AddParagraphInScope(section, cell, headerFooter);
+                                createdSvgParagraph = true;
+                            }
+                            if (!ProcessSvgElement(element, doc, section, options, svgParagraph, headerFooter) &&
+                                createdSvgParagraph &&
+                                cell != null &&
+                                cell.Paragraphs.Count > cellParagraphCount) {
+                                svgParagraph!.Remove();
+                            }
+                            break;
+                        }
+                    case "pre": {
+                            ProcessPreformattedElement(element, doc, section, options, currentParagraph, cell, headerFooter);
+                            break;
+                        }
+                    case "code": {
+                            ProcessInlineCodeElement(element, doc, section, options, currentParagraph, listStack, formatting, cell, headerFooter, headingList);
+                            break;
+                        }
+                    case "div":
+                    case "address":
+                    case "dl": {
+                            var fmt = formatting;
+                            var divStyle = element.GetAttribute("style");
+                            if (!string.IsNullOrWhiteSpace(divStyle)) {
+                                ApplySpanStyles(element, ref fmt);
+                                PreserveBlockBackgroundAsTextBackdrop(ref fmt, formatting);
+                            }
+                            int startIndex = GetGeneratedParagraphStartIndex(section, cell, headerFooter);
+                            int tableStartIndex = GetTablesInScope(section, cell, headerFooter).Count;
+                            WordParagraph? para = currentParagraph;
+                            foreach (var child in element.ChildNodes) {
+                                int paragraphCount = GetParagraphsInScope(section, cell, headerFooter).Count;
+                                if (!string.IsNullOrWhiteSpace(divStyle) && child is IElement childElement) {
+                                    ResolveComputedFontSizePixels(childElement);
+                                    var merged = MergeStyles(divStyle, childElement);
+                                    if (!string.IsNullOrEmpty(merged)) {
+                                        childElement.SetAttribute("style", merged);
+                                    }
+                                }
+                                bool startsOwnParagraph =
+                                    child is IElement blockChild &&
+                                    ShouldStartContainerChildParagraph(blockChild);
+                                ProcessNode(
+                                    child,
+                                    doc,
+                                    section,
+                                    options,
+                                    startsOwnParagraph ? null : para,
+                                    listStack,
+                                    fmt,
+                                    cell,
+                                    headerFooter,
+                                    headingList);
+                                if (startsOwnParagraph) {
+                                    para = null;
+                                } else if (para == null) {
+                                    var scopedParagraphs = GetParagraphsInScope(section, cell, headerFooter);
+                                    if (scopedParagraphs.Count > paragraphCount) {
+                                        para = scopedParagraphs[scopedParagraphs.Count - 1];
+                                    }
+                                }
+                            }
+                            var generatedParagraphs = GetMaterializedContainerParagraphs(
+                                element,
+                                section,
+                                cell,
+                                headerFooter,
+                                currentParagraph,
+                                startIndex,
+                                tableStartIndex);
+                            List<WordTable> generatedTables = GetGeneratedTables(section, cell, headerFooter, tableStartIndex);
+                            ApplyContainerFrameFromCss(element, generatedParagraphs, generatedTables);
+                            ApplyContainerPageBreaksFromCss(element, generatedParagraphs, generatedTables);
+                            break;
+                        }
+                    case "br": {
+                            currentParagraph ??= AddParagraphInScope(section, cell, headerFooter);
+                            currentParagraph.AddBreak();
+                            break;
+                        }
+                    case "hr": {
+                            AddParagraphInScope(section, cell, headerFooter).AddHorizontalLine();
+                            break;
+                        }
+                    case "strong":
+                    case "b": {
+                            var fmt = formatting;
+                            fmt.Bold = true;
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, currentParagraph, listStack, fmt, cell, headerFooter, headingList);
+                            }
+                            break;
+                        }
+                    case "em":
+                    case "i": {
+                            var fmt = formatting;
+                            fmt.Italic = true;
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, currentParagraph, listStack, fmt, cell, headerFooter, headingList);
+                            }
+                            break;
+                        }
+                    case "u": {
+                            var fmt = formatting;
+                            fmt.Underline = true;
+                            fmt.UnderlineStyle ??= UnderlineValues.Single;
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, currentParagraph, listStack, fmt, cell, headerFooter, headingList);
+                            }
+                            break;
+                        }
+                    case "s":
+                    case "del": {
+                            currentParagraph ??= AddParagraphInScope(section, cell, headerFooter);
+                            var fmt = formatting;
+                            fmt.Strike = true;
+                            int startRuns = currentParagraph.GetRuns().Count();
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, currentParagraph, listStack, fmt, cell, headerFooter, headingList);
+                            }
+                            if (string.Equals(element.TagName, "del", StringComparison.OrdinalIgnoreCase)) {
+                                var runs = currentParagraph.GetRuns().ToList();
+                                for (int i = startRuns; i < runs.Count; i++) {
+                                    runs[i].SetCharacterStyleId(HtmlSemanticStyleIds.DeletedText);
+                                }
+                            }
+                            break;
+                        }
+                    case "ins": {
+                            currentParagraph ??= AddParagraphInScope(section, cell, headerFooter);
+                            var fmt = formatting;
+                            fmt.Underline = true;
+                            fmt.UnderlineStyle ??= UnderlineValues.Single;
+                            int startRuns = currentParagraph.GetRuns().Count();
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, currentParagraph, listStack, fmt, cell, headerFooter, headingList);
+                            }
+                            var runs = currentParagraph.GetRuns().ToList();
+                            for (int i = startRuns; i < runs.Count; i++) {
+                                runs[i].SetCharacterStyleId(HtmlSemanticStyleIds.InsertedText);
+                            }
+                            break;
+                        }
+                    case "mark": {
+                            currentParagraph ??= AddParagraphInScope(section, cell, headerFooter);
+                            var fmt = formatting;
+                            fmt.Highlight = HighlightColorValues.Yellow;
+                            fmt.PreserveHighlightOverBackground = !string.IsNullOrEmpty(formatting.BackgroundColorHex);
+                            ApplySpanStyles(element, ref fmt);
+                            int startRuns = currentParagraph.GetRuns().Count();
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, currentParagraph, listStack, fmt, cell, headerFooter, headingList);
+                            }
+                            var runs = currentParagraph.GetRuns().ToList();
+                            for (int i = startRuns; i < runs.Count; i++) {
+                                runs[i].SetCharacterStyleId(HtmlSemanticStyleIds.MarkedText);
+                            }
+                            break;
+                        }
+                    case "q": {
+                            currentParagraph ??= AddParagraphInScope(section, cell, headerFooter);
+                            var fmt = formatting;
+                            ApplySpanStyles(element, ref fmt);
+                            var open = currentParagraph.AddFormattedText(options.QuotePrefix, fmt.Bold, fmt.Italic, GetUnderlineValue(fmt)?.ToOfficeEnum());
+                            ApplyFormatting(open, fmt, options);
+                            open.SetCharacterStyleId("HtmlQuote");
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, currentParagraph, listStack, fmt, cell, headerFooter, headingList);
+                            }
+                            var close = currentParagraph.AddFormattedText(options.QuoteSuffix, fmt.Bold, fmt.Italic, GetUnderlineValue(fmt)?.ToOfficeEnum());
+                            ApplyFormatting(close, fmt, options);
+                            close.SetCharacterStyleId("HtmlQuote");
+                            break;
+                        }
+                    case "cite": {
+                            currentParagraph ??= AddParagraphInScope(section, cell, headerFooter);
+                            var fmt = formatting;
+                            fmt.Italic = true;
+                            ApplySpanStyles(element, ref fmt);
+                            int startRuns = currentParagraph.GetRuns().Count();
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, currentParagraph, listStack, fmt, cell, headerFooter, headingList);
+                            }
+                            var runs = currentParagraph.GetRuns().ToList();
+                            for (int i = startRuns; i < runs.Count; i++) {
+                                runs[i].SetCharacterStyleId("HtmlCite");
+                            }
+                            break;
+                        }
+                    case "dfn": {
+                            currentParagraph ??= AddParagraphInScope(section, cell, headerFooter);
+                            var fmt = formatting;
+                            fmt.Italic = true;
+                            ApplySpanStyles(element, ref fmt);
+                            int startRuns = currentParagraph.GetRuns().Count();
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, currentParagraph, listStack, fmt, cell, headerFooter, headingList);
+                            }
+                            var runs = currentParagraph.GetRuns().ToList();
+                            for (int i = startRuns; i < runs.Count; i++) {
+                                runs[i].SetCharacterStyleId("HtmlDfn");
+                            }
+                            break;
+                        }
+                    case "time": {
+                            currentParagraph ??= AddParagraphInScope(section, cell, headerFooter);
+                            var fmt = formatting;
+                            ApplySpanStyles(element, ref fmt);
+                            var dateTime = element.GetAttribute("datetime");
+                            int startRuns = currentParagraph.GetRuns().Count();
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, currentParagraph, listStack, fmt, cell, headerFooter, headingList);
+                            }
+                            var runs = currentParagraph.GetRuns().ToList();
+                            for (int i = startRuns; i < runs.Count; i++) {
+                                runs[i].SetCharacterStyleId("HtmlTime");
+                                HtmlSemanticMetadata.SetTimeDateTime(runs[i], dateTime);
+                            }
+                            break;
+                        }
+                    case "sup": {
+                            var fmt = formatting;
+                            fmt.Superscript = true;
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, currentParagraph, listStack, fmt, cell, headerFooter, headingList);
+                            }
+                            break;
+                        }
+                    case "sub": {
+                            var fmt = formatting;
+                            fmt.Subscript = true;
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, currentParagraph, listStack, fmt, cell, headerFooter, headingList);
+                            }
+                            break;
+                        }
+                    case "font": {
+                            var fmt = formatting;
+                            ApplyFontStyles(element, ref fmt);
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, currentParagraph, listStack, fmt, cell, headerFooter, headingList);
+                            }
+                            break;
+                        }
+                    case "small": {
+                            var fmt = formatting;
+                            ApplySpanStyles(element, ref fmt);
+                            if (!fmt.FontSize.HasValue) {
+                                fmt.FontSize = 10;
+                            }
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, currentParagraph, listStack, fmt, cell, headerFooter, headingList);
+                            }
+                            break;
+                        }
+                    case "big": {
+                            var fmt = formatting;
+                            ApplySpanStyles(element, ref fmt);
+                            if (!fmt.FontSize.HasValue) {
+                                fmt.FontSize = 18;
+                            }
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, currentParagraph, listStack, fmt, cell, headerFooter, headingList);
+                            }
+                            break;
+                        }
+                    case "kbd":
+                    case "samp":
+                    case "tt": {
+                            var fmt = formatting;
+                            ApplySpanStyles(element, ref fmt);
+                            var mono = WordFontResolver.Resolve("monospace");
+                            if (!string.IsNullOrEmpty(mono)) {
+                                fmt.FontFamily = mono;
+                            }
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, currentParagraph, listStack, fmt, cell, headerFooter, headingList);
+                            }
+                            break;
+                        }
+                    case "var": {
+                            var fmt = formatting;
+                            ApplySpanStyles(element, ref fmt);
+                            fmt.Italic = true;
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, currentParagraph, listStack, fmt, cell, headerFooter, headingList);
+                            }
+                            break;
+                        }
+                    case "nobr": {
+                            var fmt = formatting;
+                            ApplySpanStyles(element, ref fmt);
+                            fmt.WhiteSpace = WhiteSpaceMode.NoWrap;
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, currentParagraph, listStack, fmt, cell, headerFooter, headingList);
+                            }
+                            break;
+                        }
+                    case "ruby": {
+                            var fmt = formatting;
+                            ApplySpanStyles(element, ref fmt);
+                            if (TryProcessRubyElement(element, section, options, currentParagraph, fmt, cell, headerFooter)) {
+                                break;
+                            }
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, currentParagraph, listStack, fmt, cell, headerFooter, headingList);
+                            }
+                            break;
+                        }
+                    case "rb":
+                    case "rt":
+                    case "rp": {
+                            var fmt = formatting;
+                            ApplySpanStyles(element, ref fmt);
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, currentParagraph, listStack, fmt, cell, headerFooter, headingList);
+                            }
+                            break;
+                        }
+                    case "span": {
+                            var fmt = formatting;
+                            ApplySpanStyles(element, ref fmt);
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, currentParagraph, listStack, fmt, cell, headerFooter, headingList);
+                            }
+                            break;
+                        }
+                    case "abbr":
+                    case "acronym": {
+                            currentParagraph ??= AddParagraphInScope(section, cell, headerFooter);
+                            var title = element.GetAttribute("title");
+                            var fmt = formatting;
+                            ApplySpanStyles(element, ref fmt);
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, currentParagraph, listStack, fmt, cell, headerFooter, headingList);
+                            }
+                            if (!string.IsNullOrEmpty(title)) {
+                                currentParagraph ??= AddParagraphInScope(section, cell, headerFooter);
+                                var fnRun = AddNoteReference(currentParagraph, title ?? string.Empty, options);
+                                fnRun.SetCharacterStyleId("HtmlAbbr");
+                                TryLinkNoteReference(fnRun, title ?? string.Empty, options);
+                            }
+                            break;
+                        }
+                    case "a": {
+                            var href = element.GetAttribute("href");
+                            var title = element.GetAttribute("title");
+                            var target = element.GetAttribute("target");
+                            var idAttr = element.GetAttribute("id");
+                            var nameAttr = element.GetAttribute("name");
+                            if (!string.IsNullOrEmpty(idAttr) || !string.IsNullOrEmpty(nameAttr)) {
+                                currentParagraph ??= AddParagraphInScope(section, cell, headerFooter);
+                                AddBookmarkIfPresent(element, currentParagraph);
+                            }
+                            if (string.IsNullOrWhiteSpace(href)) {
+                                var fmt = formatting;
+                                ApplySpanStyles(element, ref fmt);
+                                foreach (var child in element.ChildNodes) {
+                                    ProcessNode(child, doc, section, options, currentParagraph, listStack, fmt, cell, headerFooter, headingList);
+                                }
+                                break;
+                            }
+
+                            var normalizedHref = NormalizeHref(href!);
+                            if (IsInvalidHref(normalizedHref, options)) {
+                                var fmt = formatting;
+                                ApplySpanStyles(element, ref fmt);
+                                foreach (var child in element.ChildNodes) {
+                                    ProcessNode(child, doc, section, options, currentParagraph, listStack, fmt, cell, headerFooter, headingList);
+                                }
+                                break;
+                            }
+
+                            if (normalizedHref.StartsWith("#", StringComparison.Ordinal)) {
+                                var anchor = normalizedHref.TrimStart('#');
+                                if (string.IsNullOrEmpty(anchor)) {
+                                    var fmt = formatting;
+                                    ApplySpanStyles(element, ref fmt);
+                                    foreach (var child in element.ChildNodes) {
+                                        ProcessNode(child, doc, section, options, currentParagraph, listStack, fmt, cell, headerFooter, headingList);
+                                    }
+                                    break;
+                                }
+
+                                if (string.Equals(anchor, "top", StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(anchor, "_top", StringComparison.OrdinalIgnoreCase)) {
+                                    anchor = "_top";
+                                    if (headerFooter == null) {
+                                        _pendingTopBookmark = true;
+                                    }
+                                }
+
+                                if (TryProcessNoteAnchor(anchor, section, options, ref currentParagraph, cell, headerFooter)) {
+                                    break;
+                                }
+
+                                if (TryProcessCommentAnchor(anchor, section, ref currentParagraph, cell, headerFooter)) {
+                                    break;
+                                }
+
+                                currentParagraph ??= AddParagraphInScope(section, cell, headerFooter);
+                                var fmtAnchor = formatting;
+                                ApplySpanStyles(element, ref fmtAnchor);
+                                var hasBlockAnchor = HasBlockDescendant(element);
+                                WordParagraph linkParaAnchor;
+                                if (!hasBlockAnchor && element.ChildNodes.Length > 0) {
+                                    var tempParagraph = new WordParagraph(doc, newParagraph: true, newRun: false);
+                                    _suppressAutoLinksDepth++;
+                                    try {
+                                        foreach (var child in element.ChildNodes) {
+                                            ProcessNode(child, doc, section, options, tempParagraph, listStack, fmtAnchor, cell, headerFooter, headingList);
+                                        }
+                                    } finally {
+                                        _suppressAutoLinksDepth--;
+                                    }
+
+                                    var inlineContent = tempParagraph._paragraph.ChildElements
+                                        .Where(child => child is not ParagraphProperties)
+                                        .ToList();
+                                    linkParaAnchor = inlineContent.Count > 0
+                                        ? WordHyperLink.AddHyperLinkContent(currentParagraph!, inlineContent, anchor, tooltip: title ?? string.Empty)
+                                        : currentParagraph!.AddHyperLink(element.TextContent, anchor);
+                                } else {
+                                    linkParaAnchor = currentParagraph!.AddHyperLink(element.TextContent, anchor);
+                                }
+
+                                if (!string.IsNullOrEmpty(options.FontFamily)) {
+                                    linkParaAnchor.SetFontFamily(options.FontFamily!);
+                                }
+                                var linkAnchor = linkParaAnchor.Hyperlink;
+                                if (linkAnchor != null) {
+                                    if (!string.IsNullOrEmpty(title)) {
+                                        linkAnchor.Tooltip = title;
+                                    }
+                                    if (!string.IsNullOrEmpty(target) && Enum.TryParse<WordHyperlinkTargetFrame>(target, true, out var frame)) {
+                                        linkAnchor.TargetFrame = frame;
+                                    }
+                                }
+                                break;
+                            }
+
+                            if (!TryResolveHyperlinkUri(element, normalizedHref, out var resolvedUri)) {
+                                var fmt = formatting;
+                                ApplySpanStyles(element, ref fmt);
+                                foreach (var child in element.ChildNodes) {
+                                    ProcessNode(child, doc, section, options, currentParagraph, listStack, fmt, cell, headerFooter, headingList);
+                                }
+                                break;
+                            }
+
+                            if (IsInvalidResolvedHref(resolvedUri, options)) {
+                                var fmt = formatting;
+                                ApplySpanStyles(element, ref fmt);
+                                foreach (var child in element.ChildNodes) {
+                                    ProcessNode(child, doc, section, options, currentParagraph, listStack, fmt, cell, headerFooter, headingList);
+                                }
+                                break;
+                            }
+
+                            try {
+                                currentParagraph ??= AddParagraphInScope(section, cell, headerFooter);
+                                var fmtExternal = formatting;
+                                ApplySpanStyles(element, ref fmtExternal);
+                                var hasBlock = HasBlockDescendant(element);
+                                WordParagraph linkPara;
+                                if (!hasBlock && element.ChildNodes.Length > 0) {
+                                    var tempParagraph = new WordParagraph(doc, newParagraph: true, newRun: false);
+                                    _suppressAutoLinksDepth++;
+                                    try {
+                                        foreach (var child in element.ChildNodes) {
+                                            ProcessNode(child, doc, section, options, tempParagraph, listStack, fmtExternal, cell, headerFooter, headingList);
+                                        }
+                                    } finally {
+                                        _suppressAutoLinksDepth--;
+                                    }
+
+                                    var inlineContent = tempParagraph._paragraph.ChildElements
+                                        .Where(child => child is not ParagraphProperties)
+                                        .ToList();
+                                    linkPara = inlineContent.Count > 0
+                                        ? WordHyperLink.AddHyperLinkContent(currentParagraph!, inlineContent, resolvedUri, tooltip: title ?? string.Empty)
+                                        : currentParagraph!.AddHyperLink(element.TextContent, resolvedUri);
+                                } else {
+                                    linkPara = currentParagraph!.AddHyperLink(element.TextContent, resolvedUri);
+                                }
+
+                                if (!string.IsNullOrEmpty(options.FontFamily)) {
+                                    linkPara.SetFontFamily(options.FontFamily!);
+                                }
+                                var link = linkPara.Hyperlink;
+                                if (link != null) {
+                                    if (!string.IsNullOrEmpty(title)) {
+                                        link.Tooltip = title;
+                                    }
+                                    if (!string.IsNullOrEmpty(target) && Enum.TryParse<WordHyperlinkTargetFrame>(target, true, out var frame)) {
+                                        link.TargetFrame = frame;
+                                    }
+                                }
+                            } catch (Exception) {
+                                var fmt = formatting;
+                                ApplySpanStyles(element, ref fmt);
+                                foreach (var child in element.ChildNodes) {
+                                    ProcessNode(child, doc, section, options, currentParagraph, listStack, fmt, cell, headerFooter, headingList);
+                                }
+                            }
+                            break;
+                        }
+                    case "ul":
+                    case "ol": {
+                            ProcessList(element, doc, section, options, listStack, cell, formatting, headerFooter);
+                            break;
+                        }
+                    case "li": {
+                            ProcessListItem((IHtmlListItemElement)element, doc, section, options, listStack, formatting, cell, headerFooter, insertionAnchor: null);
+                            break;
+                        }
+                    case "table": {
+                            ProcessTable((IHtmlTableElement)element, doc, section, options, listStack, cell, currentParagraph, headerFooter);
+                            break;
+                        }
+                    case "figure": {
+                            ProcessFigureElement(element, doc, section, options, currentParagraph, listStack, formatting, cell, headerFooter, headingList);
+                            break;
+                        }
+                    case "img": {
+                            WordParagraph? imageParagraph = currentParagraph;
+                            bool createdCellParagraph = false;
+                            if (imageParagraph == null && cell != null) {
+                                imageParagraph = AddParagraphInScope(section, cell, headerFooter);
+                                createdCellParagraph = true;
+                            }
+                            Func<int?>? resolveImageContainerWidthTwips = cell == null
+                                ? null
+                                : () => _tableCellContentWidths.TryGetValue(
+                                        cell._tableCell,
+                                        out int? knownWidth)
+                                    ? knownWidth
+                                    : WordTable.EstimateCellContentWidthInDxa(doc, cell._tableCell);
+                            ProcessImage(
+                                (IHtmlImageElement)element,
+                                doc,
+                                options,
+                                imageParagraph,
+                                headerFooter,
+                                resolveImageContainerWidthTwips);
+                            if (createdCellParagraph &&
+                                imageParagraph != null &&
+                                cell!.Paragraphs.Count > 1 &&
+                                IsReplaceableEmptyCellParagraph(imageParagraph)) {
+                                imageParagraph.Remove();
+                            }
+                            break;
+                        }
+                    case "input":
+                    case "select":
+                    case "textarea":
+                    case "meter":
+                    case "progress": {
+                            ProcessFormControl(element, section, options, currentParagraph, formatting, cell, headerFooter);
+                            break;
+                        }
+                    case "label": {
+                            if (IsRadioChoiceLabel(element)) {
+                                foreach (var radio in element.QuerySelectorAll("input").Where(IsRadioInput)) {
+                                    ProcessFormControl(radio, section, options, currentParagraph, formatting, cell, headerFooter);
+                                }
+
+                                break;
+                            }
+
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, currentParagraph, listStack, formatting, cell, headerFooter, headingList);
+                            }
+
+                            break;
+                        }
+                    case "datalist": {
+                            break;
+                        }
+                    case "script":
+                    case "template": {
+                            AddDiagnostic(options, "HtmlElementSkipped", "HTML element content was skipped because it is not rendered as document content.", element.TagName.ToLowerInvariant());
+                            break;
+                        }
+                    case "iframe":
+                    case "object":
+                    case "embed":
+                    case "video":
+                    case "audio":
+                    case "canvas": {
+                            AddDiagnostic(options, "HtmlEmbeddedContentSkipped", "Embedded HTML content was skipped because it does not have a Word conversion contract.", element.TagName.ToLowerInvariant());
+                            break;
+                        }
+                    case "style": {
+                            break;
+                        }
+                    case "link": {
+                            break;
+                        }
+                    default: {
+                            foreach (var child in element.ChildNodes) {
+                                ProcessNode(child, doc, section, options, currentParagraph, listStack, formatting, cell, headerFooter, headingList);
+                            }
+                            break;
+                        }
+                }
+            } else if (node is IComment commentNode) {
+                ProcessRawHtmlComment(commentNode, section, ref currentParagraph, cell, headerFooter, options);
+            } else if (node is IText textNode) {
+                var text = textNode.Text;
+                if (string.IsNullOrEmpty(text)) {
+                    return;
+                }
+                if (string.IsNullOrWhiteSpace(text)) {
+                    if (currentParagraph == null) {
+                        return;
+                    }
+                    var existing = currentParagraph.Text;
+                    if (!string.IsNullOrEmpty(existing)) {
+                        var last = existing[existing.Length - 1];
+                        if (last == ' ' || last == '\u00A0') {
+                            return;
+                        }
+                    }
+                }
+                currentParagraph ??= AddParagraphInScope(section, cell, headerFooter);
+                if (textNode.ParentElement != null) {
+                    ApplyBidiIfPresent(textNode.ParentElement, currentParagraph);
+                    var language = GetElementLanguage(textNode.ParentElement);
+                    if (!string.IsNullOrWhiteSpace(language)) {
+                        formatting.Language = language;
+                    }
+                }
+                AddTextRun(currentParagraph, text, formatting, options);
+            }
+        }
+
+        private static void ApplyExportedSectionMetadata(IElement element, WordSection section) {
+            if (!IsExportedWordSectionElement(element)) {
+                return;
+            }
+
+            var pageSizeValue = element.GetAttribute("data-page-size");
+            if (Enum.TryParse<WordPageSize>(pageSizeValue, ignoreCase: true, out var pageSize) && pageSize != WordPageSize.Unknown) {
+                section.PageSettings.PageSize = pageSize;
+            }
+
+            var orientationValue = element.GetAttribute("data-page-orientation");
+            if (TryParsePageOrientation(orientationValue, out var orientation)) {
+                section.PageOrientation = orientation.ToOfficeEnum();
+            }
+
+            if (TryGetUInt32Attribute(element, "data-page-width-twips", out var width)) {
+                section.PageSettings.Width = width;
+            }
+            if (TryGetUInt32Attribute(element, "data-page-height-twips", out var height)) {
+                section.PageSettings.Height = height;
+            }
+            if (TryGetInt32Attribute(element, "data-margin-top-twips", out var top)) {
+                section.Margins.Top = top;
+            }
+            if (TryGetUInt32Attribute(element, "data-margin-right-twips", out var right)) {
+                section.Margins.Right = right;
+            }
+            if (TryGetInt32Attribute(element, "data-margin-bottom-twips", out var bottom)) {
+                section.Margins.Bottom = bottom;
+            }
+            if (TryGetUInt32Attribute(element, "data-margin-left-twips", out var left)) {
+                section.Margins.Left = left;
+            }
+        }
+
+        private static bool IsExportedWordSectionElement(IElement element) =>
+            string.Equals(element.GetAttribute("data-word-section"), "1", StringComparison.OrdinalIgnoreCase) ||
+            element.ClassList.Contains("word-section");
+
+        private static bool TryGetUInt32Attribute(IElement element, string name, out UInt32Value value) {
+            value = 0U;
+            if (!uint.TryParse(element.GetAttribute(name), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)) {
+                return false;
+            }
+
+            value = parsed;
+            return true;
+        }
+
+        private static bool TryGetInt32Attribute(IElement element, string name, out int value) =>
+            int.TryParse(element.GetAttribute(name), NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
+
+        private static bool TryParsePageOrientation(string? value, out PageOrientationValues orientation) {
+            orientation = PageOrientationValues.Portrait;
+            if (string.Equals(value, "Landscape", StringComparison.OrdinalIgnoreCase)) {
+                orientation = PageOrientationValues.Landscape;
+                return true;
+            }
+
+            return string.Equals(value, "Portrait", StringComparison.OrdinalIgnoreCase);
+        }
+    }
+}

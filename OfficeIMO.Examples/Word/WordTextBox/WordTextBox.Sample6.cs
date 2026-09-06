@@ -15,9 +15,9 @@ namespace OfficeIMO.Examples.Word {
                 var textBox = document.AddTextBox("[Grab your reader’s attention with a great quote from the document or use this space to emphasize a key point. To place this text box anywhere on the page, just drag it.]");
 
 
-                textBox.HorizontalPositionRelativeFrom = HorizontalRelativePositionValues.Page;
+                textBox.HorizontalPositionRelativeFrom = WordHorizontalRelativePosition.Page;
                 textBox.HorizontalPositionOffsetCentimeters = 1.5;
-                textBox.VerticalPositionRelativeFrom = VerticalRelativePositionValues.Page;
+                textBox.VerticalPositionRelativeFrom = WordVerticalRelativePosition.Page;
 
                 textBox.VerticalPositionOffsetCentimeters = 5;
 
@@ -36,7 +36,8 @@ namespace OfficeIMO.Examples.Word {
                 Console.WriteLine("Width emus: " + textBox.Width);
                 Console.WriteLine("Height emus: " + textBox.Height);
 
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
     }

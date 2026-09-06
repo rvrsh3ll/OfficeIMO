@@ -1,0 +1,329 @@
+using System.IO;
+using System.Linq;
+using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Wordprocessing;
+using OfficeIMO.Word;
+using Xunit;
+using Color = OfficeIMO.Drawing.OfficeColor;
+
+namespace OfficeIMO.Tests {
+    public partial class Word {
+        [Fact]
+        public void Test_CreatingWordDocumentWithTOC() {
+            string filePath = Path.Combine(_directoryWithFiles, "CreatedDocumentWithTOC.docx");
+            using (WordDocument document = WordDocument.Create(filePath)) {
+                Assert.True(document.Paragraphs.Count == 0, "Number of paragraphs during creation is wrong. Current: " + document.Paragraphs.Count);
+                Assert.True(document.Tables.Count == 0, "Tables count matches");
+                Assert.True(document.Lists.Count == 0, "List count matches");
+                Assert.True(document.TableOfContent == null, "TableOfContent Should not be set");
+                Assert.True(document.Settings.UpdateFieldsOnOpen == false, "UpdateFieldsOnOpen should not be set");
+
+                WordTableOfContent wordTableContent = document.AddTableOfContent(WordTableOfContentsStyle.Template1);
+                wordTableContent.Text = "This is Table of Contents";
+                wordTableContent.TextNoContent = "Ooopsi, no content";
+
+                Assert.True(document.Settings.UpdateFieldsOnOpen, "UpdateFieldsOnOpen should be enabled once TOC is added");
+
+                wordTableContent.Update();
+
+                Assert.True(document.Settings.UpdateFieldsOnOpen == true);
+
+                document.Settings.UpdateFieldsOnOpen = true;
+
+                document.AddPageBreak();
+
+                var paragraph = document.AddParagraph("Test Heading 1");
+                paragraph.Style = WordParagraphStyles.Heading1;
+
+                Assert.True(document.Settings.UpdateFieldsOnOpen == true, "UpdateFieldsOnOpen should be set");
+                Assert.True(document.TableOfContent != null, "TableOfContent Should be set");
+                Assert.True(document.Tables.Count == 0, "Tables count matches");
+                Assert.True(document.Lists.Count == 0, "List count matches");
+                Assert.True(document.PageBreaks.Count == 1, "PageBreak count should be 1");
+                Assert.True(document.Paragraphs.Count == 2, "Number of paragraphs during creation is wrong. Current: " + document.Paragraphs.Count);
+                Assert.True(document.Sections.Count == 1, "Number of sections during creation is wrong.");
+                Assert.True(document.Sections[0].Paragraphs.Count == 2, "Number of paragraphs on 1st section is wrong.");
+
+                document.Save();
+            }
+
+            using (WordDocument document = WordDocument.Load(Path.Combine(_directoryWithFiles, "CreatedDocumentWithTOC.docx"))) {
+                Assert.True(document.Settings.UpdateFieldsOnOpen == true, "UpdateFieldsOnOpen should be set");
+                Assert.True(document.TableOfContent != null, "TableOfContent Should be set");
+                Assert.True(document.Tables.Count == 0, "Tables count matches");
+                Assert.True(document.Lists.Count == 0, "List count matches");
+                Assert.True(document.PageBreaks.Count == 1, "PageBreak count should be 1");
+                Assert.True(document.Paragraphs.Count == 2, "Number of paragraphs during creation is wrong. Current: " + document.Paragraphs.Count);
+                Assert.True(document.Sections.Count == 1, "Number of sections during creation is wrong.");
+                Assert.True(document.Sections[0].Paragraphs.Count == 2, "Number of paragraphs on 1st section is wrong.");
+
+                document.TableOfContent.Text = "This is a test";
+                document.TableOfContent.TextNoContent = "This is sub test";
+                document.Settings.UpdateFieldsOnOpen = false;
+
+                Assert.True(document.TableOfContent.Text == "This is a test", "TableOfContent Text should be set");
+                Assert.True(document.TableOfContent.TextNoContent == "This is sub test", "TableOfContent Text should be set");
+                Assert.True(document.Settings.UpdateFieldsOnOpen == false, "UpdateFieldsOnOpen should be set");
+                document.Save();
+            }
+
+            using (WordDocument document = WordDocument.Load(Path.Combine(_directoryWithFiles, "CreatedDocumentWithTOC.docx"))) {
+                Assert.True(document.Settings.UpdateFieldsOnOpen == false, "UpdateFieldsOnOpen should not be set");
+                Assert.True(document.TableOfContent != null, "TableOfContent Should be set");
+                Assert.True(document.Tables.Count == 0, "Tables count matches");
+                Assert.True(document.Lists.Count == 0, "List count matches");
+                Assert.True(document.PageBreaks.Count == 1, "PageBreak count should be 1");
+                Assert.True(document.Paragraphs.Count == 2, "Number of paragraphs during creation is wrong. Current: " + document.Paragraphs.Count);
+                Assert.True(document.Sections.Count == 1, "Number of sections during creation is wrong.");
+                Assert.True(document.Sections[0].Paragraphs.Count == 2, "Number of paragraphs on 1st section is wrong.");
+
+                Assert.True(document.TableOfContent.Text == "This is a test", "TableOfContent Text should be set");
+                Assert.True(document.TableOfContent.TextNoContent == "This is sub test", "TableOfContent Text should be set");
+                document.Save();
+            }
+        }
+
+        [Fact]
+        public void Test_CreatingWordDocumentWithTOCAndList() {
+            string filePath = Path.Combine(_directoryWithFiles, "CreatedDocumentWithTOCandList.docx");
+
+            using (WordDocument document = WordDocument.Create(filePath)) {
+                Assert.True(document.Settings.UpdateFieldsOnOpen == false, "Update field settings should be turned off for new document");
+
+                document.Settings.UpdateFieldsOnOpen = true;
+                document.AddTableOfContent(tableOfContentStyle: WordTableOfContentsStyle.Template2);
+                document.AddHeadersAndFooters();
+                //var pageNumber = document.Header!.Default.AddPageNumber(WordPageNumberStyle.Circle);
+                var footer = RequireSectionFooter(document, 0, HeaderFooterValues.Default);
+                var pageNumber = footer.AddPageNumber(WordPageNumberStyle.VerticalOutline2);
+                pageNumber.ParagraphAlignment = WordParagraphAlignment.Center;
+
+                document.AddPageBreak();
+
+                var wordListToc = document.AddTableOfContentList(WordListStyle.Numbered);
+
+                Assert.True(document.Lists.Count == 1, "Lists count should be 1, just TOC");
+
+                wordListToc.AddItem("This is first item");
+
+                wordListToc.AddItem("This is second item");
+
+                document.AddPageBreak();
+
+                wordListToc.AddItem("Text 2.1", 1);
+
+                wordListToc.AddItem("Text 2.1", 1);
+
+                wordListToc.AddItem("Text 2.1", 1);
+
+                wordListToc.AddItem("Text 2.2", 2);
+
+                var para = document.AddParagraph("Let's show everyone how to create a list within already defined list");
+                para.CapsStyle = WordCapsStyle.Caps;
+                para.Highlight = WordHighlightColor.DarkMagenta;
+
+                var wordList = document.AddList(WordListStyle.Bulleted);
+                wordList.AddItem("List Item 1");
+                wordList.AddItem("List Item 2");
+                wordList.AddItem("List Item 3");
+                wordList.AddItem("List Item 3.1", 1);
+                wordList.AddItem("List Item 3.2", 1);
+                wordList.AddItem("List Item 3.3", 2);
+
+                wordListToc.AddItem("Text 2.3", 2);
+
+                wordListToc.AddItem("Text 3.3", 3);
+
+                Assert.True(document.Lists.Count == 2, "Lists count should be 2, just TOC + Bullets");
+                Assert.True(document.Settings.UpdateFieldsOnOpen == true, "Update field settings should be turned on when it was enabled");
+                Assert.True(document.Paragraphs.Count == 17, "All paragraphs including from lists and toc should be here");
+                Assert.True(document.PageBreaks.Count == 2, "All page breaks should be shown");
+                document.Save();
+            }
+
+            using (WordDocument document = WordDocument.Load(filePath)) {
+                Assert.True(document.Lists.Count == 2, "Lists count should be 2, just TOC + Bullets");
+                Assert.True(document.Settings.UpdateFieldsOnOpen == true, "Update field settings should be turned on when it was enabled");
+                Assert.True(document.Paragraphs.Count == 17, "All paragraphs including from lists and toc should be here");
+                Assert.True(document.PageBreaks.Count == 2, "All page breaks should be shown");
+
+                // we loaded document, lets add some text to continue 
+                document.AddParagraph().SetColor(Color.CornflowerBlue).SetText("This is some text");
+
+                // we loaded document, lets add page break to continue
+                document.AddPageBreak();
+
+                // lets find a list which has items which suggest it's a TOC attached list
+                WordList? wordListToc = null;
+                foreach (var list in document.Lists) {
+                    if (list.IsToc) {
+                        wordListToc = list;
+                    }
+                }
+
+                // finally lets add another list item
+                if (wordListToc != null) {
+                    wordListToc.AddItem("Text 4.4", 2);
+                }
+
+                document.Settings.UpdateFieldsOnOpen = true;
+
+                Assert.True(document.Lists.Count == 2, "Lists count should be 2, just TOC + Bullets");
+                Assert.True(document.Settings.UpdateFieldsOnOpen == true, "Update field settings should be turned on when it was enabled");
+                Assert.True(document.Paragraphs.Count == 20, "All paragraphs including from lists and toc should be here");
+                Assert.True(document.PageBreaks.Count == 3, "All page breaks should be shown");
+
+                Assert.True(document.Lists[0].IsToc == true, "This list should be TOC");
+                Assert.True(document.Lists[1].IsToc == false, "This list should not be TOC");
+                Assert.True(document.Lists[0].ListItems[0].Text == document.Paragraphs[1].Text, "Text should be identical");
+
+                Assert.True(document.Lists[0].ListItems[document.Lists[0].ListItems.Count - 1].Text == document.Paragraphs[document.Paragraphs.Count - 1].Text, "Text should be identical");
+
+                document.Save();
+            }
+        }
+
+        [Fact]
+        public void Test_RemoveAndRegenerateTOC() {
+            string filePath = Path.Combine(_directoryWithFiles, "DocumentTOCRemove.docx");
+            using (WordDocument document = WordDocument.Create(filePath)) {
+                document.AddTableOfContent();
+                document.AddParagraph("Heading 1").Style = WordParagraphStyles.Heading1;
+                document.TableOfContent!.Remove();
+                Assert.True(document.TableOfContent == null);
+                document.RegenerateTableOfContent();
+                Assert.True(document.TableOfContent != null);
+                document.Save();
+            }
+            using (WordDocument document = WordDocument.Load(filePath)) {
+                Assert.True(document.TableOfContent != null);
+            }
+        }
+
+        [Fact]
+        public void Test_TocListLevelClamping() {
+            string filePath = Path.Combine(_directoryWithFiles, "TocLevelClamp.docx");
+            using (var document = WordDocument.Create(filePath)) {
+                var tocList = document.AddTableOfContentList(WordListStyle.Numbered);
+                tocList.AddItem("First", -2);
+                tocList.AddItem("Last", 10);
+                document.Save();
+            }
+
+            using (var document = WordDocument.Load(filePath)) {
+                var list = document.Lists[0];
+                Assert.Equal(2, list.ListItems.Count);
+                Assert.Equal(WordParagraphStyles.Heading1, list.ListItems[0].Style);
+                Assert.Equal(WordParagraphStyles.Heading9, list.ListItems[1].Style);
+            }
+        }
+
+        [Fact]
+        public void Test_AutoUpdateToc() {
+            string filePath = Path.Combine(_directoryWithFiles, "AutoUpdateToc.docx");
+            using (var document = WordDocument.Create(filePath)) {
+                document.AddTableOfContent();
+                document.AutoUpdateToc = true;
+                document.Save();
+            }
+
+            using (var document = WordDocument.Load(filePath)) {
+                Assert.True(document.Settings.UpdateFieldsOnOpen);
+            }
+        }
+
+        [Fact]
+        public void Test_TableOfContent_UpdateMarksFieldsDirty() {
+            string filePath = Path.Combine(_directoryWithFiles, "TocMarkedDirty.docx");
+
+            using (var document = WordDocument.Create(filePath)) {
+                var toc = document.AddTableOfContent();
+                var heading = document.AddParagraph("Heading 1");
+                heading.Style = WordParagraphStyles.Heading1;
+
+                toc.Update();
+                document.Save();
+            }
+
+            using (var document = WordDocument.Load(filePath)) {
+                var toc = document.TableOfContent;
+                Assert.NotNull(toc);
+
+                var simpleFields = toc!.SdtBlock.Descendants<SimpleField>().ToList();
+                Assert.NotEmpty(simpleFields);
+                Assert.All(simpleFields, field => Assert.True(field.Dirty is not null && field.Dirty.Value));
+
+                var fieldChars = toc.SdtBlock.Descendants<FieldChar>().ToList();
+                Assert.All(fieldChars, fieldChar => Assert.True(fieldChar.Dirty is not null && fieldChar.Dirty.Value));
+
+                Assert.True(document.Settings.UpdateFieldsOnOpen);
+            }
+        }
+
+        [Fact]
+        public void Test_TocQueueUpdateHandlesMissingFields() {
+            string filePath = Path.Combine(_directoryWithFiles, "TocMissingFields.docx");
+
+            using (var document = WordDocument.Create(filePath)) {
+                var toc = document.AddTableOfContent();
+                Assert.NotNull(toc);
+                Assert.True(document.Settings.UpdateFieldsOnOpen);
+
+                document.Settings.UpdateFieldsOnOpen = false;
+                Assert.False(document.Settings.UpdateFieldsOnOpen);
+
+                foreach (var simpleField in toc!.SdtBlock.Descendants<SimpleField>().ToList()) {
+                    simpleField.Remove();
+                }
+
+                foreach (var fieldChar in toc.SdtBlock.Descendants<FieldChar>().ToList()) {
+                    fieldChar.Remove();
+                }
+
+                toc.QueueUpdateOnOpen();
+
+                Assert.True(document.Settings.UpdateFieldsOnOpen);
+            }
+        }
+
+        [Fact]
+        public void Test_TocAccessDoesNotAutoQueueUpdates() {
+            string filePath = Path.Combine(_directoryWithFiles, "TocAccessDoesNotQueue.docx");
+            using (var document = WordDocument.Create(filePath)) {
+                var toc = document.AddTableOfContent();
+                Assert.True(document.Settings.UpdateFieldsOnOpen);
+
+                document.Settings.UpdateFieldsOnOpen = false;
+                Assert.False(document.Settings.UpdateFieldsOnOpen);
+
+                var existingToc = document.TableOfContent;
+                Assert.NotNull(existingToc);
+                Assert.False(document.Settings.UpdateFieldsOnOpen);
+
+                toc.Update();
+                Assert.True(document.Settings.UpdateFieldsOnOpen);
+            }
+        }
+
+        [Fact]
+        public void Test_HeadingChangesReEnableTocUpdatesAfterDisable() {
+            string filePath = Path.Combine(_directoryWithFiles, "TocHeadingChanges.docx");
+            using (var document = WordDocument.Create(filePath)) {
+                document.AddTableOfContent();
+
+                document.AddParagraph("Heading 1").Style = WordParagraphStyles.Heading1;
+                Assert.True(document.Settings.UpdateFieldsOnOpen);
+
+                document.Settings.UpdateFieldsOnOpen = false;
+                Assert.False(document.Settings.UpdateFieldsOnOpen);
+
+                document.AddParagraph("Heading 2").Style = WordParagraphStyles.Heading2;
+                Assert.True(document.Settings.UpdateFieldsOnOpen);
+
+                document.AddParagraph("Heading 3").Style = WordParagraphStyles.Heading3;
+                Assert.True(document.Settings.UpdateFieldsOnOpen);
+            }
+        }
+
+    }
+}

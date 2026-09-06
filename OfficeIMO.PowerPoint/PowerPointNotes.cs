@@ -1,0 +1,372 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Presentation;
+using A = DocumentFormat.OpenXml.Drawing;
+
+namespace OfficeIMO.PowerPoint {
+    internal interface INotesMasterPartFactory {
+        NotesMasterPart EnsureNotesMasterPart(PresentationPart presentationPart);
+    }
+
+    internal sealed class DefaultNotesMasterPartFactory : INotesMasterPartFactory {
+        internal static DefaultNotesMasterPartFactory Instance { get; } = new();
+
+        private DefaultNotesMasterPartFactory() {
+        }
+
+        public NotesMasterPart EnsureNotesMasterPart(PresentationPart presentationPart) {
+            return PowerPointUtils.EnsureNotesMasterPart(presentationPart);
+        }
+    }
+
+    /// <summary>
+    ///     Represents notes for a slide.
+    /// </summary>
+    public class PowerPointNotes {
+        private readonly SlidePart _slidePart;
+        private readonly INotesMasterPartFactory _notesMasterPartFactory;
+        private HashSet<string>? _cachedRelationshipIds;
+
+        internal PowerPointNotes(SlidePart slidePart, INotesMasterPartFactory? notesMasterPartFactory = null) {
+            _slidePart = slidePart;
+            _notesMasterPartFactory = notesMasterPartFactory ?? DefaultNotesMasterPartFactory.Instance;
+        }
+
+        private NotesSlide NotesSlide {
+            get {
+                NotesSlidePart? notesPart = _slidePart.NotesSlidePart;
+                if (notesPart == null) {
+                    // Generate a unique relationship ID for the notes part
+                    HashSet<string> slideRelationships = GetRelationshipIds();
+
+                    int notesIdNum = 1;
+                    string notesRelId;
+                    do {
+                        notesRelId = "rId" + notesIdNum;
+                        notesIdNum++;
+                    } while (!slideRelationships.Add(notesRelId));
+
+                    notesPart = _slidePart.AddNewPart<NotesSlidePart>(notesRelId);
+
+                    ShapeTree shapeTree = CreateEmptyShapeTree();
+                    uint placeholderId = GetNextShapeId(shapeTree);
+                    shapeTree.Append(CreateNotesPlaceholderShape(placeholderId));
+
+                    notesPart.NotesSlide = new NotesSlide(
+                        new CommonSlideData(shapeTree),
+                        new ColorMapOverride(new A.MasterColorMapping()));
+                }
+
+                EnsureSlideRelationship(notesPart);
+                EnsureNotesMasterRelationship(notesPart);
+
+                if (notesPart.NotesSlide == null) {
+                    ShapeTree shapeTree = CreateEmptyShapeTree();
+                    uint placeholderId = GetNextShapeId(shapeTree);
+                    shapeTree.Append(CreateNotesPlaceholderShape(placeholderId));
+
+                    notesPart.NotesSlide = new NotesSlide(
+                        new CommonSlideData(shapeTree),
+                        new ColorMapOverride(new A.MasterColorMapping()));
+                }
+
+                return notesPart.NotesSlide!;
+            }
+        }
+
+        private void EnsureSlideRelationship(NotesSlidePart notesPart) {
+            if (!notesPart.Parts.Any(pair => ReferenceEquals(
+                    pair.OpenXmlPart, _slidePart))) {
+                notesPart.AddPart(_slidePart);
+            }
+        }
+
+        private void EnsureNotesMasterRelationship(NotesSlidePart notesPart) {
+            PresentationPart? presentationPart = _slidePart
+                .GetParentParts()
+                .OfType<PresentationPart>()
+                .FirstOrDefault();
+
+            if (presentationPart == null) {
+                return;
+            }
+
+            NotesMasterPart notesMasterPart = _notesMasterPartFactory.EnsureNotesMasterPart(presentationPart);
+
+            bool hasNotesMasterRelationship = notesPart.Parts
+                .Any(pair => ReferenceEquals(pair.OpenXmlPart, notesMasterPart));
+
+            if (!hasNotesMasterRelationship) {
+                notesPart.AddPart(notesMasterPart);
+            }
+        }
+
+        /// <summary>
+        ///     Gets or sets the notes text.
+        /// </summary>
+        public string Text {
+            get {
+                Shape? shape = GetNotesTextShape(NotesSlide.CommonSlideData?.ShapeTree);
+                if (shape?.TextBody == null) {
+                    return string.Empty;
+                }
+
+                List<string> paragraphs = shape.TextBody.Elements<A.Paragraph>()
+                    .Select(ReadParagraphText)
+                    .ToList();
+                return paragraphs.Count == 0 ? string.Empty : string.Join(Environment.NewLine, paragraphs);
+            }
+            set {
+                SetParagraphs((value ?? string.Empty).Split(new[] { "\r\n", "\n" }, StringSplitOptions.None));
+            }
+        }
+
+        /// <summary>Gets the paragraphs in the existing speaker-notes text body without creating a notes part.</summary>
+        public IReadOnlyList<PowerPointParagraph> Paragraphs {
+            get {
+                NotesSlidePart? notesPart = _slidePart.NotesSlidePart;
+                Shape? shape = GetNotesTextShape(notesPart?.NotesSlide?.CommonSlideData?.ShapeTree);
+                return shape?.TextBody?.Elements<A.Paragraph>()
+                    .Select(paragraph => new PowerPointParagraph(paragraph, _slidePart, notesPart))
+                    .ToList() ?? (IReadOnlyList<PowerPointParagraph>)Array.Empty<PowerPointParagraph>();
+            }
+        }
+
+        /// <summary>Replaces the speaker notes with paragraphs that can be further styled through their typed runs.</summary>
+        public IReadOnlyList<PowerPointParagraph> SetParagraphs(IEnumerable<string> paragraphs) {
+            if (paragraphs == null) throw new ArgumentNullException(nameof(paragraphs));
+
+            NotesSlide notesSlide = NotesSlide;
+            NotesSlidePart notesPart = _slidePart.NotesSlidePart
+                ?? throw new InvalidOperationException("The notes slide part could not be created.");
+            CommonSlideData common = notesSlide.CommonSlideData ??= new CommonSlideData(CreateEmptyShapeTree());
+            ShapeTree tree = EnsureShapeTree(common);
+            Shape shape = GetOrCreateNotesTextShape(tree);
+            TextBody textBody = shape.TextBody ?? new TextBody(new A.BodyProperties(), new A.ListStyle());
+            shape.TextBody ??= textBody;
+
+            A.Paragraph? templateParagraph = textBody.Elements<A.Paragraph>().FirstOrDefault();
+            A.ParagraphProperties? templateParagraphProperties = templateParagraph?.GetFirstChild<A.ParagraphProperties>();
+            A.EndParagraphRunProperties? templateEndParagraphRunProperties = templateParagraph?.GetFirstChild<A.EndParagraphRunProperties>();
+            A.RunProperties? templateRunProperties = templateParagraph?
+                .Elements<A.Run>()
+                .Select(run => run.RunProperties)
+                .FirstOrDefault(properties => properties != null);
+
+            textBody.RemoveAllChildren<A.Paragraph>();
+            var result = new List<PowerPointParagraph>();
+            foreach (string text in paragraphs) {
+                A.Paragraph paragraph = CreateParagraph(text ?? string.Empty, templateParagraphProperties,
+                    templateRunProperties, templateEndParagraphRunProperties);
+                textBody.Append(paragraph);
+                result.Add(new PowerPointParagraph(paragraph, _slidePart, notesPart));
+            }
+            if (result.Count == 0) {
+                A.Paragraph paragraph = CreateParagraph(string.Empty, templateParagraphProperties,
+                    templateRunProperties, templateEndParagraphRunProperties);
+                textBody.Append(paragraph);
+                result.Add(new PowerPointParagraph(paragraph, _slidePart, notesPart));
+            }
+            return result;
+        }
+
+        /// <summary>
+        ///     Reads existing speaker notes without creating notes or notes-master parts when none exist.
+        /// </summary>
+        public bool TryGetText(out string text) {
+            NotesSlide? notesSlide = _slidePart.NotesSlidePart?.NotesSlide;
+            Shape? shape = GetNotesTextShape(notesSlide?.CommonSlideData?.ShapeTree);
+            if (shape?.TextBody == null) {
+                text = string.Empty;
+                return false;
+            }
+
+            List<string> paragraphs = shape.TextBody.Elements<A.Paragraph>()
+                .Select(ReadParagraphText)
+                .ToList();
+            text = paragraphs.Count == 0 ? string.Empty : string.Join(Environment.NewLine, paragraphs);
+            return text.Length > 0;
+        }
+
+        /// <summary>
+        /// Tries to read speaker notes that already exist without creating a notes part.
+        /// </summary>
+        /// <param name="text">The existing speaker-notes text, or an empty string when none exists.</param>
+        /// <returns><see langword="true"/> when non-empty speaker notes were found.</returns>
+        public bool TryGetExistingText(out string text) {
+            text = string.Empty;
+            try {
+                NotesSlide? notesSlide = _slidePart.NotesSlidePart?.NotesSlide;
+                ShapeTree? shapeTree = notesSlide?.CommonSlideData?.ShapeTree;
+                if (shapeTree == null) {
+                    return false;
+                }
+
+                text = string.Join(
+                    Environment.NewLine + Environment.NewLine,
+                    shapeTree.Elements<Shape>()
+                        .Select(ReadShapeText)
+                        .Where(static value => !string.IsNullOrWhiteSpace(value))).Trim();
+                return text.Length > 0;
+            } catch {
+                text = string.Empty;
+                return false;
+            }
+        }
+
+        internal void Save() {
+            _slidePart.NotesSlidePart?.NotesSlide?.Save();
+        }
+
+        private static ShapeTree CreateEmptyShapeTree() {
+            return new ShapeTree(
+                new NonVisualGroupShapeProperties(
+                    new NonVisualDrawingProperties { Id = 1U, Name = "Notes Group Shape" },
+                    new NonVisualGroupShapeDrawingProperties(),
+                    new ApplicationNonVisualDrawingProperties()),
+                PowerPointUtils.CreateDefaultGroupShapeProperties());
+        }
+
+        private static ShapeTree EnsureShapeTree(CommonSlideData commonSlideData) {
+            ShapeTree tree = commonSlideData.ShapeTree ??= new ShapeTree();
+
+            if (tree.GetFirstChild<NonVisualGroupShapeProperties>() == null) {
+                tree.PrependChild(new NonVisualGroupShapeProperties(
+                    new NonVisualDrawingProperties { Id = 1U, Name = "Notes Group Shape" },
+                    new NonVisualGroupShapeDrawingProperties(),
+                    new ApplicationNonVisualDrawingProperties()));
+            }
+
+            if (tree.GetFirstChild<GroupShapeProperties>() == null) {
+                tree.AppendChild(PowerPointUtils.CreateDefaultGroupShapeProperties());
+            }
+
+            return tree;
+        }
+
+        private static Shape CreateNotesPlaceholderShape(uint id) {
+            return new Shape(
+                new NonVisualShapeProperties(
+                    new NonVisualDrawingProperties { Id = id, Name = "Notes Placeholder 1" },
+                    new NonVisualShapeDrawingProperties(new A.ShapeLocks { NoGrouping = true }),
+                    new ApplicationNonVisualDrawingProperties(
+                        new PlaceholderShape { Type = PlaceholderValues.Body, Index = 1U })
+                ),
+                new ShapeProperties(),
+                new TextBody(
+                    new A.BodyProperties(),
+                    new A.ListStyle(),
+                    new A.Paragraph(
+                        new A.Run(
+                            new A.RunProperties { Language = "en-US" },
+                            new A.Text()),
+                        new A.EndParagraphRunProperties { Language = "en-US" }))
+            );
+        }
+
+        private static uint GetNextShapeId(ShapeTree shapeTree) {
+            uint maxId = shapeTree
+                .Descendants<NonVisualDrawingProperties>()
+                .Select(properties => properties.Id?.Value ?? 0U)
+                .DefaultIfEmpty(0U)
+                .Max();
+
+            return maxId + 1U;
+        }
+
+        private static Shape? GetNotesTextShape(ShapeTree? shapeTree) {
+            if (shapeTree == null) {
+                return null;
+            }
+
+            return shapeTree.Elements<Shape>().FirstOrDefault(IsNotesTextShape)
+                ?? shapeTree.Elements<Shape>().FirstOrDefault(shape => shape.TextBody != null);
+        }
+
+        private static Shape GetOrCreateNotesTextShape(ShapeTree shapeTree) {
+            Shape? shape = GetNotesTextShape(shapeTree);
+            if (shape != null) {
+                return shape;
+            }
+
+            uint placeholderId = GetNextShapeId(shapeTree);
+            shape = CreateNotesPlaceholderShape(placeholderId);
+            shapeTree.AppendChild(shape);
+            return shape;
+        }
+
+        private static bool IsNotesTextShape(Shape shape) {
+            PlaceholderShape? placeholder = shape.NonVisualShapeProperties?
+                .ApplicationNonVisualDrawingProperties?
+                .GetFirstChild<PlaceholderShape>();
+            return placeholder?.Type?.Value == PlaceholderValues.Body;
+        }
+
+        private static string ReadParagraphText(A.Paragraph paragraph) {
+            StringBuilder builder = new();
+            foreach (DocumentFormat.OpenXml.OpenXmlElement child in paragraph.ChildElements) {
+                switch (child) {
+                    case A.Run run:
+                        builder.Append(run.Text?.Text ?? string.Empty);
+                        break;
+                    case A.Break:
+                        builder.AppendLine();
+                        break;
+                    case A.Field field:
+                        builder.Append(field.Text?.Text ?? string.Empty);
+                        break;
+                }
+            }
+
+            return builder.ToString();
+        }
+
+        private static string ReadShapeText(Shape shape) {
+            return string.Join(
+                Environment.NewLine,
+                shape.TextBody?.Elements<A.Paragraph>()
+                    .Select(ReadParagraphText)
+                    .Where(static value => !string.IsNullOrWhiteSpace(value))
+                ?? Enumerable.Empty<string>());
+        }
+
+        private static A.Paragraph CreateParagraph(
+            string text,
+            A.ParagraphProperties? templateParagraphProperties,
+            A.RunProperties? templateRunProperties,
+            A.EndParagraphRunProperties? templateEndParagraphRunProperties) {
+            var paragraph = new A.Paragraph();
+            if (templateParagraphProperties != null) {
+                paragraph.Append((A.ParagraphProperties)templateParagraphProperties.CloneNode(true));
+            }
+            var run = new A.Run();
+            if (templateRunProperties != null) {
+                run.RunProperties = (A.RunProperties)templateRunProperties.CloneNode(true);
+            }
+            run.Append(new A.Text(text));
+            paragraph.Append(run);
+            if (templateEndParagraphRunProperties != null) {
+                paragraph.Append((A.EndParagraphRunProperties)templateEndParagraphRunProperties.CloneNode(true));
+            }
+            return paragraph;
+        }
+
+        private HashSet<string> GetRelationshipIds() {
+            if (_cachedRelationshipIds == null) {
+                _cachedRelationshipIds = new HashSet<string>(
+                    _slidePart.Parts.Select(p => p.RelationshipId)
+                        .Concat(_slidePart.DataPartReferenceRelationships
+                            .Select(r => r.Id))
+                        .Concat(_slidePart.ExternalRelationships.Select(r => r.Id))
+                        .Concat(_slidePart.HyperlinkRelationships.Select(r => r.Id))
+                        .Where(id => !string.IsNullOrEmpty(id)),
+                    StringComparer.Ordinal);
+            }
+
+            return _cachedRelationshipIds;
+        }
+    }
+}

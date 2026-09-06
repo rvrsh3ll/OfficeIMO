@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -25,7 +25,7 @@ namespace OfficeIMO.Examples.Word {
                 var test = document.AddParagraph("Test 1 - to delete");
                 test.Remove();
                 section1.PageSettings.PageSize = WordPageSize.A5;
-                section2.PageOrientation = PageOrientationValues.Landscape;
+                section2.PageOrientation = OfficePageOrientation.Landscape;
 
                 document.Sections[2].AddParagraph("Test 0 - Section Last");
                 document.Sections[1].AddParagraph("Test 1").AddComment("Przemysław Kłys", "PK", " This is just a test");
@@ -40,7 +40,7 @@ namespace OfficeIMO.Examples.Word {
                 Console.WriteLine(document.Comments.Count);
 
                 document.Comments[0].Text = "Lets change it";
-                document.Save(false);
+                document.Save();
             }
 
             using (WordDocument document = WordDocument.Load(filePath)) {
@@ -54,7 +54,8 @@ namespace OfficeIMO.Examples.Word {
                 Console.WriteLine(document.Sections[0].HyperLinks.Count);
                 Console.WriteLine(document.HyperLinks.Count);
                 Console.WriteLine(document.Fields.Count);
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
 
@@ -71,9 +72,8 @@ namespace OfficeIMO.Examples.Word {
             document.Save();
             document.Dispose();
 
-            Helpers.Open(filePath, openWord);
+            if (openWord) ExampleFileLauncher.Open(filePath);
 
-            Console.WriteLine("+ IsLocked " + filePath.IsFileLocked());
         }
     }
 }

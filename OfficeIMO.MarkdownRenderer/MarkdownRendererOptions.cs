@@ -1,0 +1,563 @@
+using OfficeIMO.Markdown;
+
+namespace OfficeIMO.MarkdownRenderer;
+
+/// <summary>
+/// Options controlling how Markdown is parsed and rendered to HTML for a WebView/browser host.
+/// </summary>
+public sealed class MarkdownRendererOptions {
+    private readonly List<string> _appliedPluginIds = new List<string>();
+    private readonly List<string> _appliedFeaturePackIds = new List<string>();
+    private readonly List<MarkdownFenceOptionSchema> _fenceOptionSchemas = new List<MarkdownFenceOptionSchema>();
+
+    /// <summary>
+    /// Creates a new renderer options instance and seeds generic built-in fenced block renderers.
+    /// </summary>
+    public MarkdownRendererOptions() {
+        ApplyPlugin(MarkdownRendererPlugins.GenericVisuals);
+    }
+
+    /// <summary>
+    /// Markdown reader options used when parsing Markdown into OfficeIMO.Markdown's typed model.
+    /// Defaults are biased for untrusted input (HTML disabled and file URLs blocked).
+    /// </summary>
+    public MarkdownReaderOptions ReaderOptions { get; set; } = new MarkdownReaderOptions {
+        HtmlBlocks = false,
+        InlineHtml = false,
+        DisallowFileUrls = true,
+        AllowDataUrls = false,
+        AllowProtocolRelativeUrls = false,
+        RestrictUrlSchemes = true,
+        AllowedUrlSchemes = new[] { "http", "https", "mailto" }
+    };
+
+    /// <summary>
+    /// HTML rendering options. These control the CSS preset and optional Prism support.
+    /// </summary>
+    public HtmlOptions HtmlOptions { get; set; } = new HtmlOptions {
+        Kind = HtmlKind.Fragment,
+        Style = HtmlStyle.GithubAuto,
+        CssDelivery = CssDelivery.Inline,
+        AssetMode = AssetMode.Online,
+        BodyClass = "markdown-body",
+        RawHtmlHandling = RawHtmlHandling.Strip,
+        ExternalLinksTargetBlank = true,
+        ExternalLinksRel = "noopener noreferrer nofollow ugc",
+        ExternalLinksReferrerPolicy = "no-referrer",
+        RestrictHttpLinksToBaseOrigin = true,
+        RestrictHttpImagesToBaseOrigin = true,
+        BlockExternalHttpImages = true,
+        ImagesLoadingLazy = true,
+        ImagesDecodingAsync = true,
+        ImagesReferrerPolicy = "no-referrer",
+        Prism = new PrismOptions { Enabled = true, Theme = PrismTheme.GithubAuto }
+    };
+
+    /// <summary>
+    /// Optional base href inserted into the HTML update payload as a &lt;base&gt; tag.
+    /// The incremental updater moves it to &lt;head&gt; so relative links/images resolve.
+    /// </summary>
+    public string? BaseHref { get; set; }
+
+    /// <summary>
+    /// When true, normalizes escaped newlines ("\\n"/"\\r\\n") into real newlines before parsing.
+    /// Useful when Markdown arrives as a JSON string literal.
+    /// Default: true.
+    /// </summary>
+    public bool NormalizeEscapedNewlines { get; set; } = true;
+
+    /// <summary>
+    /// When true, removes zero-width spacing artifacts such as U+200B/U+2060/U+FEFF before parsing.
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeZeroWidthSpacingArtifacts { get; set; } = false;
+
+    /// <summary>
+    /// When true, inserts a missing space between common status/emoji markers and following prose
+    /// (for example, <c>✅Healthy</c> becomes <c>✅ Healthy</c>).
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeEmojiWordJoins { get; set; } = false;
+
+    /// <summary>
+    /// When true, inserts missing spacing around compact numbered-choice joins
+    /// (for example, <c>or2)</c> becomes <c>or 2)</c>).
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeCompactNumberedChoiceBoundaries { get; set; } = false;
+
+    /// <summary>
+    /// When true, inserts a missing newline before compact bullet markers emitted directly after sentence punctuation.
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeSentenceCollapsedBullets { get; set; } = false;
+
+    /// <summary>
+    /// When true, joins short hard-wrapped bold labels (for example, "**Status\nOK**") into a single bold span.
+    /// This helps chat-style outputs that wrap short headers mid-token.
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeSoftWrappedStrongSpans { get; set; } = false;
+
+    /// <summary>
+    /// When true, compacts inline code spans containing line breaks into a single line.
+    /// This preserves strict parser compatibility for malformed model outputs.
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeInlineCodeSpanLineBreaks { get; set; } = false;
+
+    /// <summary>
+    /// When true, converts escaped inline code spans (for example, <c>\`code\`</c>) into standard markdown code spans.
+    /// Useful for chat/model outputs that over-escape backticks.
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeEscapedInlineCodeSpans { get; set; } = false;
+
+    /// <summary>
+    /// When true, inserts a missing space after a closing strong span followed immediately by a word character
+    /// (for example, <c>**Healthy**next</c> becomes <c>**Healthy** next</c>).
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeTightStrongBoundaries { get; set; } = false;
+
+    /// <summary>
+    /// When true, normalizes compact arrow-to-strong boundaries
+    /// (for example, <c>->**Why it matters:**</c> becomes <c>-> **Why it matters:**</c>).
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeTightArrowStrongBoundaries { get; set; } = false;
+
+    /// <summary>
+    /// When true, repairs malformed strong spans that are missing the closing delimiter
+    /// immediately before an arrow-led strong label
+    /// (for example, <c>**No current failures -&gt; **Why it matters:**</c> becomes
+    /// <c>**No current failures** -&gt; **Why it matters:**</c>).
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeBrokenStrongArrowLabels { get; set; } = false;
+
+    /// <summary>
+    /// When true, repairs malformed signal-flow bullets where an entire arrow chain was accidentally wrapped
+    /// in one strong span.
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeWrappedSignalFlowStrongRuns { get; set; } = false;
+
+    /// <summary>
+    /// When true, inserts missing spaces after signal-flow labels inside arrow segments
+    /// (for example, <c>-> **Why it matters:**coverage</c> becomes
+    /// <c>-> **Why it matters:** coverage</c>).
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeSignalFlowLabelSpacing { get; set; } = false;
+
+    /// <summary>
+    /// When true, expands collapsed transcript-style metric chains into real markdown lines and
+    /// converts legacy bold metric labels into plain labels with bold values.
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeCollapsedMetricChains { get; set; } = false;
+
+    /// <summary>
+    /// When true, repairs compact host-label bullets and merges simple continuation lines
+    /// (for example, <c>-AD1</c> followed by <c>healthy</c> becomes <c>- AD1 healthy</c>).
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeHostLabelBulletArtifacts { get; set; } = false;
+
+    /// <summary>
+    /// When true, inserts a missing space after a colon in prose labels
+    /// (for example, <c>Why it matters:missing coverage</c> becomes <c>Why it matters: missing coverage</c>).
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeTightColonSpacing { get; set; } = false;
+
+    /// <summary>
+    /// When true, inserts a missing newline between an ATX heading and an immediately-following
+    /// unordered strong-label list marker on the same line
+    /// (for example, <c>## Summary- **Item:** value</c> becomes <c>## Summary\n- **Item:** value</c>).
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeHeadingListBoundaries { get; set; } = false;
+
+    /// <summary>
+    /// When true, inserts a missing newline before compact unordered strong-label list markers
+    /// that were emitted inline after punctuation or symbol characters
+    /// (for example, <c>✅- **FSMO:** ok</c> becomes <c>✅\n- **FSMO:** ok</c>).
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeCompactStrongLabelListBoundaries { get; set; } = false;
+
+    /// <summary>
+    /// When true, inserts a missing newline before compact ATX headings emitted directly after prose or symbols
+    /// on the same line (for example, <c>unexpected### Reason</c> becomes <c>unexpected\n### Reason</c>).
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeCompactHeadingBoundaries { get; set; } = false;
+
+    /// <summary>
+    /// When true, removes stray standalone <c>#</c> separator lines that appear immediately before a real ATX heading.
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeStandaloneHashHeadingSeparators { get; set; } = false;
+
+    /// <summary>
+    /// When true, repairs broken two-line strong lead-ins such as
+    /// <c>**Result</c> followed by <c>body text** tail</c>.
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeBrokenTwoLineStrongLeadIns { get; set; } = false;
+
+    /// <summary>
+    /// When true, inserts a missing newline between a colon and an immediately-following unordered list marker
+    /// on the same line (for example, <c>Next step:- **Item**</c> becomes <c>Next step:\n- **Item**</c>).
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeColonListBoundaries { get; set; } = false;
+
+    /// <summary>
+    /// When true, inserts a missing newline between a fenced code block language token and inline body content
+    /// for compact malformed transcript output
+    /// (for example, <c>```json{"x":1}</c> or <c>```mermaidflowchart LR A--&gt;B</c>).
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeCompactFenceBodyBoundaries { get; set; } = false;
+
+    /// <summary>
+    /// When true, trims accidental whitespace immediately inside strong delimiters
+    /// (for example, <c>** Healthy**</c> or <c>**Healthy **</c> become <c>**Healthy**</c>).
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeLooseStrongDelimiters { get; set; } = false;
+
+    /// <summary>
+    /// When true, inserts a missing space after ordered list markers when list item content starts
+    /// immediately with emphasis delimiters (for example, <c>2.**Task**</c> -> <c>2. **Task**</c>).
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeOrderedListMarkerSpacing { get; set; } = false;
+
+    /// <summary>
+    /// When true, converts ordered list markers in <c>1)</c> form to <c>1.</c> with normalized spacing.
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeOrderedListParenMarkers { get; set; } = false;
+
+    /// <summary>
+    /// When true, removes stray caret artifacts after ordered list markers
+    /// (for example, <c>2.^ **Task**</c> -> <c>2. **Task**</c>).
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeOrderedListCaretArtifacts { get; set; } = false;
+
+    /// <summary>
+    /// When true, inserts missing newlines between adjacent ordered list items that were emitted on one line
+    /// (for example, <c>...)</c><c>2.**Task**</c> -> <c>...)\n2.**Task**</c>).
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeCollapsedOrderedListBoundaries { get; set; } = false;
+
+    /// <summary>
+    /// When true, repairs malformed ordered list items where a bold title is missing its closing strong delimiter
+    /// before a parenthetical detail section
+    /// (for example, <c>1. **Task(detail)</c> -> <c>1. **Task** (detail)</c>).
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeOrderedListStrongDetailClosures { get; set; } = false;
+
+    /// <summary>
+    /// When true, inserts a missing space before parenthetical phrases adjacent to prose or strong spans
+    /// (for example, <c>**Task**(detail)</c> -> <c>**Task** (detail)</c>).
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeTightParentheticalSpacing { get; set; } = false;
+
+    /// <summary>
+    /// When true, flattens malformed nested strong delimiters emitted by some model outputs
+    /// (for example, <c>**from **Service Control Manager**.**</c>).
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeNestedStrongDelimiters { get; set; } = false;
+
+    /// <summary>
+    /// When true, upgrades trailing list-item strong-close artifacts
+    /// (for example, <c>- Overall health Healthy****</c> becomes <c>- Overall health **Healthy**</c>).
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeDanglingTrailingStrongListClosers { get; set; } = false;
+
+    /// <summary>
+    /// When true, repairs malformed strong runs used as metric values
+    /// (for example, <c>******healthy**</c>, <c>**✅****Healthy**</c>, or a missing trailing closer).
+    /// Default: false.
+    /// </summary>
+    public bool NormalizeMetricValueStrongRuns { get; set; } = false;
+
+    /// <summary>
+    /// Optional markdown pre-processors applied before parsing.
+    /// These run after escaped newline normalization and after built-in text normalization.
+    /// Default: none.
+    /// </summary>
+    public List<MarkdownTextPreProcessor> MarkdownPreProcessors { get; } = new List<MarkdownTextPreProcessor>();
+
+    /// <summary>
+    /// Optional AST-level document transforms applied by <see cref="MarkdownRenderer.RenderBodyHtml"/> after parsing
+    /// and before HTML generation.
+    /// Prefer these for structural/content rewrites that should operate on <see cref="MarkdownDoc"/> instead of
+    /// raw markdown text or rendered HTML strings.
+    /// Default: none.
+    /// </summary>
+    public List<IMarkdownDocumentTransform> DocumentTransforms { get; } = new List<IMarkdownDocumentTransform>();
+
+    /// <summary>Mermaid support options.</summary>
+    public MermaidOptions Mermaid { get; } = new MermaidOptions();
+
+    /// <summary>Chart.js support options.</summary>
+    public ChartOptions Chart { get; } = new ChartOptions();
+
+    /// <summary>vis-network support options.</summary>
+    public NetworkOptions Network { get; } = new NetworkOptions();
+
+    /// <summary>Math (KaTeX) support options.</summary>
+    public MathOptions Math { get; } = new MathOptions();
+
+    /// <summary>
+    /// Optional custom fenced code block renderers applied before built-in Mermaid/Chart/Math conversions.
+    /// These can replace rendered <c>&lt;pre&gt;&lt;code class="language-..."&gt;</c> blocks with host-specific HTML
+    /// and optionally contribute shell head/update fragments through <see cref="MarkdownFencedCodeBlockRenderer.BuildShellHeadHtml"/>,
+    /// <see cref="MarkdownFencedCodeBlockRenderer.BuildBeforeContentReplaceScript"/>, and
+    /// <see cref="MarkdownFencedCodeBlockRenderer.BuildAfterContentReplaceScript"/>.
+    /// The default collection is seeded with built-in Chart.js / vis-network renderers, and later additions win when aliases overlap.
+    /// </summary>
+    public List<MarkdownFencedCodeBlockRenderer> FencedCodeBlockRenderers { get; } = new List<MarkdownFencedCodeBlockRenderer>();
+
+    /// <summary>
+    /// Stable ids of host-level feature packs already applied to this renderer configuration.
+    /// </summary>
+    public IReadOnlyList<string> AppliedFeaturePackIds => _appliedFeaturePackIds;
+
+    /// <summary>
+    /// Registered fence option schemas available to renderer plugins and host integrations.
+    /// </summary>
+    public IReadOnlyList<MarkdownFenceOptionSchema> FenceOptionSchemas => _fenceOptionSchemas;
+
+    /// <summary>
+    /// Applies a fenced-block renderer plugin without duplicating existing language registrations.
+    /// </summary>
+    public void ApplyPlugin(MarkdownRendererPlugin plugin) {
+        if (plugin == null) {
+            throw new ArgumentNullException(nameof(plugin));
+        }
+
+        plugin.Apply(this);
+    }
+
+    /// <summary>
+    /// Returns <see langword="true"/> when the supplied plugin has already registered any of its languages.
+    /// </summary>
+    public bool HasPlugin(MarkdownRendererPlugin plugin) {
+        if (plugin == null) {
+            throw new ArgumentNullException(nameof(plugin));
+        }
+
+        return plugin.IsApplied(this);
+    }
+
+    /// <summary>
+    /// Applies a host-level feature pack once.
+    /// </summary>
+    public void ApplyFeaturePack(MarkdownRendererFeaturePack featurePack) {
+        if (featurePack == null) {
+            throw new ArgumentNullException(nameof(featurePack));
+        }
+
+        featurePack.Apply(this);
+    }
+
+    /// <summary>
+    /// Returns <see langword="true"/> when the supplied host-level feature pack has already been applied.
+    /// </summary>
+    public bool HasFeaturePack(MarkdownRendererFeaturePack featurePack) {
+        if (featurePack == null) {
+            throw new ArgumentNullException(nameof(featurePack));
+        }
+
+        return featurePack.IsApplied(this);
+    }
+
+    /// <summary>
+    /// Registers a fence option schema once.
+    /// </summary>
+    public void ApplyFenceOptionSchema(MarkdownFenceOptionSchema schema) {
+        if (schema == null) {
+            throw new ArgumentNullException(nameof(schema));
+        }
+
+        if (HasFenceOptionSchema(schema)) {
+            return;
+        }
+
+        _fenceOptionSchemas.Add(schema);
+    }
+
+    /// <summary>
+    /// Returns <see langword="true"/> when the supplied fence option schema is already registered.
+    /// </summary>
+    public bool HasFenceOptionSchema(MarkdownFenceOptionSchema schema) {
+        if (schema == null) {
+            throw new ArgumentNullException(nameof(schema));
+        }
+
+        for (int i = 0; i < _fenceOptionSchemas.Count; i++) {
+            if (string.Equals(_fenceOptionSchemas[i].Id, schema.Id, StringComparison.OrdinalIgnoreCase)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Attempts to resolve the most recently-registered fence option schema for the supplied language.
+    /// </summary>
+    public bool TryGetFenceOptionSchema(string language, out MarkdownFenceOptionSchema schema) {
+        if (!string.IsNullOrWhiteSpace(language)) {
+            for (int i = _fenceOptionSchemas.Count - 1; i >= 0; i--) {
+                if (_fenceOptionSchemas[i].HandlesLanguage(language)) {
+                    schema = _fenceOptionSchemas[i];
+                    return true;
+                }
+            }
+        }
+
+        schema = null!;
+        return false;
+    }
+
+    /// <summary>
+    /// Attempts to parse fence metadata using the most recently-registered schema for the supplied language.
+    /// </summary>
+    public bool TryParseFenceOptions(string language, MarkdownCodeFenceInfo? fenceInfo, out MarkdownFenceOptionSet optionSet) {
+        if (TryGetFenceOptionSchema(language, out var schema)) {
+            optionSet = schema.Parse(fenceInfo);
+            return true;
+        }
+
+        optionSet = null!;
+        return false;
+    }
+
+    internal bool TryMarkFeaturePackApplied(string featurePackId) {
+        if (string.IsNullOrWhiteSpace(featurePackId)) {
+            return false;
+        }
+
+        for (int i = 0; i < _appliedFeaturePackIds.Count; i++) {
+            if (string.Equals(_appliedFeaturePackIds[i], featurePackId, StringComparison.OrdinalIgnoreCase)) {
+                return false;
+            }
+        }
+
+        _appliedFeaturePackIds.Add(featurePackId);
+        return true;
+    }
+
+    internal bool TryMarkPluginApplied(string pluginId) {
+        if (string.IsNullOrWhiteSpace(pluginId)) {
+            return false;
+        }
+
+        for (int i = 0; i < _appliedPluginIds.Count; i++) {
+            if (string.Equals(_appliedPluginIds[i], pluginId, StringComparison.OrdinalIgnoreCase)) {
+                return false;
+            }
+        }
+
+        _appliedPluginIds.Add(pluginId);
+        return true;
+    }
+
+    internal bool HasFeaturePackId(string featurePackId) {
+        if (string.IsNullOrWhiteSpace(featurePackId)) {
+            return false;
+        }
+
+        for (int i = 0; i < _appliedFeaturePackIds.Count; i++) {
+            if (string.Equals(_appliedFeaturePackIds[i], featurePackId, StringComparison.OrdinalIgnoreCase)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    internal bool HasPluginId(string pluginId) {
+        if (string.IsNullOrWhiteSpace(pluginId)) {
+            return false;
+        }
+
+        for (int i = 0; i < _appliedPluginIds.Count; i++) {
+            if (string.Equals(_appliedPluginIds[i], pluginId, StringComparison.OrdinalIgnoreCase)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Optional post-processors applied to the HTML fragment produced by <see cref="MarkdownRenderer.RenderBodyHtml"/>.
+    /// These run after built-in conversions (Mermaid/Chart/Math) and after BaseHref injection.
+    /// Prefer <see cref="DocumentTransforms"/> when the change can be expressed against the AST before HTML is emitted.
+    /// Default: none.
+    /// </summary>
+    public List<MarkdownHtmlPostProcessor> HtmlPostProcessors { get; } = new List<MarkdownHtmlPostProcessor>();
+
+    /// <summary>
+    /// Optional Content-Security-Policy meta tag value for the shell document (inserted as http-equiv).
+    /// Leave unset unless your host wants to enforce a specific policy.
+    /// Default: null.
+    /// </summary>
+    public string? ContentSecurityPolicy { get; set; }
+
+    /// <summary>
+    /// Optional additional CSS appended to the shell document after built-in styles and assets.
+    /// Use this to theme/override the default styles without replacing the full shell HTML.
+    /// Default: null.
+    /// </summary>
+    public string? ShellCss { get; set; }
+
+    /// <summary>
+    /// When true, the shell will add "Copy" buttons to fenced code blocks (client-side).
+    /// Default: false.
+    /// </summary>
+    public bool EnableCodeCopyButtons { get; set; } = false;
+
+    /// <summary>
+    /// When true, the shell will add table copy actions (TSV/CSV) above rendered tables (client-side).
+    /// Default: false.
+    /// </summary>
+    public bool EnableTableCopyButtons { get; set; } = false;
+
+    /// <summary>
+    /// Optional guardrail limit for Markdown input size (character count). When exceeded, <see cref="MarkdownOverflowHandling"/> applies.
+    /// Default: null (no limit).
+    /// </summary>
+    public int? MaxMarkdownChars { get; set; }
+
+    /// <summary>
+    /// Optional guardrail limit for the rendered HTML payload size (UTF-8 bytes). When exceeded, <see cref="BodyHtmlOverflowHandling"/> applies.
+    /// Default: null (no limit).
+    /// </summary>
+    public int? MaxBodyHtmlBytes { get; set; }
+
+    /// <summary>
+    /// Behavior when <see cref="MaxMarkdownChars"/> is exceeded. Default: <see cref="OverflowHandling.Truncate"/>.
+    /// </summary>
+    public OverflowHandling MarkdownOverflowHandling { get; set; } = OverflowHandling.Truncate;
+
+    /// <summary>
+    /// Behavior when <see cref="MaxBodyHtmlBytes"/> is exceeded. Default: <see cref="OverflowHandling.RenderError"/>.
+    /// </summary>
+    public OverflowHandling BodyHtmlOverflowHandling { get; set; } = OverflowHandling.RenderError;
+}

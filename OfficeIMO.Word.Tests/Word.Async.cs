@@ -1,0 +1,84 @@
+using System;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+using OfficeIMO.Word;
+using Xunit;
+
+namespace OfficeIMO.Tests {
+    public partial class Word {
+        [Fact]
+        public async Task Test_WordSaveLoadAsync() {
+            var filePath = Path.Combine(_directoryWithFiles, "AsyncWord.docx");
+            if (File.Exists(filePath)) File.Delete(filePath);
+
+            await using (var document = WordDocument.Create(filePath)) {
+                document.AddParagraph("Async");
+                await document.SaveAsync();
+            }
+
+            Assert.True(File.Exists(filePath));
+
+            await using (var document = await WordDocument.LoadAsync(filePath, cancellationToken: CancellationToken.None)) {
+                Assert.Single(document.Paragraphs);
+            }
+
+            File.Delete(filePath);
+        }
+
+        [Fact]
+        public async Task Test_WordCreate_DoesNotCreateDestinationUntilSaveAsync() {
+            var filePath = Path.Combine(_directoryWithFiles, "AsyncCreate.docx");
+            if (File.Exists(filePath)) File.Delete(filePath);
+
+            await using (var document = WordDocument.Create(filePath)) {
+                Assert.False(File.Exists(filePath));
+                document.AddParagraph("Created");
+                await document.SaveAsync();
+            }
+
+            Assert.True(File.Exists(filePath));
+
+            await using (var document = await WordDocument.LoadAsync(filePath, cancellationToken: CancellationToken.None)) {
+                Assert.Single(document.Paragraphs);
+            }
+
+            File.Delete(filePath);
+        }
+
+        [Fact]
+        public async Task Test_WordLoadAsync_CanBeCancelled() {
+            var filePath = Path.Combine(_directoryWithFiles, "AsyncLoadCancelled.docx");
+            if (File.Exists(filePath)) File.Delete(filePath);
+
+            await using (var document = WordDocument.Create(filePath)) {
+                document.AddParagraph("Cancelled");
+                document.Save();
+            }
+
+            var cts = new CancellationTokenSource();
+            cts.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => WordDocument.LoadAsync(filePath, cancellationToken: cts.Token));
+
+            File.Delete(filePath);
+        }
+
+        [Fact]
+        public async Task Test_WordLoadAsync_AllowsReadOnlySharedHandle() {
+            var filePath = Path.Combine(_directoryWithFiles, "AsyncLoadSharedHandle.docx");
+            if (File.Exists(filePath)) File.Delete(filePath);
+
+            using (var document = WordDocument.Create(filePath)) {
+                document.AddParagraph("Shared");
+                document.Save();
+            }
+
+            using var sharedReader = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            await using var loaded = await WordDocument.LoadAsync(filePath, cancellationToken: CancellationToken.None);
+
+            var paragraph = Assert.Single(loaded.Paragraphs);
+            Assert.Equal("Shared", paragraph.Text);
+        }
+    }
+}

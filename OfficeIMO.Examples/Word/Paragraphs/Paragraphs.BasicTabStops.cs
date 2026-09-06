@@ -1,7 +1,9 @@
 using System;
 using DocumentFormat.OpenXml.Wordprocessing;
 using OfficeIMO.Word;
-using Color = SixLabors.ImageSharp.Color;
+using Color = OfficeIMO.Drawing.OfficeColor;
+
+namespace OfficeIMO.Examples.Word;
 
 internal static partial class Paragraphs {
 
@@ -12,15 +14,15 @@ internal static partial class Paragraphs {
             var paragraph = document.AddParagraph("\tFirst Line");
 
             document.Settings.DefaultTabStop = 2880;
-            document.Settings.CharacterSpacingControl = CharacterSpacingValues.DoNotCompress;
+            document.Settings.CharacterSpacingControl = WordCharacterSpacing.DoNotCompress;
 
             Console.WriteLine("Tabs count: " + paragraph.TabStops.Count);
 
             var tab1 = paragraph.AddTabStop(1440);
 
             var tab2 = paragraph.AddTabStop(1440);
-            tab2.Alignment = TabStopValues.Left;
-            tab2.Leader = TabStopLeaderCharValues.Hyphen;
+            tab2.Alignment = WordTabAlignment.Left;
+            tab2.Leader = WordTabLeader.Hyphen;
             tab2.Position = 1440;
 
             paragraph.AddText("\tMore text");
@@ -30,7 +32,7 @@ internal static partial class Paragraphs {
             var paragraph1 = document.AddParagraph("\tNext Line");
 
             var tab3 = paragraph1.AddTabStop(5000);
-            tab3.Leader = TabStopLeaderCharValues.Hyphen;
+            tab3.Leader = WordTabLeader.Hyphen;
 
             var tab4 = paragraph1.AddTabStop(1440 * 2);
             paragraph1.AddText("\tEven more text");
@@ -45,7 +47,8 @@ internal static partial class Paragraphs {
 
         using (WordDocument document = WordDocument.Load(filePath)) {
 
-            document.Save(openWord);
+            document.Save();
+            if (openWord) document.OpenInApplication();
         }
     }
 }

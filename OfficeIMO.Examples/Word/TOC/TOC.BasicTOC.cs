@@ -1,6 +1,6 @@
 using System;
 using OfficeIMO.Word;
-using SixLabors.ImageSharp;
+using Color = OfficeIMO.Drawing.OfficeColor;
 
 namespace OfficeIMO.Examples.Word {
     internal static partial class TOC {
@@ -12,13 +12,13 @@ namespace OfficeIMO.Examples.Word {
                 // Standard way to open document and be asked about Updating Fields including TOC
                 document.Settings.UpdateFieldsOnOpen = true;
 
-                WordTableOfContent wordTableContent = document.AddTableOfContent(TableOfContentStyle.Template1);
+                WordTableOfContent wordTableContent = document.AddTableOfContent(WordTableOfContentsStyle.Template1);
                 wordTableContent.Text = "This is Table of Contents";
                 wordTableContent.TextNoContent = "Ooopsi, no content";
 
                 document.AddPageBreak();
 
-                WordList wordList = document.AddList(WordListStyle.Headings111);
+                WordList wordList = document.AddList(WordListStyle.Numbered);
                 wordList.AddItem("Text 1").Style = WordParagraphStyles.Heading1;
 
                 document.AddPageBreak();
@@ -29,7 +29,8 @@ namespace OfficeIMO.Examples.Word {
             }
 
             using (WordDocument document = WordDocument.Load(filePath)) {
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
 

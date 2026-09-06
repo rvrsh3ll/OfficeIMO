@@ -1,0 +1,124 @@
+using System;
+using System.IO;
+using System.Linq;
+using OfficeIMO.Excel;
+using Xunit;
+
+namespace OfficeIMO.Tests {
+    public class ExcelNamedRangesTests {
+        [Fact]
+        public void CanCreateAndReadNamedRanges() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".xlsx");
+            using (var document = ExcelDocument.Create(filePath)) {
+                var sheet = document.AddWorksheet("Data");
+                document.SetNamedRange("GlobalRange", "'Data'!A1:A2", save: false);
+                sheet.SetNamedRange("LocalRange", "A1", save: false);
+                document.Save();
+            }
+
+            using (var document = ExcelDocument.Load(filePath)) {
+                Assert.Equal("'Data'!$A$1:$A$2", document.GetNamedRange("GlobalRange"));
+                var sheet = document.Sheets.First(s => s.Name == "Data");
+                Assert.Equal("$A$1", sheet.GetNamedRange("LocalRange"));
+            }
+            File.Delete(filePath);
+        }
+
+        [Fact]
+        public void CanDeleteNamedRange() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".xlsx");
+            using (var document = ExcelDocument.Create(filePath)) {
+                var sheet = document.AddWorksheet("Data");
+                sheet.SetNamedRange("TempRange", "A1:B2", save: false);
+                document.Save();
+            }
+
+            using (var document = ExcelDocument.Load(filePath)) {
+                var sheet = document.Sheets.First(s => s.Name == "Data");
+                Assert.True(sheet.RemoveNamedRange("TempRange", save: false));
+                Assert.Null(sheet.GetNamedRange("TempRange"));
+                document.Save();
+            }
+            File.Delete(filePath);
+        }
+
+        [Fact]
+        public void InvalidA1RangeThrows() {
+            using var document = ExcelDocument.Create(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".xlsx"));
+            document.AddWorksheet("Data");
+            Assert.Throws<ArgumentException>(() => document.SetNamedRange("Bad", "'Data'!A1:A"));
+        }
+
+        [Fact]
+        public void CanListNamedRanges() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".xlsx");
+            using (var document = ExcelDocument.Create(filePath)) {
+                var sheet = document.AddWorksheet("Data");
+                document.SetNamedRange("GlobalRange", "'Data'!A1:A2", save: false);
+                sheet.SetNamedRange("LocalRange", "A1:B2", save: false);
+                document.Save();
+            }
+
+            using (var document = ExcelDocument.Load(filePath)) {
+                var globals = document.GetAllNamedRanges();
+                Assert.Single(globals);
+                Assert.Equal("'Data'!$A$1:$A$2", globals["GlobalRange"]);
+                var sheet = document.Sheets.First(s => s.Name == "Data");
+                var locals = sheet.GetAllNamedRanges();
+                Assert.Single(locals);
+                Assert.Equal("$A$1:$B$2", locals["LocalRange"]);
+            }
+            File.Delete(filePath);
+        }
+
+        [Fact]
+        public void SheetLookupFallsBackToWorkbookGlobalNamedRange() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".xlsx");
+            using (var document = ExcelDocument.Create(filePath)) {
+                document.AddWorksheet("Data");
+                document.SetNamedRange("GlobalRange", "'Data'!A1:A2", save: false);
+                document.Save();
+            }
+
+            using (var document = ExcelDocument.Load(filePath)) {
+                var sheet = document.Sheets.First(s => s.Name == "Data");
+                Assert.Equal("'Data'!$A$1:$A$2", document.GetNamedRange("GlobalRange"));
+                Assert.Equal("'Data'!$A$1:$A$2", sheet.GetNamedRange("GlobalRange"));
+            }
+            File.Delete(filePath);
+        }
+
+        [Fact]
+        public void SheetLookupPrefersLocalNamedRangeOverWorkbookGlobal() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".xlsx");
+            using (var document = ExcelDocument.Create(filePath)) {
+                var sheet = document.AddWorksheet("Data");
+                document.SetNamedRange("SharedRange", "'Data'!A1:A2", save: false);
+                sheet.SetNamedRange("SharedRange", "B1:B2", save: false);
+                document.Save();
+            }
+
+            using (var document = ExcelDocument.Load(filePath)) {
+                var sheet = document.Sheets.First(s => s.Name == "Data");
+                Assert.Equal("'Data'!$A$1:$A$2", document.GetNamedRange("SharedRange"));
+                Assert.Equal("$B$1:$B$2", sheet.GetNamedRange("SharedRange"));
+            }
+            File.Delete(filePath);
+        }
+
+        [Fact]
+        public void RenameNamedRange_StrictValidationFailureKeepsOriginalName() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".xlsx");
+            using (var document = ExcelDocument.Create(filePath)) {
+                document.AddWorksheet("Data");
+                document.SetNamedRange("OriginalName", "'Data'!A1:A2", save: false);
+
+                Assert.Throws<ArgumentException>(() => document.RenameNamedRange("OriginalName", "A1", validationMode: ExcelDefinedNameValidationMode.Strict, save: false));
+                Assert.Equal("'Data'!$A$1:$A$2", document.GetNamedRange("OriginalName"));
+                Assert.Null(document.GetNamedRange("A1"));
+            }
+            File.Delete(filePath);
+        }
+    }
+}
+

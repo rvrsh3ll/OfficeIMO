@@ -1,0 +1,269 @@
+namespace OfficeIMO.OpenDocument;
+
+internal static class OdfTextCodec {
+    private const int MaximumDecodedCharacters = 16 * 1024 * 1024;
+
+    internal static string Read(XElement element) {
+        if (element == null) throw new ArgumentNullException(nameof(element));
+        XNode? first = element.FirstNode;
+        if (first == null) return string.Empty;
+        if (first is XText text && first.NextNode == null) {
+            string value = text.Value;
+            if (value.Length > MaximumDecodedCharacters) {
+                throw new InvalidDataException($"Decoded OpenDocument text exceeds the {MaximumDecodedCharacters}-character safety limit.");
+            }
+            return value;
+        }
+        return ReadNodes(element.Nodes());
+    }
+
+    internal static string ReadNodes(IEnumerable<XNode> nodes) {
+        if (nodes == null) throw new ArgumentNullException(nameof(nodes));
+        var builder = new StringBuilder();
+        AppendValue(nodes, builder, MaximumDecodedCharacters);
+        return builder.ToString();
+    }
+
+    internal static void Replace(XElement element, string? text) {
+        if (element == null) throw new ArgumentNullException(nameof(element));
+        element.RemoveNodes();
+        Append(element, text);
+    }
+
+    internal static void Append(XElement element, string? text) {
+        if (element == null) throw new ArgumentNullException(nameof(element));
+        if (string.IsNullOrEmpty(text)) return;
+
+        var plain = new StringBuilder();
+        int spaces = 0;
+        Action flushPlain = () => {
+            if (plain.Length == 0) return;
+            element.Add(new XText(plain.ToString()));
+            plain.Clear();
+        };
+        Action flushSpaces = () => {
+            if (spaces == 0) return;
+            flushPlain();
+            var space = new XElement(OdfNamespaces.Text + "s");
+            if (spaces != 1) space.SetAttributeValue(OdfNamespaces.Text + "c", spaces);
+            element.Add(space);
+            spaces = 0;
+        };
+
+        foreach (char character in text!) {
+            if (character == ' ') {
+                spaces++;
+                continue;
+            }
+            flushSpaces();
+            if (character == '\t') {
+                flushPlain();
+                element.Add(new XElement(OdfNamespaces.Text + "tab"));
+            } else if (character == '\n') {
+                flushPlain();
+                element.Add(new XElement(OdfNamespaces.Text + "line-break"));
+            } else if (character != '\r') {
+                plain.Append(character);
+            }
+        }
+        flushSpaces();
+        flushPlain();
+    }
+
+    internal static void TransformTextCase(
+        XElement element,
+        OfficeIMO.Drawing.OfficeTextCase textCase,
+        CultureInfo? culture = null) {
+        if (element == null) throw new ArgumentNullException(nameof(element));
+        if (textCase == OfficeIMO.Drawing.OfficeTextCase.None) return;
+
+        string source = ReadTransformText(element);
+        string transformed = OfficeIMO.Drawing.OfficeTextCaseTransformer.Apply(source, textCase, culture);
+        if (transformed.Length == source.Length) {
+            int offset = 0;
+            AssignTransformedText(element.Nodes(), transformed, ref offset);
+            return;
+        }
+
+        AssignVariableLengthTransformedText(new[] { element }, textCase, culture);
+    }
+
+    internal static void TransformTextCase(
+        IReadOnlyList<XElement> elements,
+        OfficeIMO.Drawing.OfficeTextCase textCase,
+        CultureInfo? culture = null) {
+        if (elements == null) throw new ArgumentNullException(nameof(elements));
+        if (textCase == OfficeIMO.Drawing.OfficeTextCase.None || elements.Count == 0) return;
+
+        var source = new StringBuilder();
+        for (int index = 0; index < elements.Count; index++) {
+            if (elements[index] == null) throw new ArgumentException("Text elements cannot contain null entries.", nameof(elements));
+            string paragraphText = ReadTransformText(elements[index]);
+            int separatorLength = index > 0 ? 1 : 0;
+            EnsureCapacity(source, separatorLength + paragraphText.Length, MaximumDecodedCharacters);
+            if (separatorLength != 0) source.Append('\n');
+            source.Append(paragraphText);
+        }
+
+        string transformed = OfficeIMO.Drawing.OfficeTextCaseTransformer.Apply(source.ToString(), textCase, culture);
+        if (transformed.Length == source.Length) {
+            int offset = 0;
+            for (int index = 0; index < elements.Count; index++) {
+                AssignTransformedText(elements[index].Nodes(), transformed, ref offset);
+                if (index < elements.Count - 1) offset++;
+            }
+            return;
+        }
+
+        AssignVariableLengthTransformedText(elements, textCase, culture);
+    }
+
+    private static void AssignVariableLengthTransformedText(
+        IReadOnlyList<XElement> elements,
+        OfficeIMO.Drawing.OfficeTextCase textCase,
+        CultureInfo? culture) {
+        var segments = new List<string>();
+        var targets = new List<XText?>();
+        for (int index = 0; index < elements.Count; index++) {
+            if (index > 0) {
+                segments.Add("\n");
+                targets.Add(null);
+            }
+            CollectTransformSegments(elements[index].Nodes(), segments, targets);
+        }
+
+        IReadOnlyList<string> transformed = OfficeIMO.Drawing.OfficeTextCaseTransformer.ApplySegments(segments, textCase, culture);
+        for (int index = 0; index < targets.Count; index++) {
+            if (targets[index] != null) targets[index]!.Value = transformed[index];
+        }
+    }
+
+    private static void CollectTransformSegments(
+        IEnumerable<XNode> nodes,
+        IList<string> segments,
+        IList<XText?> targets) {
+        foreach (XNode node in nodes) {
+            if (node is XText text) {
+                segments.Add(text.Value);
+                targets.Add(text);
+                continue;
+            }
+            if (!(node is XElement element)) continue;
+            if (IsExcludedFromCaseTransform(element)) continue;
+            if (element.Name == OdfNamespaces.Text + "s") {
+                segments.Add(new string(' ', ParsePositiveCount((string?)element.Attribute(OdfNamespaces.Text + "c"))));
+                targets.Add(null);
+            } else if (element.Name == OdfNamespaces.Text + "tab") {
+                segments.Add("\t");
+                targets.Add(null);
+            } else if (element.Name == OdfNamespaces.Text + "line-break") {
+                segments.Add("\n");
+                targets.Add(null);
+            } else {
+                CollectTransformSegments(element.Nodes(), segments, targets);
+            }
+        }
+    }
+
+    private static void AssignTransformedText(IEnumerable<XNode> nodes, string transformed, ref int offset) {
+        foreach (XNode node in nodes) {
+            if (node is XText text) {
+                int length = text.Value.Length;
+                text.Value = transformed.Substring(offset, length);
+                offset += length;
+                continue;
+            }
+            if (!(node is XElement element)) continue;
+            if (IsExcludedFromCaseTransform(element)) continue;
+            if (element.Name == OdfNamespaces.Text + "s") {
+                offset += ParsePositiveCount((string?)element.Attribute(OdfNamespaces.Text + "c"));
+            } else if (element.Name == OdfNamespaces.Text + "tab" ||
+                       element.Name == OdfNamespaces.Text + "line-break") {
+                offset++;
+            } else {
+                AssignTransformedText(element.Nodes(), transformed, ref offset);
+            }
+        }
+    }
+
+    private static string ReadTransformText(XElement element) {
+        var builder = new StringBuilder();
+        AppendTransformValue(element.Nodes(), builder, MaximumDecodedCharacters);
+        return builder.ToString();
+    }
+
+    private static void AppendTransformValue(IEnumerable<XNode> nodes, StringBuilder builder, int maximumCharacters) {
+        foreach (XNode node in nodes) {
+            if (node is XText text) {
+                AppendBounded(builder, text.Value, maximumCharacters);
+                continue;
+            }
+            if (!(node is XElement element) || IsExcludedFromCaseTransform(element)) continue;
+            if (element.Name == OdfNamespaces.Text + "s") {
+                int count = ParsePositiveCount((string?)element.Attribute(OdfNamespaces.Text + "c"));
+                EnsureCapacity(builder, count, maximumCharacters);
+                builder.Append(' ', count);
+            } else if (element.Name == OdfNamespaces.Text + "tab") {
+                EnsureCapacity(builder, 1, maximumCharacters);
+                builder.Append('\t');
+            } else if (element.Name == OdfNamespaces.Text + "line-break") {
+                EnsureCapacity(builder, 1, maximumCharacters);
+                builder.Append('\n');
+            } else {
+                AppendTransformValue(element.Nodes(), builder, maximumCharacters);
+            }
+        }
+    }
+
+    private static bool IsExcludedFromCaseTransform(XElement element) =>
+        element.Name == OdfNamespaces.Office + "annotation" ||
+        element.Name == OdfNamespaces.Presentation + "notes" ||
+        element.Name == OdfNamespaces.Text + "note" ||
+        element.Name == OdfNamespaces.Svg + "title" ||
+        element.Name == OdfNamespaces.Svg + "desc" ||
+        element.Name == OdfNamespaces.Office + "binary-data" ||
+        element.Name == OdfNamespaces.Draw + "object" ||
+        element.Name == OdfNamespaces.Draw + "object-ole" ||
+        element.Name == OdfNamespaces.Draw + "image" ||
+        element.Name == OdfNamespaces.Draw + "plugin" ||
+        element.Name == OdfNamespaces.Draw + "applet" ||
+        element.Name == OdfNamespaces.Draw + "floating-frame";
+
+    private static void AppendValue(IEnumerable<XNode> nodes, StringBuilder builder, int maximumCharacters) {
+        foreach (XNode node in nodes) {
+            if (node is XText text) {
+                AppendBounded(builder, text.Value, maximumCharacters);
+                continue;
+            }
+            if (!(node is XElement element)) continue;
+            if (element.Name == OdfNamespaces.Text + "s") {
+                int count = ParsePositiveCount((string?)element.Attribute(OdfNamespaces.Text + "c"));
+                EnsureCapacity(builder, count, maximumCharacters);
+                builder.Append(' ', count);
+            } else if (element.Name == OdfNamespaces.Text + "tab") {
+                EnsureCapacity(builder, 1, maximumCharacters);
+                builder.Append('\t');
+            } else if (element.Name == OdfNamespaces.Text + "line-break") {
+                EnsureCapacity(builder, 1, maximumCharacters);
+                builder.Append('\n');
+            } else {
+                AppendValue(element.Nodes(), builder, maximumCharacters);
+            }
+        }
+    }
+
+    private static void AppendBounded(StringBuilder builder, string value, int maximumCharacters) {
+        EnsureCapacity(builder, value.Length, maximumCharacters);
+        builder.Append(value);
+    }
+
+    private static void EnsureCapacity(StringBuilder builder, int additionalCharacters, int maximumCharacters) {
+        if (additionalCharacters > maximumCharacters - builder.Length) {
+            throw new InvalidDataException($"Decoded OpenDocument text exceeds the {maximumCharacters}-character safety limit.");
+        }
+    }
+
+    private static int ParsePositiveCount(string? value) {
+        return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int count) && count > 0 ? count : 1;
+    }
+}

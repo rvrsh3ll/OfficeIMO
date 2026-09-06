@@ -1,0 +1,6 @@
+*.vsix
+dist/
+out/
+.tmp/
+node_modules/
+tools/OfficeIMO.Markup.Cli/

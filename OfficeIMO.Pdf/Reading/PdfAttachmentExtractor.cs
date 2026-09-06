@@ -1,0 +1,829 @@
+using OfficeIMO.Core.Internal;
+using System.Globalization;
+using System.Threading;
+using OfficeIMO.Pdf.Filters;
+
+namespace OfficeIMO.Pdf;
+
+/// <summary>
+/// Extracts embedded file attachments from PDFs that can be parsed by OfficeIMO.Pdf.
+/// </summary>
+internal static class PdfAttachmentExtractor {
+    /// <summary>Extracts only attachments accepted by the caller predicate.</summary>
+    public static IReadOnlyList<PdfExtractedAttachment> ExtractAttachments(byte[] pdf, Func<PdfExtractedAttachment, bool> predicate) {
+        Guard.NotNull(predicate, nameof(predicate));
+        return ExtractAttachments(pdf).Where(predicate).ToArray();
+    }
+
+    /// <summary>Extracts attachments with an exact file name.</summary>
+    public static IReadOnlyList<PdfExtractedAttachment> ExtractAttachmentsByFileName(byte[] pdf, string fileName) {
+        Guard.NotNullOrWhiteSpace(fileName, nameof(fileName));
+        return ExtractAttachments(pdf, attachment => string.Equals(attachment.FileName, fileName, StringComparison.Ordinal));
+    }
+
+    /// <summary>Extracts embedded file attachments from a PDF byte array.</summary>
+    public static IReadOnlyList<PdfExtractedAttachment> ExtractAttachments(byte[] pdf) {
+        Guard.NotNull(pdf, nameof(pdf));
+        var (objects, trailerRaw) = PdfSyntax.ParseObjects(pdf, null, out _, out long decodedStreamBytes);
+        return ExtractAttachments(objects, trailerRaw, null, decodedStreamBytes);
+    }
+
+    /// <summary>Extracts embedded file attachments from a PDF file path.</summary>
+    public static IReadOnlyList<PdfExtractedAttachment> ExtractAttachments(string path) {
+        Guard.NotNullOrWhiteSpace(path, nameof(path));
+        return ExtractAttachments(File.ReadAllBytes(path));
+    }
+
+    /// <summary>Extracts embedded file attachments from the current position of a readable stream.</summary>
+    public static IReadOnlyList<PdfExtractedAttachment> ExtractAttachments(Stream stream) {
+        Guard.NotNull(stream, nameof(stream));
+        if (!stream.CanRead) {
+            throw new ArgumentException("Stream must be readable.", nameof(stream));
+        }
+
+        using var buffer = new MemoryStream();
+        stream.CopyTo(buffer);
+        return ExtractAttachments(buffer.ToArray());
+    }
+
+    /// <summary>Extracts embedded file attachments from a parsed PDF document.</summary>
+    public static IReadOnlyList<PdfExtractedAttachment> ExtractAttachments(PdfReadDocument document) {
+        Guard.NotNull(document, nameof(document));
+        return document.ExtractAttachments();
+    }
+
+    /// <summary>Extracts embedded file attachments from a PDF path and writes them to <paramref name="outputDirectory"/>.</summary>
+    public static IReadOnlyList<string> ExtractAttachments(string inputPath, string outputDirectory) {
+        Guard.NotNullOrWhiteSpace(inputPath, nameof(inputPath));
+        Guard.NotNull(outputDirectory, nameof(outputDirectory));
+
+        string fullOutputDirectory = ValidateOutputDirectory(outputDirectory);
+        return WriteAttachmentFiles(ExtractAttachments(inputPath), fullOutputDirectory);
+    }
+
+    /// <summary>Extracts embedded file attachments from a byte array and writes them to <paramref name="outputDirectory"/>.</summary>
+    public static IReadOnlyList<string> ExtractAttachments(byte[] pdf, string outputDirectory) {
+        Guard.NotNull(pdf, nameof(pdf));
+        Guard.NotNull(outputDirectory, nameof(outputDirectory));
+
+        string fullOutputDirectory = ValidateOutputDirectory(outputDirectory);
+        return WriteAttachmentFiles(ExtractAttachments(pdf), fullOutputDirectory);
+    }
+
+    /// <summary>Extracts embedded file attachments from a stream and writes them to <paramref name="outputDirectory"/>.</summary>
+    public static IReadOnlyList<string> ExtractAttachments(Stream stream, string outputDirectory) {
+        Guard.NotNull(outputDirectory, nameof(outputDirectory));
+
+        string fullOutputDirectory = ValidateOutputDirectory(outputDirectory);
+        return WriteAttachmentFiles(ExtractAttachments(stream), fullOutputDirectory);
+    }
+
+    internal static IReadOnlyList<PdfExtractedAttachment> ExtractAttachments(
+        Dictionary<int, PdfIndirectObject> objects,
+        string trailerRaw,
+        PdfReadLimits? limits = null,
+        long initialDecodedStreamBytes = 0) {
+        IReadOnlyList<AttachmentDescriptor> descriptors = CollectAttachmentDescriptors(
+            objects, trailerRaw, limits, out AttachmentExtractionBudget budget, initialDecodedStreamBytes: initialDecodedStreamBytes);
+        if (descriptors.Count == 0) {
+            return Array.Empty<PdfExtractedAttachment>();
+        }
+
+        var attachments = new List<PdfExtractedAttachment>(descriptors.Count);
+        for (int index = 0; index < descriptors.Count; index++) {
+            AttachmentDescriptor descriptor = descriptors[index];
+            attachments.Add(descriptor.ToExtractedAttachment(budget.GetDecodedBytes(descriptor.Stream, objects)));
+        }
+        return attachments.AsReadOnly();
+    }
+
+    internal static IReadOnlyList<PdfExtractedAttachment> ExtractAttachments(
+        PdfReadDocument document,
+        Func<PdfAttachmentInfo, bool> predicate,
+        long maxDecodedBytes,
+        long? maxDecodedBytesPerAttachment = null,
+        int? maxSelectedAttachments = null,
+        int? maxStructuralEntries = null,
+        bool requireSuccessfulDecoding = false,
+        ISet<int>? allowedObjectNumbers = null,
+        CancellationToken cancellationToken = default) {
+        Guard.NotNull(document, nameof(document));
+        Guard.NotNull(predicate, nameof(predicate));
+        Guard.Positive(maxDecodedBytes, nameof(maxDecodedBytes));
+        if (maxDecodedBytesPerAttachment.HasValue) Guard.Positive(maxDecodedBytesPerAttachment.Value, nameof(maxDecodedBytesPerAttachment));
+        if (maxSelectedAttachments.HasValue) Guard.Positive(maxSelectedAttachments.Value, nameof(maxSelectedAttachments));
+        if (maxStructuralEntries.HasValue) Guard.Positive(maxStructuralEntries.Value, nameof(maxStructuralEntries));
+        document.DemandContentExtraction("attachment");
+        IReadOnlyList<AttachmentDescriptor> descriptors = CollectAttachmentDescriptors(
+            document.Objects,
+            document.TrailerRaw,
+            document.ReadOptions.Limits,
+            out AttachmentExtractionBudget budget,
+            maxDecodedBytes,
+            maxDecodedBytesPerAttachment,
+            maxStructuralEntries,
+            document.DecodedStreamBytes,
+            document.DecodedStreamBudget,
+            allowedObjectNumbers,
+            cancellationToken);
+        var attachments = new List<PdfExtractedAttachment>();
+        foreach (AttachmentDescriptor descriptor in descriptors) {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!predicate(descriptor.ToAttachmentInfo())) continue;
+            if (maxSelectedAttachments.HasValue && attachments.Count >= maxSelectedAttachments.Value) {
+                throw new InvalidDataException($"The asset exceeds the configured carrier limit of {maxSelectedAttachments.Value}.");
+            }
+            attachments.Add(descriptor.ToExtractedAttachment(budget.GetDecodedBytes(
+                descriptor.Stream,
+                document.Objects,
+                requireSuccessfulDecoding)));
+        }
+        return attachments.AsReadOnly();
+    }
+
+    internal static IReadOnlyList<PdfAttachmentInfo> InspectAttachments(
+        Dictionary<int, PdfIndirectObject> objects,
+        string trailerRaw,
+        PdfReadLimits? limits = null,
+        CancellationToken cancellationToken = default) {
+        IReadOnlyList<AttachmentDescriptor> descriptors = CollectAttachmentDescriptors(
+            objects,
+            trailerRaw,
+            limits,
+            out _,
+            cancellationToken: cancellationToken);
+        if (descriptors.Count == 0) {
+            return Array.Empty<PdfAttachmentInfo>();
+        }
+
+        var attachments = new PdfAttachmentInfo[descriptors.Count];
+        for (int index = 0; index < descriptors.Count; index++) {
+            cancellationToken.ThrowIfCancellationRequested();
+            attachments[index] = descriptors[index].ToAttachmentInfo();
+        }
+
+        return attachments;
+    }
+
+    private static IReadOnlyList<AttachmentDescriptor> CollectAttachmentDescriptors(
+        Dictionary<int, PdfIndirectObject> objects,
+        string trailerRaw,
+        PdfReadLimits? limits,
+        out AttachmentExtractionBudget budget,
+        long? maxDecodedBytes = null,
+        long? maxDecodedBytesPerAttachment = null,
+        int? maxStructuralEntries = null,
+        long initialDecodedStreamBytes = 0,
+        PdfDecodedStreamBudget? sharedDecodedStreamBudget = null,
+        ISet<int>? allowedObjectNumbers = null,
+        CancellationToken cancellationToken = default) {
+        Guard.NotNull(objects, nameof(objects));
+        PdfReadLimits effectiveLimits = limits ?? new PdfReadLimits();
+        effectiveLimits.Validate();
+        budget = new AttachmentExtractionBudget(
+            effectiveLimits, maxDecodedBytes, maxDecodedBytesPerAttachment, maxStructuralEntries,
+            initialDecodedStreamBytes, sharedDecodedStreamBudget, cancellationToken);
+        budget.Checkpoint();
+        budget.ValidateStructuralObjects(objects);
+        PdfDictionary? catalog = PdfSyntax.FindCatalog(objects, trailerRaw);
+        if (catalog is null) {
+            return Array.Empty<AttachmentDescriptor>();
+        }
+
+        var attachments = new List<AttachmentDescriptor>();
+        var discoveredFileSpecs = new HashSet<PdfDictionary>();
+        if (catalog.Items.TryGetValue("Names", out var namesObject) &&
+            ResolveDictionary(objects, namesObject) is PdfDictionary namesDictionary &&
+            namesDictionary.Items.TryGetValue("EmbeddedFiles", out var embeddedFilesTreeObject)) {
+            var visitedTrees = new HashSet<int>();
+            int traversedNameTreeNodes = 0;
+            ReadEmbeddedFilesNameTree(objects, embeddedFilesTreeObject, attachments, discoveredFileSpecs, visitedTrees, budget, effectiveLimits, 0, ref traversedNameTreeNodes);
+        }
+
+        foreach (PdfArray associatedFiles in PdfAssociatedFileGraph.FindAssociatedFileArrays(
+                     objects,
+                     allowedObjectNumbers,
+                     cancellationToken)) {
+            budget.Checkpoint();
+            ReadAssociatedFiles(objects, associatedFiles, attachments, discoveredFileSpecs, budget);
+        }
+
+        ReadFileAttachmentAnnotations(objects, attachments, discoveredFileSpecs, budget, allowedObjectNumbers);
+
+        return attachments.Count == 0 ? Array.Empty<AttachmentDescriptor>() : attachments.AsReadOnly();
+    }
+
+    private static void ReadFileAttachmentAnnotations(
+        Dictionary<int, PdfIndirectObject> objects,
+        List<AttachmentDescriptor> attachments,
+        ISet<PdfDictionary> discoveredFileSpecs,
+        AttachmentExtractionBudget budget,
+        ISet<int>? allowedObjectNumbers) {
+        var visited = new HashSet<PdfObject>();
+        foreach (PdfIndirectObject indirect in objects.Values) {
+            budget.Checkpoint();
+            if (allowedObjectNumbers != null && !allowedObjectNumbers.Contains(indirect.ObjectNumber)) continue;
+            ReadFileAttachmentAnnotations(objects, indirect.Value, attachments, discoveredFileSpecs, visited, budget);
+        }
+    }
+
+    private static void ReadFileAttachmentAnnotations(
+        Dictionary<int, PdfIndirectObject> objects,
+        PdfObject value,
+        List<AttachmentDescriptor> attachments,
+        ISet<PdfDictionary> discoveredFileSpecs,
+        ISet<PdfObject> visited,
+        AttachmentExtractionBudget budget) {
+        budget.Checkpoint();
+        if (!visited.Add(value)) return;
+        if (value is PdfStream stream) {
+            ReadFileAttachmentAnnotations(objects, stream.Dictionary, attachments, discoveredFileSpecs, visited, budget);
+            return;
+        }
+        if (value is PdfDictionary dictionary) {
+            if (string.Equals(
+                    PdfObjectLookup.Resolve(objects, dictionary.Items.TryGetValue("Subtype", out PdfObject? subtype) ? subtype : null) is PdfName resolvedSubtype
+                        ? resolvedSubtype.Name
+                        : null,
+                    "FileAttachment",
+                    StringComparison.Ordinal) &&
+                dictionary.Items.TryGetValue("FS", out PdfObject? fileSpecObject)) {
+                string name = TryReadFileSpecName(objects, fileSpecObject) ?? "FileAttachment";
+                AttachmentDescriptor? attachment = TryBuildAttachment(
+                    objects,
+                    name,
+                    fileSpecObject,
+                    "FileAttachment",
+                    discoveredFileSpecs,
+                    budget);
+                if (attachment != null) {
+                    attachments.Add(attachment);
+                }
+            }
+
+            foreach (PdfObject child in dictionary.Items.Values) {
+                if (child is not PdfReference) {
+                    ReadFileAttachmentAnnotations(objects, child, attachments, discoveredFileSpecs, visited, budget);
+                }
+            }
+            return;
+        }
+        if (value is PdfArray array) {
+            foreach (PdfObject child in array.Items) {
+                if (child is not PdfReference) {
+                    ReadFileAttachmentAnnotations(objects, child, attachments, discoveredFileSpecs, visited, budget);
+                }
+            }
+        }
+    }
+
+    private static void ReadEmbeddedFilesNameTree(
+        Dictionary<int, PdfIndirectObject> objects,
+        PdfObject treeObject,
+        List<AttachmentDescriptor> attachments,
+        ISet<PdfDictionary> discoveredFileSpecs,
+        HashSet<int> visitedTrees,
+        AttachmentExtractionBudget budget,
+        PdfReadLimits limits,
+        int depth,
+        ref int traversedNodes) {
+        budget.Checkpoint();
+        if (treeObject is PdfReference treeReference) {
+            if (!visitedTrees.Add(treeReference.ObjectNumber)) {
+                return;
+            }
+
+            traversedNodes++;
+            if (traversedNodes > limits.MaxNameTreeNodes) {
+                throw PdfReadLimitException.Create(PdfReadLimitKind.NameTreeNodes, limits.MaxNameTreeNodes, traversedNodes);
+            }
+        }
+
+        if (depth > limits.MaxNameTreeDepth) {
+            throw PdfReadLimitException.Create(PdfReadLimitKind.NameTreeDepth, limits.MaxNameTreeDepth, depth);
+        }
+
+        if (ResolveDictionary(objects, treeObject) is not PdfDictionary tree) {
+            return;
+        }
+
+        if (ResolveObject(objects, tree.Items.TryGetValue("Names", out var namesObject) ? namesObject : null) is PdfArray names) {
+            for (int i = 0; i + 1 < names.Items.Count; i += 2) {
+                budget.Checkpoint();
+                if (ResolveObject(objects, names.Items[i]) is not PdfStringObj name) {
+                    continue;
+                }
+
+                PdfObject fileSpecObject = names.Items[i + 1];
+                AttachmentDescriptor? attachment = TryBuildAttachment(objects, name.Value, fileSpecObject, "Names/EmbeddedFiles", discoveredFileSpecs, budget);
+                if (attachment != null) {
+                    attachments.Add(attachment);
+                }
+            }
+        }
+
+        if (ResolveObject(objects, tree.Items.TryGetValue("Kids", out var kidsObject) ? kidsObject : null) is PdfArray kids) {
+            foreach (PdfObject kid in kids.Items) {
+                budget.Checkpoint();
+                ReadEmbeddedFilesNameTree(objects, kid, attachments, discoveredFileSpecs, visitedTrees, budget, limits, depth + 1, ref traversedNodes);
+            }
+        }
+    }
+
+    private static void ReadAssociatedFiles(
+        Dictionary<int, PdfIndirectObject> objects,
+        PdfArray associatedFiles,
+        List<AttachmentDescriptor> attachments,
+        ISet<PdfDictionary> discoveredFileSpecs,
+        AttachmentExtractionBudget budget) {
+        for (int i = 0; i < associatedFiles.Items.Count; i++) {
+            budget.Checkpoint();
+            PdfObject fileSpecObject = associatedFiles.Items[i];
+            string name = TryReadFileSpecName(objects, fileSpecObject) ?? "AF." + i.ToString(CultureInfo.InvariantCulture);
+            AttachmentDescriptor? attachment = TryBuildAttachment(objects, name, fileSpecObject, "AF", discoveredFileSpecs, budget);
+            if (attachment != null) {
+                attachments.Add(attachment);
+            }
+        }
+    }
+
+    private static AttachmentDescriptor? TryBuildAttachment(
+        Dictionary<int, PdfIndirectObject> objects,
+        string name,
+        PdfObject fileSpecObject,
+        string source,
+        ISet<PdfDictionary> discoveredFileSpecs,
+        AttachmentExtractionBudget budget) {
+        budget.Checkpoint();
+        int fileSpecObjectNumber = fileSpecObject is PdfReference fileSpecReference ? fileSpecReference.ObjectNumber : 0;
+        if (ResolveDictionary(objects, fileSpecObject) is not PdfDictionary fileSpec ||
+            !discoveredFileSpecs.Add(fileSpec) ||
+            ResolveDictionary(objects, fileSpec.Items.TryGetValue("EF", out var embeddedFilesObject) ? embeddedFilesObject : null) is not PdfDictionary embeddedFiles) {
+            return null;
+        }
+
+        PdfObject? embeddedFileObject = null;
+        PdfStream? stream = null;
+        if (embeddedFiles.Items.TryGetValue("UF", out PdfObject? unicodeEmbeddedFileObject) &&
+            ResolveObject(objects, unicodeEmbeddedFileObject) is PdfStream unicodeStream) {
+            embeddedFileObject = unicodeEmbeddedFileObject;
+            stream = unicodeStream;
+        } else if (embeddedFiles.Items.TryGetValue("F", out PdfObject? regularEmbeddedFileObject) &&
+            ResolveObject(objects, regularEmbeddedFileObject) is PdfStream regularStream) {
+            embeddedFileObject = regularEmbeddedFileObject;
+            stream = regularStream;
+        }
+        if (embeddedFileObject == null || stream == null) {
+            return null;
+        }
+        int embeddedFileObjectNumber = embeddedFileObject is PdfReference embeddedFileReference ? embeddedFileReference.ObjectNumber : 0;
+        budget.ReserveAttachment();
+
+        string fileName = TryReadText(objects, fileSpec, "F") ?? name;
+        string? unicodeFileName = TryReadText(objects, fileSpec, "UF");
+        string? description = TryReadText(objects, fileSpec, "Desc");
+        string? mimeType = TryReadStreamSubtype(objects, stream.Dictionary);
+        PdfAssociatedFileRelationship relationship = TryReadRelationship(objects, fileSpec);
+        string filter = GetFilterName(objects, stream.Dictionary.Items.TryGetValue("Filter", out var filterObject) ? filterObject : null);
+        PdfDictionary? parameters = ResolveDictionary(objects, stream.Dictionary.Items.TryGetValue("Params", out PdfObject? parametersObject) ? parametersObject : null);
+        DateTimeOffset? creationDate = TryReadPdfDate(objects, parameters, "CreationDate");
+        DateTimeOffset? modificationDate = TryReadPdfDate(objects, parameters, "ModDate");
+        int? declaredSizeBytes = TryReadDeclaredAttachmentSize(objects, parameters);
+
+        return new AttachmentDescriptor(
+            name,
+            fileName,
+            unicodeFileName,
+            description,
+            mimeType,
+            relationship,
+            filter,
+            fileSpecObjectNumber,
+            embeddedFileObjectNumber,
+            stream.Data.Length,
+            declaredSizeBytes,
+            stream,
+            source,
+            creationDate,
+            modificationDate);
+    }
+
+    private static int? TryReadDeclaredAttachmentSize(
+        Dictionary<int, PdfIndirectObject> objects,
+        PdfDictionary? parameters) {
+        if (parameters is not null &&
+            parameters.Items.TryGetValue("Size", out PdfObject? sizeObject) &&
+            ResolveObject(objects, sizeObject) is PdfNumber size &&
+            size.Value >= 0D &&
+            size.Value <= int.MaxValue &&
+            Math.Floor(size.Value) == size.Value) {
+            return (int)size.Value;
+        }
+
+        return null;
+    }
+
+    private sealed class AttachmentDescriptor {
+        internal AttachmentDescriptor(
+            string name,
+            string fileName,
+            string? unicodeFileName,
+            string? description,
+            string? mimeType,
+            PdfAssociatedFileRelationship relationship,
+            string filter,
+            int fileSpecObjectNumber,
+            int embeddedFileObjectNumber,
+            int encodedSizeBytes,
+            int? declaredSizeBytes,
+            PdfStream stream,
+            string source,
+            DateTimeOffset? creationDate,
+            DateTimeOffset? modificationDate) {
+            Name = name;
+            FileName = fileName;
+            UnicodeFileName = unicodeFileName;
+            Description = description;
+            MimeType = mimeType;
+            Relationship = relationship;
+            Filter = filter;
+            FileSpecObjectNumber = fileSpecObjectNumber;
+            EmbeddedFileObjectNumber = embeddedFileObjectNumber;
+            EncodedSizeBytes = encodedSizeBytes;
+            DeclaredSizeBytes = declaredSizeBytes;
+            Stream = stream;
+            Source = source;
+            CreationDate = creationDate;
+            ModificationDate = modificationDate;
+        }
+
+        internal string Name { get; }
+        internal string FileName { get; }
+        internal string? UnicodeFileName { get; }
+        internal string? Description { get; }
+        internal string? MimeType { get; }
+        internal PdfAssociatedFileRelationship Relationship { get; }
+        internal string Filter { get; }
+        internal int FileSpecObjectNumber { get; }
+        internal int EmbeddedFileObjectNumber { get; }
+        internal int EncodedSizeBytes { get; }
+        internal int? DeclaredSizeBytes { get; }
+        internal PdfStream Stream { get; }
+        internal string Source { get; }
+        internal DateTimeOffset? CreationDate { get; }
+        internal DateTimeOffset? ModificationDate { get; }
+
+        internal PdfAttachmentInfo ToAttachmentInfo() => new(
+            Name,
+            FileName,
+            UnicodeFileName,
+            Description,
+            MimeType,
+            Relationship,
+            Filter,
+            FileSpecObjectNumber,
+            EmbeddedFileObjectNumber,
+            EncodedSizeBytes,
+            DeclaredSizeBytes,
+            Source,
+            CreationDate,
+            ModificationDate);
+
+        internal PdfExtractedAttachment ToExtractedAttachment(byte[] bytes) => new(
+            Name,
+            FileName,
+            UnicodeFileName,
+            Description,
+            MimeType,
+            Relationship,
+            Filter,
+            FileSpecObjectNumber,
+            EmbeddedFileObjectNumber,
+            bytes,
+            Source,
+            CreationDate,
+            ModificationDate,
+            copyBytes: false);
+    }
+
+    private sealed class AttachmentExtractionBudget {
+        private readonly PdfReadLimits _limits;
+        private readonly long _maxTotalAttachmentBytes;
+        private readonly long _maxSingleAttachmentBytes;
+        private readonly long _maxTotalDecodedStreamBytes;
+        private readonly int? _maxStructuralEntries;
+        private readonly PdfDecodedStreamBudget? _sharedDecodedStreamBudget;
+        private readonly CancellationToken _cancellationToken;
+        private readonly Dictionary<PdfStream, byte[]> _decodedEmbeddedStreams = new();
+        private int _attachmentCount;
+        private int _structuralEntryCount;
+        private long _decodedAttachmentBytes;
+        private long _decodedStreamBytes;
+
+        internal AttachmentExtractionBudget(
+            PdfReadLimits limits,
+            long? maxDecodedBytes = null,
+            long? maxDecodedBytesPerAttachment = null,
+            int? maxStructuralEntries = null,
+            long initialDecodedStreamBytes = 0,
+            PdfDecodedStreamBudget? sharedDecodedStreamBudget = null,
+            CancellationToken cancellationToken = default) {
+            _limits = limits;
+            _maxTotalAttachmentBytes = Math.Min(limits.MaxTotalAttachmentBytes, maxDecodedBytes ?? long.MaxValue);
+            _maxSingleAttachmentBytes = Math.Min(limits.MaxDecodedStreamBytes, maxDecodedBytesPerAttachment ?? long.MaxValue);
+            _maxTotalDecodedStreamBytes = limits.MaxTotalDecodedStreamBytes;
+            _maxStructuralEntries = maxStructuralEntries;
+            _sharedDecodedStreamBudget = sharedDecodedStreamBudget;
+            _cancellationToken = cancellationToken;
+            if (initialDecodedStreamBytes < 0 || initialDecodedStreamBytes > _maxTotalDecodedStreamBytes) {
+                throw PdfReadLimitException.Create(
+                    PdfReadLimitKind.TotalDecodedStreamBytes,
+                    _maxTotalDecodedStreamBytes,
+                    initialDecodedStreamBytes);
+            }
+            _decodedStreamBytes = initialDecodedStreamBytes;
+        }
+
+        internal void ValidateStructuralObjects(Dictionary<int, PdfIndirectObject> objects) {
+            Checkpoint();
+            if (!_maxStructuralEntries.HasValue) return;
+            var visited = new HashSet<PdfObject>();
+            var pending = new Stack<PdfObject>(objects.Values.Select(static item => item.Value));
+            while (pending.Count > 0) {
+                Checkpoint();
+                PdfObject value = pending.Pop();
+                if (!visited.Add(value)) continue;
+                PdfDictionary? dictionary = value is PdfStream stream ? stream.Dictionary : value as PdfDictionary;
+                if (dictionary != null) {
+                    ReserveStructuralEntry();
+                    ReserveStructuralEntries(dictionary.Items.Count);
+                    foreach (PdfObject child in dictionary.Items.Values) {
+                        if (child is not PdfReference) pending.Push(child);
+                    }
+                } else if (value is PdfArray array) {
+                    ReserveStructuralEntry();
+                    ReserveStructuralEntries(array.Items.Count);
+                    foreach (PdfObject child in array.Items) {
+                        if (child is not PdfReference) pending.Push(child);
+                    }
+                }
+            }
+        }
+
+        internal void ReserveStructuralEntry() {
+            Checkpoint();
+            ReserveStructuralEntries(1);
+        }
+
+        private void ReserveStructuralEntries(int count) {
+            if (!_maxStructuralEntries.HasValue) return;
+            if (count < 0 || _structuralEntryCount > _maxStructuralEntries.Value - count) {
+                throw new InvalidDataException($"The PDF exceeds the configured container entry limit of {_maxStructuralEntries.Value}.");
+            }
+
+            _structuralEntryCount += count;
+        }
+
+        internal void ReserveAttachment() {
+            Checkpoint();
+            int nextCount = _attachmentCount + 1;
+            if (nextCount > _limits.MaxAttachments) {
+                throw PdfReadLimitException.Create(PdfReadLimitKind.Attachments, _limits.MaxAttachments, nextCount);
+            }
+
+            _attachmentCount = nextCount;
+        }
+
+        internal byte[] GetDecodedBytes(
+            PdfStream stream,
+            Dictionary<int, PdfIndirectObject> objects,
+            bool requireSuccessfulDecoding = false) {
+            Checkpoint();
+            if (_decodedEmbeddedStreams.TryGetValue(stream, out byte[]? cachedBytes) && cachedBytes is not null) {
+                return cachedBytes;
+            }
+
+            long remainingBytes = _maxTotalAttachmentBytes - _decodedAttachmentBytes;
+            if (remainingBytes <= 0L) {
+                throw PdfReadLimitException.Create(
+                    PdfReadLimitKind.AttachmentBytes,
+                    _maxTotalAttachmentBytes,
+                    _maxTotalAttachmentBytes + 1L);
+            }
+
+            long remainingDecodedStreamBytes = _sharedDecodedStreamBudget == null
+                ? _maxTotalDecodedStreamBytes - _decodedStreamBytes
+                : long.MaxValue;
+            if (_sharedDecodedStreamBudget == null && remainingDecodedStreamBytes <= 0L) {
+                throw PdfReadLimitException.Create(
+                    PdfReadLimitKind.TotalDecodedStreamBytes,
+                    _maxTotalDecodedStreamBytes,
+                    _maxTotalDecodedStreamBytes + 1L);
+            }
+
+            long effectiveLimit = Math.Min(_maxSingleAttachmentBytes, Math.Min(remainingBytes, remainingDecodedStreamBytes));
+            int decodeLimit = (int)effectiveLimit;
+            byte[] bytes;
+            try {
+                if (_sharedDecodedStreamBudget != null) {
+                    bytes = requireSuccessfulDecoding
+                        ? _sharedDecodedStreamBudget.DecodeRequired(stream, objects, decodeLimit, _cancellationToken)
+                        : _sharedDecodedStreamBudget.Decode(stream, objects, decodeLimit, _cancellationToken);
+                } else {
+                    bytes = requireSuccessfulDecoding
+                        ? StreamDecoder.DecodeRequired(stream.Dictionary, stream.Data, objects, decodeLimit, _cancellationToken)
+                        : StreamDecoder.Decode(stream.Dictionary, stream.Data, objects, decodeLimit, _cancellationToken);
+                }
+            } catch (PdfReadLimitException exception) when (
+                exception.Kind == PdfReadLimitKind.DecodedStreamBytes &&
+                effectiveLimit < _limits.MaxDecodedStreamBytes) {
+                if (_sharedDecodedStreamBudget == null && remainingDecodedStreamBytes <= remainingBytes && remainingDecodedStreamBytes <= _maxSingleAttachmentBytes) {
+                    throw PdfReadLimitException.Create(
+                        PdfReadLimitKind.TotalDecodedStreamBytes,
+                        _maxTotalDecodedStreamBytes,
+                        _decodedStreamBytes + exception.Actual);
+                }
+                bool singleAttachmentLimitApplied = _maxSingleAttachmentBytes <= remainingBytes;
+                throw PdfReadLimitException.Create(
+                    PdfReadLimitKind.AttachmentBytes,
+                    singleAttachmentLimitApplied ? _maxSingleAttachmentBytes : _maxTotalAttachmentBytes,
+                    singleAttachmentLimitApplied ? exception.Actual : _decodedAttachmentBytes + exception.Actual);
+            }
+
+            Checkpoint();
+            _decodedAttachmentBytes += bytes.LongLength;
+            if (_sharedDecodedStreamBudget == null) _decodedStreamBytes += bytes.LongLength;
+            _decodedEmbeddedStreams[stream] = bytes;
+            return bytes;
+        }
+
+        internal void Checkpoint() => _cancellationToken.ThrowIfCancellationRequested();
+    }
+
+    private static DateTimeOffset? TryReadPdfDate(Dictionary<int, PdfIndirectObject> objects, PdfDictionary? dictionary, string key) {
+        if (dictionary == null ||
+            !dictionary.Items.TryGetValue(key, out PdfObject? value) ||
+            ResolveObject(objects, value) is not PdfStringObj text) return null;
+        string raw = text.Value.StartsWith("D:", StringComparison.Ordinal) ? text.Value.Substring(2) : text.Value;
+        if (raw.Length < 4 || !TryPart(raw, 0, 4, out int year)) return null;
+        int month = TryPart(raw, 4, 2, out int parsedMonth) ? parsedMonth : 1;
+        int day = TryPart(raw, 6, 2, out int parsedDay) ? parsedDay : 1;
+        int hour = TryPart(raw, 8, 2, out int parsedHour) ? parsedHour : 0;
+        int minute = TryPart(raw, 10, 2, out int parsedMinute) ? parsedMinute : 0;
+        int second = TryPart(raw, 12, 2, out int parsedSecond) ? parsedSecond : 0;
+        TimeSpan offset = TimeSpan.Zero;
+        if (raw.Length > 14 && (raw[14] == '+' || raw[14] == '-')) {
+            int offsetHour = TryPart(raw, 15, 2, out int parsedOffsetHour) ? parsedOffsetHour : 0;
+            int minuteIndex = raw.Length > 17 && raw[17] == '\'' ? 18 : 17;
+            int offsetMinute = TryPart(raw, minuteIndex, 2, out int parsedOffsetMinute) ? parsedOffsetMinute : 0;
+            offset = new TimeSpan(offsetHour, offsetMinute, 0);
+            if (raw[14] == '-') offset = -offset;
+        }
+        try { return new DateTimeOffset(year, month, day, hour, minute, second, offset); } catch (ArgumentOutOfRangeException) { return null; }
+    }
+
+    private static bool TryPart(string value, int index, int length, out int result) {
+        result = 0;
+        if (index < 0 || index + length > value.Length) return false;
+        for (int i = 0; i < length; i++) {
+            char character = value[index + i];
+            if (character < '0' || character > '9') { result = 0; return false; }
+            result = (result * 10) + (character - '0');
+        }
+        return true;
+    }
+
+    private static string? TryReadFileSpecName(Dictionary<int, PdfIndirectObject> objects, PdfObject fileSpecObject) {
+        if (ResolveDictionary(objects, fileSpecObject) is not PdfDictionary fileSpec) {
+            return null;
+        }
+
+        return TryReadText(objects, fileSpec, "UF") ?? TryReadText(objects, fileSpec, "F");
+    }
+
+    private static string? TryReadText(Dictionary<int, PdfIndirectObject> objects, PdfDictionary dictionary, string key) {
+        return dictionary.Items.TryGetValue(key, out var value) &&
+            ResolveObject(objects, value) is PdfStringObj text &&
+            text.Value.Length > 0
+            ? text.Value
+            : null;
+    }
+
+    private static string? TryReadStreamSubtype(Dictionary<int, PdfIndirectObject> objects, PdfDictionary dictionary) {
+        return ResolveObject(objects, dictionary.Items.TryGetValue("Subtype", out var subtypeObject) ? subtypeObject : null) is PdfName subtype &&
+            subtype.Name.Length > 0
+            ? subtype.Name
+            : null;
+    }
+
+    private static PdfAssociatedFileRelationship TryReadRelationship(Dictionary<int, PdfIndirectObject> objects, PdfDictionary fileSpec) {
+        if (ResolveObject(objects, fileSpec.Items.TryGetValue("AFRelationship", out var relationshipObject) ? relationshipObject : null) is not PdfName relationship) {
+            return PdfAssociatedFileRelationship.Unspecified;
+        }
+
+        return relationship.Name switch {
+            "Source" => PdfAssociatedFileRelationship.Source,
+            "Data" => PdfAssociatedFileRelationship.Data,
+            "Alternative" => PdfAssociatedFileRelationship.Alternative,
+            "Supplement" => PdfAssociatedFileRelationship.Supplement,
+            "C2PA_Manifest" => PdfAssociatedFileRelationship.C2paManifest,
+            _ => PdfAssociatedFileRelationship.Unspecified
+        };
+    }
+
+    private static PdfDictionary? ResolveDictionary(Dictionary<int, PdfIndirectObject> objects, PdfObject? obj) {
+        return ResolveObject(objects, obj) as PdfDictionary;
+    }
+
+    private static PdfObject? ResolveObject(Dictionary<int, PdfIndirectObject> objects, PdfObject? obj) {
+        return PdfObjectLookup.Resolve(objects, obj);
+    }
+
+    private static string GetFilterName(Dictionary<int, PdfIndirectObject> objects, PdfObject? obj) {
+        PdfObject? resolved = ResolveObject(objects, obj);
+        if (resolved is PdfName name) {
+            return name.Name;
+        }
+
+        if (resolved is PdfArray array) {
+            var names = new List<string>();
+            foreach (PdfObject item in array.Items) {
+                if (ResolveObject(objects, item) is PdfName itemName) {
+                    names.Add(itemName.Name);
+                }
+            }
+
+            return string.Join(",", names);
+        }
+
+        return string.Empty;
+    }
+
+    private static List<string> WriteAttachmentFiles(IReadOnlyList<PdfExtractedAttachment> attachments, string outputDirectory) {
+        var paths = new List<string>(attachments.Count);
+        var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < attachments.Count; i++) {
+            PdfExtractedAttachment attachment = attachments[i];
+            string fileName = GetSafeFileName(attachment.UnicodeFileName ?? attachment.FileName, "attachment-" + (i + 1).ToString("0000", CultureInfo.InvariantCulture) + ".bin");
+            string uniqueFileName = MakeUniqueFileName(fileName, usedNames);
+            string outputPath = Path.Combine(outputDirectory, uniqueFileName);
+            OfficeFileCommit.WriteAllBytes(outputPath, attachment.Bytes);
+            paths.Add(outputPath);
+        }
+
+        return paths;
+    }
+
+    private static string GetSafeFileName(string? fileName, string fallback) {
+        string safe = Path.GetFileName(fileName ?? string.Empty);
+        if (string.IsNullOrWhiteSpace(safe)) {
+            safe = fallback;
+        }
+
+        char[] invalid = Path.GetInvalidFileNameChars();
+        var sb = new StringBuilder(safe.Length);
+        for (int i = 0; i < safe.Length; i++) {
+            char ch = safe[i];
+            sb.Append(Array.IndexOf(invalid, ch) >= 0 || char.IsControl(ch) ? '_' : ch);
+        }
+
+        safe = sb.ToString().Trim();
+        return safe.Length == 0 ? fallback : safe;
+    }
+
+    private static string MakeUniqueFileName(string fileName, HashSet<string> usedNames) {
+        if (usedNames.Add(fileName)) {
+            return fileName;
+        }
+
+        string stem = Path.GetFileNameWithoutExtension(fileName);
+        string extension = Path.GetExtension(fileName);
+        for (int i = 2; ; i++) {
+            string candidate = stem + "-" + i.ToString(CultureInfo.InvariantCulture) + extension;
+            if (usedNames.Add(candidate)) {
+                return candidate;
+            }
+        }
+    }
+
+    private static string ValidateOutputDirectory(string outputDirectory) {
+        Guard.NotNull(outputDirectory, nameof(outputDirectory));
+        if (string.IsNullOrWhiteSpace(outputDirectory)) {
+            throw new ArgumentException("Output directory cannot be empty or whitespace.", nameof(outputDirectory));
+        }
+
+        string fullOutputDirectory;
+        try {
+            fullOutputDirectory = Path.GetFullPath(outputDirectory);
+        } catch (Exception ex) {
+            throw new ArgumentException("Output directory is invalid.", nameof(outputDirectory), ex);
+        }
+
+        if (File.Exists(fullOutputDirectory)) {
+            throw new ArgumentException("Output directory refers to a file; a directory path is required.", nameof(outputDirectory));
+        }
+
+        Directory.CreateDirectory(fullOutputDirectory);
+        return fullOutputDirectory;
+    }
+}

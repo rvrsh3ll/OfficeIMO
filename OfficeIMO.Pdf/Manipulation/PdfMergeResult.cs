@@ -1,0 +1,113 @@
+namespace OfficeIMO.Pdf;
+
+/// <summary>Observable inventory for one source supplied to a PDF merge.</summary>
+public sealed class PdfMergeSourceInventory {
+    internal PdfMergeSourceInventory(int sourceIndex, int pageCount, int outlineCount, int namedDestinationCount, int pageLabelCount, int formFieldCount, int attachmentCount, PdfDocumentSecurityInfo security, PdfPermissionPolicy permissionPolicy) {
+        SourceIndex = sourceIndex; PageCount = pageCount; OutlineCount = outlineCount; NamedDestinationCount = namedDestinationCount;
+        PageLabelCount = pageLabelCount; FormFieldCount = formFieldCount; AttachmentCount = attachmentCount;
+        Security = security;
+        HasEncryption = security.HasEncryption; PasswordAuthenticationRole = security.PasswordAuthenticationRole;
+        PermissionRestrictionsIgnored = PdfPermissionAuthorization.RestrictionsIgnored(security, permissionPolicy);
+        HasSignatures = security.HasSignatures;
+    }
+    /// <summary>Zero-based source index.</summary>
+    public int SourceIndex { get; }
+    /// <summary>Pages imported from the source.</summary>
+    public int PageCount { get; }
+    /// <summary>Readable outline nodes, including descendants.</summary>
+    public int OutlineCount { get; }
+    /// <summary>Readable named destinations.</summary>
+    public int NamedDestinationCount { get; }
+    /// <summary>Readable page-label rules.</summary>
+    public int PageLabelCount { get; }
+    /// <summary>Readable terminal form fields.</summary>
+    public int FormFieldCount { get; }
+    /// <summary>Readable embedded or associated files.</summary>
+    public int AttachmentCount { get; }
+    /// <summary>Complete security state detected for this source.</summary>
+    public PdfDocumentSecurityInfo Security { get; }
+    /// <summary>True when this source was encrypted.</summary>
+    public bool HasEncryption { get; }
+    /// <summary>Password role established for this source.</summary>
+    public PdfPasswordAuthenticationRole PasswordAuthenticationRole { get; }
+    /// <summary>True when authenticated user-password restrictions were explicitly ignored for this source.</summary>
+    public bool PermissionRestrictionsIgnored { get; }
+    /// <summary>True when signature evidence was detected in this source.</summary>
+    public bool HasSignatures { get; }
+}
+
+/// <summary>One applied merge-policy decision.</summary>
+public sealed class PdfMergeDecision {
+    internal PdfMergeDecision(string structure, PdfMergeStructureMode mode, string action, int importedCount = 0, int droppedCount = 0, IReadOnlyList<string>? renamedItems = null) {
+        Structure = structure; Mode = mode; Action = action; ImportedCount = importedCount; DroppedCount = droppedCount;
+        RenamedItems = renamedItems ?? Array.Empty<string>();
+    }
+    /// <summary>Stable structure name.</summary>
+    public string Structure { get; }
+    /// <summary>Requested policy mode.</summary>
+    public PdfMergeStructureMode Mode { get; }
+    /// <summary>Human-readable action actually applied.</summary>
+    public string Action { get; }
+    /// <summary>Number of non-primary items imported.</summary>
+    public int ImportedCount { get; }
+    /// <summary>Number of incoming items deliberately dropped.</summary>
+    public int DroppedCount { get; }
+    /// <summary>Deterministic old-to-new name mappings in <c>old -&gt; new</c> form.</summary>
+    public IReadOnlyList<string> RenamedItems { get; }
+}
+
+/// <summary>Policy and readback evidence returned by a first-party PDF merge.</summary>
+public sealed class PdfMergeReport {
+    internal PdfMergeReport(IReadOnlyList<PdfMergeSourceInventory> sources, IReadOnlyList<PdfMergeDecision> decisions, int outputPageCount, PdfDocumentSecurityInfo outputSecurity) {
+        Sources = sources; Decisions = decisions; OutputPageCount = outputPageCount; OutputSecurity = outputSecurity;
+    }
+    /// <summary>Per-source structure inventory captured before mutation.</summary>
+    public IReadOnlyList<PdfMergeSourceInventory> Sources { get; }
+    /// <summary>Policy decisions actually applied.</summary>
+    public IReadOnlyList<PdfMergeDecision> Decisions { get; }
+    /// <summary>Page count read back from the saved artifact.</summary>
+    public int OutputPageCount { get; }
+    /// <summary>Complete security state read back from the merged output.</summary>
+    public PdfDocumentSecurityInfo OutputSecurity { get; }
+    /// <summary>True when the merged output remains encrypted.</summary>
+    public bool OutputHasEncryption => OutputSecurity.HasEncryption;
+    /// <summary>True when signature evidence is present in the merged output.</summary>
+    public bool OutputHasSignatures => OutputSecurity.HasSignatures;
+}
+
+/// <summary>Merged PDF bytes plus the policy decisions and readback evidence.</summary>
+public sealed class PdfMergeResult : IOfficeResult<PdfDocument> {
+    private readonly byte[] _pdf;
+    private readonly PdfReadDocument _readDocument;
+    private readonly PdfLoadOptions _readOptions;
+    internal PdfMergeResult(byte[] pdf, PdfMergeReport report, PdfReadDocument readDocument, PdfLoadOptions readOptions) {
+        _pdf = pdf;
+        _readDocument = readDocument;
+        _readOptions = readOptions;
+        Report = report;
+    }
+    /// <summary>Merge policy report.</summary>
+    public PdfMergeReport Report { get; }
+
+    /// <inheritdoc />
+    public bool Succeeded => true;
+
+    /// <inheritdoc />
+    public PdfDocument Value => ToDocument();
+
+    /// <inheritdoc />
+    public PdfDocument RequireValue() => ToDocument();
+    /// <summary>Returns a defensive copy of the merged artifact.</summary>
+    public byte[] ToBytes() => (byte[])_pdf.Clone();
+    /// <summary>Opens the merged artifact through the OfficeIMO.Pdf document surface.</summary>
+    public PdfDocument ToDocument() => PdfDocument.LoadOwned(_pdf, _readOptions, _readDocument);
+
+    /// <summary>Returns the merge-owned artifact for an in-assembly document handoff.</summary>
+    internal byte[] OwnedBytes => _pdf;
+
+    /// <summary>Returns the canonical parse already used for merge readback validation.</summary>
+    internal PdfReadDocument ReadDocument => _readDocument;
+
+    /// <summary>Returns the read contract used for merge readback validation.</summary>
+    internal PdfLoadOptions ReadOptions => _readOptions;
+}

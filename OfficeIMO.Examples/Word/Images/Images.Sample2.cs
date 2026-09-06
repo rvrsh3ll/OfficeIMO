@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using OfficeIMO.Examples.Utils;
 using OfficeIMO.Word;
 
 namespace OfficeIMO.Examples.Word {
@@ -13,15 +14,22 @@ namespace OfficeIMO.Examples.Word {
             string outputPath = System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "Documents");
             string documentPaths = System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "Templates");
 
-            using (WordDocument document = WordDocument.Load(System.IO.Path.Combine(documentPaths, "DocumentWithImagesWraps.docx"), true)) {
+            using (WordDocument document = WordDocument.Load(System.IO.Path.Combine(documentPaths, "DocumentWithImagesWraps.docx"), new OfficeIMO.Word.WordLoadOptions { AccessMode = OfficeIMO.DocumentAccessMode.ReadOnly })) {
                 Console.WriteLine("+ Document paragraphs: " + document.Paragraphs.Count);
-                Console.WriteLine("+ Document images: " + document.Images.Count);
-                Console.WriteLine("+ Document images in header: " + document.Header.Default.Images.Count);
-                Console.WriteLine("+ Document images in footer: " + document.Footer.Default.Images.Count);
-                //document.Images[0].SaveToFile(System.IO.Path.Combine(outputPath, "random.jpg"));
+                var images = document.Images;
+                Console.WriteLine("+ Document images: " + images.Count);
+
+                var defaultHeader = document.HeaderDefaultOrCreate;
+                var headerImages = defaultHeader.Images;
+                Console.WriteLine("+ Document images in header: " + headerImages.Count);
+
+                var defaultFooter = document.FooterDefaultOrCreate;
+                var footerImages = defaultFooter.Images;
+                Console.WriteLine("+ Document images in footer: " + footerImages.Count);
+                //document.Images[0].Save(System.IO.Path.Combine(outputPath, "random.jpg"));
 
                 Console.WriteLine("----");
-                foreach (var image in document.Images) {
+                foreach (var image in images) {
                     Console.WriteLine("+ Image: " + image.FileName);
                     Console.WriteLine("+ Image: " + image.Width);
                     Console.WriteLine("+ Image: " + image.Height);

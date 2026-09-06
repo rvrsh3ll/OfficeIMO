@@ -1,25 +1,34 @@
-using System.Collections.Generic;
-using System.Linq;
-using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Wordprocessing;
+using System.Runtime.CompilerServices;
 
 namespace OfficeIMO.Word {
-    public class WordTableRow {
+    /// <summary>
+    /// Represents a row within a <see cref="WordTable"/> and exposes row level operations.
+    /// </summary>
+    public class WordTableRow : System.IEquatable<WordTableRow> {
         internal readonly TableRow _tableRow;
 
         /// <summary>
         /// Return all cells for given row
         /// </summary>
         public List<WordTableCell> Cells {
-            get {
-                var list = new List<WordTableCell>();
-                foreach (TableCell cell in _tableRow.ChildElements.OfType<TableCell>().ToList()) {
-                    WordTableCell wordCell = new WordTableCell(_document, _wordTable, this, cell);
-                    list.Add(wordCell);
-                }
+            get { return GetCells(readOnly: false); }
+        }
 
-                return list;
+        /// <summary>
+        /// Returns cells for this row. When <paramref name="readOnly"/> is true,
+        /// wrappers are created without ensuring tcPr, avoiding DOM mutations on read.
+        /// </summary>
+        public List<WordTableCell> GetCells(bool readOnly = false) {
+            var list = new List<WordTableCell>(_tableRow.ChildElements.Count);
+            foreach (TableCell cell in _tableRow.ChildElements.OfType<TableCell>()) {
+                WordTableCell wordCell = GetOrCreateCell(cell, ensureCellProperties: !readOnly);
+                if (!readOnly) {
+                    wordCell.AddTableCellProperties();
+                }
+                list.Add(wordCell);
             }
+            return list;
         }
         /// <summary>
         /// Return first cell for given row
@@ -43,7 +52,7 @@ namespace OfficeIMO.Word {
             get {
                 if (_tableRow.TableRowProperties != null) {
                     var rowHeight = _tableRow.TableRowProperties.OfType<TableRowHeight>().FirstOrDefault();
-                    if (rowHeight != null) {
+                    if (rowHeight?.Val != null) {
                         return (int)rowHeight.Val.Value;
                     }
                 }
@@ -52,14 +61,16 @@ namespace OfficeIMO.Word {
             set {
                 if (value != null) {
                     AddTableRowProperties();
-                    var tableRowHeight = _tableRow.TableRowProperties.OfType<TableRowHeight>().FirstOrDefault();
+                    var tableRowProperties = _tableRow.TableRowProperties!;
+                    var tableRowHeight = tableRowProperties.OfType<TableRowHeight>().FirstOrDefault();
                     if (tableRowHeight == null) {
-                        _tableRow.TableRowProperties.InsertAt(new TableRowHeight(), 0);
-                        tableRowHeight = _tableRow.TableRowProperties.OfType<TableRowHeight>().FirstOrDefault();
+                        tableRowHeight = new TableRowHeight();
+                        tableRowProperties.InsertAt(tableRowHeight, 0);
                     }
                     tableRowHeight.Val = (uint)value;
+                    tableRowHeight.HeightType = HeightRuleValues.Exact;
                 } else {
-                    var tableRowHeight = _tableRow.TableRowProperties.OfType<TableRowHeight>().FirstOrDefault();
+                    var tableRowHeight = _tableRow.TableRowProperties?.OfType<TableRowHeight>().FirstOrDefault();
                     if (tableRowHeight != null) {
                         tableRowHeight.Remove();
                     }
@@ -67,13 +78,16 @@ namespace OfficeIMO.Word {
             }
         }
 
-
+        /// <summary>
+        /// Gets or sets a value indicating whether the row is allowed to break across pages.
+        /// When set to <c>false</c>, the row is kept intact on a single page.
+        /// </summary>
         public bool AllowRowToBreakAcrossPages {
             get {
                 if (_tableRow.TableRowProperties != null) {
                     var cantSplit = _tableRow.TableRowProperties.OfType<CantSplit>().FirstOrDefault();
                     if (cantSplit != null) {
-                        return false;
+                        return !ReadOnOff(cantSplit);
                     }
                 }
 
@@ -92,64 +106,108 @@ namespace OfficeIMO.Word {
                     }
                 } else {
                     AddTableRowProperties();
-                    var cantSplit = _tableRow.TableRowProperties.OfType<CantSplit>().FirstOrDefault();
+                    var tableRowProperties = _tableRow.TableRowProperties!;
+                    var cantSplit = tableRowProperties.OfType<CantSplit>().FirstOrDefault();
                     if (cantSplit == null) {
-                        _tableRow.TableRowProperties.InsertAt(new CantSplit(), 0);
+                        tableRowProperties.InsertAt(new CantSplit(), 0);
                     }
                 }
             }
         }
 
         /// <summary>
-        /// Gets or sets header row at the top of each page
-        /// Since this is a table row property, it is not possible to set it for a single row
+        /// Gets or sets whether this table row should repeat at the top of each page.
+        /// Word repeats contiguous header rows from the start of the table.
         /// </summary>
-        internal bool RepeatHeaderRowAtTheTopOfEachPage {
+        public bool RepeatHeaderRowAtTheTopOfEachPage {
             get {
                 if (_tableRow.TableRowProperties != null) {
                     var rowHeader = _tableRow.TableRowProperties.OfType<TableHeader>().FirstOrDefault();
                     if (rowHeader != null) {
-                        return true;
+                        return ReadOnOff(rowHeader);
                     }
                 }
                 return false;
             }
             set {
                 AddTableRowProperties();
-                var rowHeader = _tableRow.TableRowProperties.OfType<TableHeader>().FirstOrDefault();
+                var tableRowProperties = _tableRow.TableRowProperties!;
+                var rowHeader = tableRowProperties.OfType<TableHeader>().FirstOrDefault();
                 if (rowHeader != null) {
                     if (value == false) {
                         rowHeader.Remove();
                     }
-                } else {
+                } else if (value) {
                     // Add table header
-                    _tableRow.TableRowProperties.InsertAt(new TableHeader(), 0);
-
+                    tableRowProperties.InsertAt(new TableHeader(), 0);
                 }
             }
         }
 
         private readonly WordTable _wordTable;
         private readonly WordDocument _document;
+        private readonly ConditionalWeakTable<TableCell, WordTableCell> _cellCache = new();
 
+        internal void TrackCell(WordTableCell cell) {
+            if (!_cellCache.TryGetValue(cell._tableCell, out _)) {
+                _cellCache.Add(cell._tableCell, cell);
+            }
+        }
+
+        private WordTableCell GetOrCreateCell(TableCell cell, bool ensureCellProperties) {
+            if (_cellCache.TryGetValue(cell, out WordTableCell? cachedCell)) {
+                return cachedCell;
+            }
+
+            var wordCell = new WordTableCell(_document, _wordTable, this, cell, ensureCellProperties);
+            _cellCache.Add(cell, wordCell);
+            return wordCell;
+        }
+
+        /// <summary>
+        /// Gets the table that owns this row.
+        /// </summary>
+        public WordTable Parent => _wordTable;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="WordTableRow"/> class and creates an empty row.
+        /// </summary>
+        /// <param name="document">The parent <see cref="WordDocument"/>.</param>
+        /// <param name="wordTable">The table to which this row belongs.</param>
         public WordTableRow(WordDocument document, WordTable wordTable) {
             // Create a row.
             TableRow tableRow = new TableRow();
             _tableRow = tableRow;
             _document = document;
             _wordTable = wordTable;
+            wordTable.TrackRow(this);
 
         }
-        public WordTableRow(WordTable wordTable, TableRow row, WordDocument document) {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="WordTableRow"/> class from an existing <see cref="TableRow"/>.
+        /// </summary>
+        /// <param name="wordTable">The parent <see cref="WordTable"/>.</param>
+        /// <param name="row">The underlying Open XML table row.</param>
+        /// <param name="document">The parent <see cref="WordDocument"/>.</param>
+        internal WordTableRow(WordTable wordTable, TableRow row, WordDocument document) : this(wordTable, row, document, initializeCells: true) {
+        }
+
+        internal WordTableRow(WordTable wordTable, TableRow row, WordDocument document, bool initializeCells) {
             _document = document;
             _tableRow = row;
             _wordTable = wordTable;
 
-            foreach (TableCell cell in row.ChildElements.OfType<TableCell>()) {
-                WordTableCell wordCell = new WordTableCell(document, wordTable, this, cell);
+            if (initializeCells) {
+                foreach (TableCell cell in row.ChildElements.OfType<TableCell>()) {
+                    GetOrCreateCell(cell, ensureCellProperties: true);
+                }
             }
         }
 
+        /// <summary>
+        /// Appends the specified <see cref="WordTableCell"/> to the end of this row.
+        /// </summary>
+        /// <param name="cell">The cell to append.</param>
         public void Add(WordTableCell cell) {
             _tableRow.Append(cell._tableCell);
         }
@@ -158,6 +216,7 @@ namespace OfficeIMO.Word {
         /// Remove a row
         /// </summary>
         public void Remove() {
+            _wordTable.TrackRemovedRow(_tableRow);
             _tableRow.Remove();
         }
 
@@ -169,5 +228,106 @@ namespace OfficeIMO.Word {
                 _tableRow.InsertAt(new TableRowProperties(), 0);
             }
         }
+
+        private static bool ReadOnOff(CantSplit value) {
+            if (value.Val == null) {
+                return true;
+            }
+
+            return ReadOnOffValue(value.Val.InnerText);
+        }
+
+        private static bool ReadOnOff(TableHeader value) {
+            if (value.Val == null) {
+                return true;
+            }
+
+            return ReadOnOffValue(value.Val.InnerText);
+        }
+
+        private static bool ReadOnOffValue(string? value) =>
+            !string.Equals(value, "0", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(value, "false", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(value, "off", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Merges cells starting from the specified column across subsequent rows.
+        /// </summary>
+        /// <param name="cellIndex">Column index of the first cell to merge.</param>
+        /// <param name="rowsCount">Number of rows below this one to merge.</param>
+        /// <param name="copyParagraphs">True to move paragraphs from merged cells to the first cell; false to discard them.</param>
+        public void MergeVertically(int cellIndex, int rowsCount, bool copyParagraphs = false) {
+            var rows = _wordTable.Rows;
+            int startIndex = rows.FindIndex(r => r._tableRow == _tableRow);
+            if (startIndex < 0 || cellIndex < 0 || cellIndex >= CellsCount || rowsCount < 0) {
+                return;
+            }
+
+            int rowsToMerge = Math.Min(rowsCount, rows.Count - startIndex - 1);
+            for (int offset = 1; offset <= rowsToMerge; offset++) {
+                if (cellIndex >= rows[startIndex + offset].Cells.Count) {
+                    return;
+                }
+            }
+
+            var firstCell = rows[startIndex].Cells[cellIndex];
+            firstCell.AddTableCellProperties();
+            firstCell.VerticalMerge = WordCellMerge.Restart;
+            var targetCell = firstCell._tableCell;
+
+            for (int i = 0; i < rowsToMerge; i++) {
+                int idx = startIndex + i + 1;
+                if (idx >= rows.Count) break;
+
+                var row = rows[idx];
+                var cell = row.Cells[cellIndex];
+                cell.AddTableCellProperties();
+
+                if (copyParagraphs) {
+                    var paragraphs = cell._tableCell.ChildElements.OfType<Paragraph>().ToList();
+                    foreach (var paragraph in paragraphs) {
+                        paragraph.Remove();
+                        targetCell.Append(paragraph);
+                    }
+                    cell._tableCell.Append(new Paragraph());
+                } else {
+                    var paragraphs = cell._tableCell.ChildElements.OfType<Paragraph>().ToList();
+                    foreach (var paragraph in paragraphs) {
+                        paragraph.Remove();
+                    }
+                    cell._tableCell.Append(new Paragraph());
+                }
+
+                cell.VerticalMerge = WordCellMerge.Continue;
+            }
+        }
+
+        /// <summary>
+        /// Determines whether this instance and another row reference the same underlying OpenXML row.
+        /// </summary>
+        public bool Equals(WordTableRow? other) {
+            if (other is null) return false;
+            if (ReferenceEquals(this, other)) return true;
+            return ReferenceEquals(_tableRow, other._tableRow);
+        }
+
+        /// <inheritdoc/>
+        public override bool Equals(object? obj) => obj is WordTableRow other && Equals(other);
+
+        /// <inheritdoc/>
+        public override int GetHashCode() => _tableRow?.GetHashCode() ?? 0;
+
+        /// <summary>
+        /// Compares two rows for equality based on the underlying OpenXML row reference.
+        /// </summary>
+        public static bool operator ==(WordTableRow? left, WordTableRow? right) {
+            if (left is null) return right is null;
+            return left.Equals(right);
+        }
+
+        /// <summary>
+        /// Determines whether two rows are not equal.
+        /// </summary>
+        public static bool operator !=(WordTableRow? left, WordTableRow? right) => !(left == right);
     }
 }

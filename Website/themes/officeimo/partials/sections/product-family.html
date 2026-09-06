@@ -1,0 +1,23 @@
+{{ if data.products }}
+<section id="product-family" class="imo-product-grid">
+  <div class="imo-container">
+    <p class="imo-section__eyebrow">Product family</p>
+    <h2 class="imo-section__title">{{ data.sections.products.title ?? "Focused packages, one document platform" }}</h2>
+    {{ if data.sections.products.description }}<p class="imo-section__subtitle">{{ data.sections.products.description }}</p>{{ end }}
+    <div class="imo-product-grid__groups">
+      <div class="imo-product-grid__group">
+        <div class="imo-product-grid__group-header"><h3 class="imo-product-grid__group-title">Create and edit</h3><p class="imo-product-grid__group-desc">Build the document your application needs with a native, typed model.</p></div>
+        <div class="imo-product-grid__grid">{{ for product in data.products }}{{ if product.family == "create" }}{{ include "sections/product-card" }}{{ end }}{{ end }}</div>
+      </div>
+      <div class="imo-product-grid__group">
+        <div class="imo-product-grid__group-header"><h3 class="imo-product-grid__group-title">Formats and conversion</h3><p class="imo-product-grid__group-desc">Move structured content across document, web, and interchange formats with explicit diagnostics.</p></div>
+        <div class="imo-product-grid__grid">{{ for product in data.products }}{{ if product.family == "formats" }}{{ include "sections/product-card" }}{{ end }}{{ end }}</div>
+      </div>
+      <div class="imo-product-grid__group">
+        <div class="imo-product-grid__group-header"><h3 class="imo-product-grid__group-title">Extraction and automation</h3><p class="imo-product-grid__group-desc">Read heterogeneous files, connect Google Workspace, or run the same capabilities from PowerShell.</p></div>
+        <div class="imo-product-grid__grid imo-product-grid__grid--compact">{{ for product in data.products }}{{ if product.family == "workflow" }}{{ include "sections/product-card" }}{{ end }}{{ end }}</div>
+      </div>
+    </div>
+  </div>
+</section>
+{{ end }}

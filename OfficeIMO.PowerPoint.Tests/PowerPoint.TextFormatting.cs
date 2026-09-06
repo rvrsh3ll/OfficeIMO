@@ -1,0 +1,321 @@
+using System;
+using System.IO;
+using System.Linq;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Presentation;
+using A = DocumentFormat.OpenXml.Drawing;
+using OfficeIMO.PowerPoint;
+using Xunit;
+
+namespace OfficeIMO.Tests {
+    public class PowerPointTextFormatting {
+        [Fact]
+        public void DrawingFontSizeAuthoringEnforcesSchemaBoundsAcrossTextSurfaces() {
+            using PowerPointPresentation presentation = PowerPointPresentation.Create();
+            PowerPointSlide slide = presentation.AddSlide();
+            PowerPointTextBox box = slide.AddTextBox("Text");
+            PowerPointTextRun run = box.Paragraphs.Single().Runs.Single();
+            PowerPointTableCell cell = slide.AddTable(1, 1).GetCell(0, 0);
+
+            run.FontSizePoints = 1D;
+            Assert.Equal(1D, run.FontSizePoints);
+            run.FontSizePoints = 4000D;
+            Assert.Equal(4000D, run.FontSizePoints);
+
+            Assert.Throws<ArgumentOutOfRangeException>(() => run.FontSizePoints = 0.5D);
+            Assert.Throws<ArgumentOutOfRangeException>(() => run.FontSizePoints = 4000.01D);
+            Assert.Throws<ArgumentOutOfRangeException>(() => run.FontSizePoints = double.NaN);
+            Assert.Throws<ArgumentOutOfRangeException>(() => box.FontSize = 0);
+            Assert.Throws<ArgumentOutOfRangeException>(() => box.FontSize = 4001);
+            Assert.Throws<ArgumentOutOfRangeException>(() => cell.FontSize = 0);
+            Assert.Throws<ArgumentOutOfRangeException>(() => cell.FontSize = 4001);
+            Assert.Empty(presentation.ValidateDocument());
+        }
+
+        [Fact]
+        public void CanApplyFormattingToTextBoxAndBullets() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".pptx");
+
+            using (PowerPointPresentation presentation = PowerPointPresentation.Create(filePath)) {
+                PowerPointSlide slide = presentation.AddSlide();
+                PowerPointTextBox box = slide.AddTextBox("Hello");
+                box.Bold = true;
+                box.Italic = true;
+                box.FontSize = 24;
+                box.FontName = "Arial";
+                box.Color = "FF0000";
+                box.AddBullet("Bullet1");
+                box.AddBullet("Bullet2");
+                presentation.Save();
+            }
+
+            using (PresentationDocument document = PresentationDocument.Open(filePath, false)) {
+                SlidePart slidePart = document.PresentationPart!.SlideParts.First();
+                Shape shape = slidePart.Slide.Descendants<Shape>().First();
+                var paragraphs = shape.TextBody!.Elements<A.Paragraph>().ToList();
+                    foreach (var paragraph in paragraphs) {
+                        A.Run run = paragraph.GetFirstChild<A.Run>()!;
+                        A.RunProperties rp = run.RunProperties!;
+                        Assert.True(rp.Bold?.Value ?? false);
+                        Assert.True(rp.Italic?.Value ?? false);
+                        Assert.Equal(2400, rp.FontSize!.Value);
+                        Assert.Equal("Arial", rp.GetFirstChild<A.LatinFont>()?.Typeface);
+                        Assert.Equal("FF0000", rp.GetFirstChild<A.SolidFill>()?.RgbColorModelHex?.Val);
+                    }
+            }
+
+            File.Delete(filePath);
+        }
+
+        [Fact]
+        public void TextBoxTextReturnsEmptyWhenParagraphsAreMissing() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".pptx");
+
+            using (PowerPointPresentation presentation = PowerPointPresentation.Create(filePath)) {
+                PowerPointSlide slide = presentation.AddSlide();
+                slide.AddTextBox("Initial");
+                presentation.Save();
+            }
+
+            using (PresentationDocument document = PresentationDocument.Open(filePath, true)) {
+                SlidePart slidePart = document.PresentationPart!.SlideParts.First();
+                Shape shape = slidePart.Slide.Descendants<Shape>().First();
+                shape.TextBody!.RemoveAllChildren<A.Paragraph>();
+                slidePart.Slide.Save();
+                document.Save();
+            }
+
+            using (PowerPointPresentation presentation = PowerPointPresentation.Load(filePath)) {
+                PowerPointSlide slide = presentation.Slides.First();
+                PowerPointTextBox textBox = slide.TextBoxes.First();
+                Assert.Equal(string.Empty, textBox.Text);
+            }
+
+            File.Delete(filePath);
+        }
+
+        [Fact]
+        public void TextBoxTextHandlesSingleParagraph() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".pptx");
+
+            using (PowerPointPresentation presentation = PowerPointPresentation.Create(filePath)) {
+                PowerPointSlide slide = presentation.AddSlide();
+                PowerPointTextBox textBox = slide.AddTextBox("Initial");
+
+                textBox.Text = "Updated text";
+                Assert.Equal("Updated text", textBox.Text);
+
+                presentation.Save();
+            }
+
+            using (PresentationDocument document = PresentationDocument.Open(filePath, false)) {
+                SlidePart slidePart = document.PresentationPart!.SlideParts.First();
+                Shape shape = slidePart.Slide.Descendants<Shape>().First();
+                var paragraphs = shape.TextBody!.Elements<A.Paragraph>().ToList();
+                Assert.Single(paragraphs);
+                Assert.Equal("Updated text", paragraphs[0].InnerText);
+            }
+
+            File.Delete(filePath);
+        }
+
+        [Fact]
+        public void TextBoxTextHandlesMultipleParagraphs() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".pptx");
+            string[] lines = { "First line", "Second line", "Third line" };
+            string text = string.Join(Environment.NewLine, lines);
+
+            using (PowerPointPresentation presentation = PowerPointPresentation.Create(filePath)) {
+                PowerPointSlide slide = presentation.AddSlide();
+                PowerPointTextBox textBox = slide.AddTextBox(string.Empty);
+
+                textBox.Text = text;
+                Assert.Equal(text, textBox.Text);
+
+                presentation.Save();
+            }
+
+            using (PresentationDocument document = PresentationDocument.Open(filePath, false)) {
+                SlidePart slidePart = document.PresentationPart!.SlideParts.First();
+                Shape shape = slidePart.Slide.Descendants<Shape>().First();
+                var paragraphs = shape.TextBody!.Elements<A.Paragraph>().ToList();
+                Assert.Equal(lines.Length, paragraphs.Count);
+                for (int i = 0; i < lines.Length; i++) {
+                    Assert.Equal(lines[i], paragraphs[i].InnerText);
+                }
+            }
+
+            File.Delete(filePath);
+        }
+
+        [Fact]
+        public void CanApplyTextAndParagraphStyles() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".pptx");
+
+            using (PowerPointPresentation presentation = PowerPointPresentation.Create(filePath)) {
+                PowerPointSlide slide = presentation.AddSlide();
+                PowerPointTextBox box = slide.AddTextBox("Highlights");
+                box.AddBullets(new[] { "First", "Second" });
+                box.ApplyTextStyle(new PowerPointTextStyle(fontSize: 20, bold: true, color: "336699"));
+                box.ApplyParagraphStyle(new PowerPointParagraphStyle(
+                    lineSpacingMultiplier: 1.2,
+                    spaceAfterPoints: 4,
+                    leftMarginPoints: 18,
+                    indentPoints: -18));
+                presentation.Save();
+            }
+
+            using (PresentationDocument document = PresentationDocument.Open(filePath, false)) {
+                SlidePart slidePart = document.PresentationPart!.SlideParts.First();
+                Shape shape = slidePart.Slide.Descendants<Shape>().First();
+                A.Paragraph paragraph = shape.TextBody!.Elements<A.Paragraph>().First();
+                A.Run run = paragraph.GetFirstChild<A.Run>()!;
+                A.RunProperties rp = run.RunProperties!;
+
+                Assert.Equal(2000, rp.FontSize!.Value);
+                Assert.True(rp.Bold?.Value ?? false);
+                Assert.Equal("336699", rp.GetFirstChild<A.SolidFill>()?.RgbColorModelHex?.Val);
+
+                A.ParagraphProperties pp = paragraph.ParagraphProperties!;
+                Assert.Equal(PowerPointUnits.FromPoints(18), pp.LeftMargin!.Value);
+                Assert.Equal(PowerPointUnits.FromPoints(-18), pp.Indent!.Value);
+                Assert.Equal(120000, pp.LineSpacing!.SpacingPercent!.Val!.Value);
+                Assert.Equal(400, pp.SpaceAfter!.SpacingPoints!.Val!.Value);
+            }
+
+            File.Delete(filePath);
+        }
+
+        [Fact]
+        public void ClearPreservesValidTextBodyStructure() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".pptx");
+
+            using (PowerPointPresentation presentation = PowerPointPresentation.Create(filePath)) {
+                PowerPointSlide slide = presentation.AddSlide();
+                PowerPointTextBox box = slide.AddTextBox("Initial");
+
+                box.Clear();
+                presentation.Save();
+
+                Assert.Empty(presentation.ValidateDocument());
+                Assert.Equal(string.Empty, box.Text);
+            }
+
+            using (PresentationDocument document = PresentationDocument.Open(filePath, false)) {
+                Shape shape = document.PresentationPart!.SlideParts.First().Slide.Descendants<Shape>().First();
+                Assert.Single(shape.TextBody!.Elements<A.Paragraph>());
+            }
+
+            File.Delete(filePath);
+        }
+
+        [Fact]
+        public void SetParagraphs_ReplacesContentWithoutLeadingBlankParagraph() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".pptx");
+
+            using (PowerPointPresentation presentation = PowerPointPresentation.Create(filePath)) {
+                PowerPointSlide slide = presentation.AddSlide();
+                PowerPointTextBox box = slide.AddTextBox("Initial");
+
+                box.SetParagraphs(new[] { "First", "Second" });
+
+                Assert.Equal("First" + Environment.NewLine + "Second", box.Text);
+                Assert.Equal(2, box.Paragraphs.Count);
+                presentation.Save();
+            }
+
+            using (PresentationDocument document = PresentationDocument.Open(filePath, false)) {
+                Shape shape = document.PresentationPart!.SlideParts.First().Slide.Descendants<Shape>().First();
+                var paragraphs = shape.TextBody!.Elements<A.Paragraph>().ToList();
+                Assert.Equal(2, paragraphs.Count);
+                Assert.Equal("First", paragraphs[0].InnerText);
+                Assert.Equal("Second", paragraphs[1].InnerText);
+            }
+
+            File.Delete(filePath);
+        }
+
+        [Fact]
+        public void SetBulletsAndNumberedList_DoNotLeaveLeadingBlankParagraph() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".pptx");
+
+            using (PowerPointPresentation presentation = PowerPointPresentation.Create(filePath)) {
+                PowerPointSlide slide = presentation.AddSlide();
+                PowerPointTextBox bullets = slide.AddTextBox("Initial bullets");
+                PowerPointTextBox numbered = slide.AddTextBox("Initial numbered");
+
+                bullets.SetBullets(new[] { "Bullet A", "Bullet B" });
+                numbered.SetNumberedList(new[] { "One", "Two" });
+
+                Assert.Equal(2, bullets.Paragraphs.Count);
+                Assert.Equal(2, numbered.Paragraphs.Count);
+                presentation.Save();
+            }
+
+            using (PresentationDocument document = PresentationDocument.Open(filePath, false)) {
+                var shapes = document.PresentationPart!.SlideParts.First().Slide.Descendants<Shape>().ToList();
+
+                var bulletParagraphs = shapes[0].TextBody!.Elements<A.Paragraph>().ToList();
+                Assert.Equal(2, bulletParagraphs.Count);
+                Assert.Equal("Bullet A", bulletParagraphs[0].InnerText);
+                Assert.Equal("Bullet B", bulletParagraphs[1].InnerText);
+
+                var numberedParagraphs = shapes[1].TextBody!.Elements<A.Paragraph>().ToList();
+                Assert.Equal(2, numberedParagraphs.Count);
+                Assert.Equal("One", numberedParagraphs[0].InnerText);
+                Assert.Equal("Two", numberedParagraphs[1].InnerText);
+            }
+
+            File.Delete(filePath);
+        }
+
+        [Fact]
+        public void BulletSizingAndFontStayInSchemaOrder() {
+            string filePath = CreateTempFilePath(".pptx");
+
+            using (PowerPointPresentation presentation = PowerPointPresentation.Create(filePath)) {
+                PowerPointSlide slide = presentation.AddSlide();
+                PowerPointTextBox box = slide.AddTextBox("Bullets");
+                box.SetBullets(new[] { "First", "Second" }, configure: paragraph => {
+                    paragraph.SetBulletSizePercent(72)
+                        .SetBulletFont("Aptos")
+                        .SetHangingPoints(16)
+                        .SetFontSize(18);
+                });
+
+                presentation.Save();
+
+                Assert.Empty(presentation.ValidateDocument());
+            }
+
+            using (PresentationDocument document = PresentationDocument.Open(filePath, false)) {
+                Shape shape = document.PresentationPart!.SlideParts.First().Slide.Descendants<Shape>().First();
+                A.ParagraphProperties props = shape.TextBody!.Elements<A.Paragraph>().First().ParagraphProperties!;
+                var children = props.ChildElements.ToList();
+
+                int sizeIndex = IndexOf<A.BulletSizePercentage>(children);
+                int fontIndex = IndexOf<A.BulletFont>(children);
+                int bulletIndex = IndexOf<A.CharacterBullet>(children);
+
+                Assert.NotEqual(-1, sizeIndex);
+                Assert.NotEqual(-1, fontIndex);
+                Assert.NotEqual(-1, bulletIndex);
+                Assert.True(sizeIndex < fontIndex);
+                Assert.True(fontIndex < bulletIndex);
+            }
+
+            File.Delete(filePath);
+
+            static int IndexOf<T>(IReadOnlyList<DocumentFormat.OpenXml.OpenXmlElement> children)
+                where T : DocumentFormat.OpenXml.OpenXmlElement {
+                return children.ToList().FindIndex(child => child is T);
+            }
+        }
+
+        private static string CreateTempFilePath(string extension) {
+            string path = Path.GetTempFileName();
+            File.Delete(path);
+            return Path.ChangeExtension(path, extension);
+        }
+    }
+}

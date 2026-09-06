@@ -1,0 +1,570 @@
+namespace OfficeIMO.Markdown;
+
+/// <summary>
+/// Composes HTML fragments/documents from a MarkdownDoc with options.
+/// </summary>
+internal static class HtmlRenderer {
+    internal static string Render(MarkdownDoc doc, HtmlOptions options) {
+        var parts = RenderParts(doc, options);
+        if (options.Kind == HtmlKind.Fragment) {
+            return parts.Body; // Body already wrapped if requested
+        }
+        // Full document
+        var sb = new StringBuilder();
+        sb.Append("<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
+        sb.Append("<title>").Append(HtmlTextEncoder.Encode(options.Title ?? "Document", options)).Append("</title>");
+        if (!string.IsNullOrEmpty(parts.Css)) sb.Append("<style>\n").Append(parts.Css).Append("\n</style>");
+        if (!string.IsNullOrEmpty(parts.Head)) sb.Append(parts.Head);
+        sb.Append("</head><body>");
+        sb.Append(parts.Body);
+        if (!string.IsNullOrEmpty(parts.Scripts)) sb.Append("<script>\n").Append(parts.Scripts).Append("\n</script>");
+        sb.Append("</body></html>");
+        return sb.ToString();
+    }
+
+    internal static HtmlRenderParts RenderParts(MarkdownDoc doc, HtmlOptions options) {
+        var (realizedBlocks, headingCatalog) = doc.GetBlocksAndHeadingSlugs(options.HeadingIdentifierStyle);
+        var footnoteState = options.GitHubFootnoteHtml
+            ? HtmlFootnoteRenderState.Create(realizedBlocks)
+            : null;
+        using var _ctx = HtmlRenderContext.Push(options, footnoteState);
+        var css = BuildCss(options, out string? cssLinkTag, out string? cssToWrite, out string? extraHeadLinks);
+        options._externalCssContentToWrite = cssToWrite; // pass back for SaveAsHtml
+
+        // Insert a top anchor for back-to-top links
+        var blocksForRendering = doc.Blocks;
+        string bodyContent = (options.BackToTopLinks ? "<a id=\"top\"></a>" : string.Empty) + RenderBody(doc, blocksForRendering, options, headingCatalog);
+        if (options.ThemeToggle) {
+            const string toggle = "<button class=\"theme-toggle\" data-theme-toggle title=\"Toggle theme\" aria-label=\"Toggle theme\">🌓</button>";
+            bodyContent = toggle + bodyContent;
+        }
+        if (!string.IsNullOrEmpty(options.BodyClass)) {
+            // Wrap in article
+            bodyContent = $"<article class=\"{HtmlTextEncoder.Encode(options.BodyClass, options)}\">" + bodyContent + "</article>";
+        }
+
+        StringBuilder head = new StringBuilder();
+        if (!string.IsNullOrEmpty(cssLinkTag)) head.Append(cssLinkTag);
+        if (!string.IsNullOrEmpty(extraHeadLinks)) head.Append(extraHeadLinks);
+
+        StringBuilder scripts = new StringBuilder();
+        if (options.ThemeToggle) scripts.Append(HtmlResources.ThemeToggleScript);
+        if (options.CopyHeadingLinkOnClick) scripts.Append(HtmlResources.AnchorCopyScript);
+        // ScrollSpy: include only if any TOC requests it
+        try {
+            if (doc.Blocks != null && doc.Blocks.Any(b => b is ITocPlaceholderMarkdownBlock toc && toc.RequiresScrollSpy())) {
+                scripts.Append(HtmlResources.ScrollSpyScript);
+            }
+        } catch { /* best-effort */ }
+
+        // Additional JS: link in head when Online; download+inline into scripts when Offline
+        if (options.AssetMode == AssetMode.Online) {
+            foreach (var js in options.AdditionalJsHrefs.Where(u => !string.IsNullOrWhiteSpace(u))) {
+                head.Append($"<script src=\"{HtmlAttributeUrlEncoder.Encode(js, options)}\"></script>\n");
+            }
+        } else {
+            foreach (var js in options.AdditionalJsHrefs.Where(u => !string.IsNullOrWhiteSpace(u))) {
+                var code = ResolveExternalText(js, options.ExternalTextResolver);
+                if (!string.IsNullOrEmpty(code)) scripts.Append(code).Append('\n');
+            }
+        }
+
+        var parts = new HtmlRenderParts();
+
+        // Prism assets (manifest + optional emission)
+        if (options.Prism?.Enabled == true) {
+            // For Prism in Online mode, prefer link-based CSS for GithubAuto theme to expose media attributes
+            // so hosts can dedupe/merge correctly (tests expect media queries present in <link> tags).
+            var prismCssDelivery = (options.AssetMode == AssetMode.Online && options.Prism.Theme == PrismTheme.GithubAuto)
+                ? CssDelivery.LinkHref
+                : options.CssDelivery;
+            var assets = AssetFactory.PrismAssets(
+                options.Prism,
+                options.AssetMode,
+                prismCssDelivery,
+                options.CssScopeSelector,
+                options.ExternalTextResolver);
+            foreach (var a in assets) parts.Assets.Add(a);
+            if (options.EmitMode == AssetEmitMode.Emit) {
+                foreach (var a in parts.Assets) {
+                    if (a.Kind == HtmlAssetKind.Css) {
+                        if (!string.IsNullOrEmpty(a.Href)) {
+                            var media = string.IsNullOrEmpty(a.Media) ? string.Empty : $" media=\"{HtmlTextEncoder.Encode(a.Media, options)}\"";
+                            head.Append($"<link rel=\"stylesheet\" data-asset-id=\"{HtmlTextEncoder.Encode(a.Id, options)}\" href=\"{HtmlAttributeUrlEncoder.Encode(a.Href, options)}\"{media}>\n");
+                        } else if (!string.IsNullOrEmpty(a.Inline)) {
+                            if (options.CssDelivery == CssDelivery.ExternalFile) {
+                                // When writing CSS to a sidecar file, ensure Prism inline CSS is included there too.
+                                options._externalCssContentToWrite = (options._externalCssContentToWrite?.Length > 0 ? (options._externalCssContentToWrite + "\n") : (options._externalCssContentToWrite ?? string.Empty)) + a.Inline;
+                            } else {
+                                css = (css?.Length > 0 ? (css + "\n") : (css ?? string.Empty)) + a.Inline;
+                            }
+                        }
+                    } else {
+                        if (!string.IsNullOrEmpty(a.Href)) head.Append($"<script data-asset-id=\"{HtmlTextEncoder.Encode(a.Id, options)}\" src=\"{HtmlAttributeUrlEncoder.Encode(a.Href, options)}\"></script>\n");
+                        else if (!string.IsNullOrEmpty(a.Inline)) scripts.Append(a.Inline).Append('\n');
+                    }
+                }
+            }
+        }
+
+        // Capture final strings after optional asset emission.
+        parts.Head = head.ToString();
+        parts.Body = bodyContent;
+        parts.Css = css ?? string.Empty;
+        parts.Scripts = scripts.ToString();
+        return parts;
+    }
+
+    private static string RenderBody(MarkdownDoc document, System.Collections.Generic.IReadOnlyList<IMarkdownBlock> blocks, HtmlOptions options, MarkdownHeadingCatalog headingCatalog) {
+        var context = new MarkdownBodyRenderContext(document, blocks, options, headingCatalog);
+        using var _inlineContext = HtmlRenderContext.PushBodyContext(context);
+        var plan = MarkdownBodyRenderPlan.Create(blocks);
+        var footnotes = plan.Footnotes;
+        var sidebar = plan.Sidebar;
+
+        if (sidebar != null) {
+            var navHtml = sidebar.RenderHtml(context);
+            var content = new StringBuilder();
+            for (int i = 0; i < plan.RenderBlocks.Count; i++) {
+                content.Append(RenderBodyBlock(plan.RenderBlocks[i], context));
+            }
+            if (footnotes.Count > 0) content.Append(BuildFootnotesSectionHtml(footnotes, context));
+            return sidebar.WrapSidebarLayoutHtml(navHtml, content.ToString());
+        }
+
+        var sb = new StringBuilder();
+        for (int i = 0; i < plan.RenderBlocks.Count; i++) {
+            sb.Append(RenderBodyBlock(plan.RenderBlocks[i], context));
+        }
+        if (footnotes.Count > 0) sb.Append(BuildFootnotesSectionHtml(footnotes, context));
+        return sb.ToString();
+    }
+
+    private static string RenderBodyBlock(IMarkdownBlock block, MarkdownBodyRenderContext context) {
+        return MarkdownBlockRenderDispatcher.RenderHtml(block, context);
+    }
+
+    private static string BuildFootnotesSectionHtml(IReadOnlyList<IFootnoteSectionMarkdownBlock> footnotes, MarkdownBodyRenderContext context) {
+        var options = context.Options;
+        if (footnotes == null || footnotes.Count == 0) return string.Empty;
+
+        var typedFootnotes = footnotes.OfType<FootnoteDefinitionBlock>().ToList();
+        var overridden = options.FootnoteSectionHtmlRenderer?.Invoke(typedFootnotes, options);
+        if (overridden != null) {
+            return overridden;
+        }
+
+        if (options.GitHubFootnoteHtml && HtmlRenderContext.Footnotes != null) {
+            return BuildGitHubFootnotesSectionHtml(typedFootnotes, context, HtmlRenderContext.Footnotes);
+        }
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var sb = new StringBuilder();
+        sb.Append("<section class=\"footnotes\"><hr /><ol>");
+
+        for (int i = 0; i < footnotes.Count; i++) {
+            var fn = footnotes[i];
+            if (fn == null) continue;
+
+            var label = fn.FootnoteLabel ?? string.Empty;
+            if (label.Length == 0) continue;
+            if (!seen.Add(label)) continue;
+            sb.Append(fn.RenderFootnoteSectionItemHtml());
+        }
+
+        sb.Append("</ol></section>");
+        return sb.ToString();
+    }
+
+    private static string BuildGitHubFootnotesSectionHtml(
+        IReadOnlyList<FootnoteDefinitionBlock> footnotes,
+        MarkdownBodyRenderContext context,
+        HtmlFootnoteRenderState state) {
+        if (footnotes == null || footnotes.Count == 0 || state.OrderedReferencedLabels.Count == 0) {
+            return string.Empty;
+        }
+
+        var sb = new StringBuilder();
+        sb.Append("<section class=\"footnotes\" data-footnotes><ol>");
+
+        for (int i = 0; i < state.OrderedReferencedLabels.Count; i++) {
+            var footnote = state.FindDefinition(state.OrderedReferencedLabels[i]);
+            if (footnote == null) {
+                continue;
+            }
+
+            sb.Append(RenderGitHubFootnoteItemHtml(footnote, context, state));
+        }
+
+        sb.Append("</ol></section>");
+        return sb.ToString();
+    }
+
+    private static string RenderGitHubFootnoteItemHtml(
+        FootnoteDefinitionBlock footnote,
+        MarkdownBodyRenderContext context,
+        HtmlFootnoteRenderState state) {
+        var info = state.GetDefinitionInfo(footnote.Label);
+        if (info == null) {
+            return string.Empty;
+        }
+
+        var blocks = GetFootnoteBlocksForRender(footnote);
+        var sb = new StringBuilder();
+        sb.Append("<li id=\"fn-")
+            .Append(HtmlTextEncoder.Encode(info.Value.EscapedLabel, context.Options))
+            .Append("\">");
+
+        if (blocks.Count == 0) {
+            var fallback = new ParagraphBlock(new InlineSequence().Text(footnote.Text));
+            sb.Append(AppendBackrefsToParagraphHtml(RenderBodyBlock(fallback, context), info.Value));
+        } else {
+            int finalBlockIndex = blocks.Count - 1;
+            bool appendBackrefsToFinalParagraph = blocks[finalBlockIndex] is ParagraphBlock;
+            for (int i = 0; i < blocks.Count; i++) {
+                var rendered = RenderBodyBlock(blocks[i], context);
+                if (appendBackrefsToFinalParagraph && i == finalBlockIndex) {
+                    rendered = AppendBackrefsToParagraphHtml(rendered, info.Value);
+                }
+                sb.Append(rendered);
+            }
+
+            if (!appendBackrefsToFinalParagraph) {
+                sb.Append(BuildGitHubBackrefsHtml(info.Value));
+            }
+        }
+
+        sb.Append("</li>");
+        return sb.ToString();
+    }
+
+    private static IReadOnlyList<IMarkdownBlock> GetFootnoteBlocksForRender(FootnoteDefinitionBlock footnote) {
+        if (footnote.ChildBlocks.Count > 0) {
+            return footnote.ChildBlocks;
+        }
+
+        if (footnote.ParagraphBlocks.Count > 0) {
+            return footnote.ParagraphBlocks;
+        }
+
+        if (footnote.Paragraphs.Count > 0) {
+            var paragraphs = new List<IMarkdownBlock>(footnote.Paragraphs.Count);
+            for (int i = 0; i < footnote.Paragraphs.Count; i++) {
+                paragraphs.Add(new ParagraphBlock(footnote.Paragraphs[i]));
+            }
+            return paragraphs;
+        }
+
+        if (!string.IsNullOrEmpty(footnote.Text)) {
+            return new IMarkdownBlock[] { new ParagraphBlock(new InlineSequence().Text(footnote.Text)) };
+        }
+
+        return Array.Empty<IMarkdownBlock>();
+    }
+
+    private static string AppendBackrefsToParagraphHtml(string paragraphHtml, HtmlFootnoteDefinitionInfo info) {
+        if (string.IsNullOrEmpty(paragraphHtml)) {
+            return "<p>" + BuildGitHubBackrefsHtml(info) + "</p>";
+        }
+
+        const string closing = "</p>";
+        if (paragraphHtml.EndsWith(closing, StringComparison.Ordinal)) {
+            return paragraphHtml.Substring(0, paragraphHtml.Length - closing.Length)
+                   + " "
+                   + BuildGitHubBackrefsHtml(info)
+                   + closing;
+        }
+
+        return paragraphHtml + "<p>" + BuildGitHubBackrefsHtml(info) + "</p>";
+    }
+
+    private static string BuildGitHubBackrefsHtml(HtmlFootnoteDefinitionInfo info) {
+        var sb = new StringBuilder();
+        for (int i = 0; i < info.ReferenceIds.Count; i++) {
+            if (i > 0) {
+                sb.Append(' ');
+            }
+
+            string backrefIndex = i == 0
+                ? info.Number.ToString()
+                : info.Number.ToString() + "-" + (i + 1).ToString();
+
+            sb.Append("<a href=\"#")
+                .Append(HtmlTextEncoder.Encode(info.ReferenceIds[i], HtmlRenderContext.Options))
+                .Append("\" class=\"footnote-backref\" data-footnote-backref data-footnote-backref-idx=\"")
+                .Append(HtmlTextEncoder.Encode(backrefIndex, HtmlRenderContext.Options))
+                .Append("\" aria-label=\"Back to reference ")
+                .Append(HtmlTextEncoder.Encode(backrefIndex, HtmlRenderContext.Options))
+                .Append("\">")
+                .Append(i == 0 ? "↩" : "↩<sup>" + (i + 1).ToString() + "</sup>")
+                .Append("</a>");
+        }
+
+        return sb.ToString();
+    }
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<HtmlStyle, string> _unscopedBaseCssCache = new System.Collections.Concurrent.ConcurrentDictionary<HtmlStyle, string>();
+
+    private static string? BuildCss(HtmlOptions options, out string? cssLinkTag, out string? cssToWrite, out string? extraHeadLinks) {
+        cssLinkTag = null; cssToWrite = null; extraHeadLinks = null;
+        // Only cache the finite built-in style set. Caller-controlled scope selectors are
+        // deliberately rendered on demand so unique request values cannot grow static state.
+        MarkdownVisualTheme? effectiveVisualTheme = ResolveVisualTheme(options);
+        HtmlStyle effectiveStyle = NormalizeHtmlStyle(GetEffectiveStyle(options, effectiveVisualTheme));
+        string rawBaseCss = _unscopedBaseCssCache.GetOrAdd(effectiveStyle,
+            static style => HtmlResources.GetStyleCss(style) + HtmlResources.CommonExtraCss);
+        string baseCss = ScopeCss(rawBaseCss, options.CssScopeSelector);
+
+        // Additional CSS/JS URLs may be included in head as link/script or inlined depending on AssetMode
+        StringBuilder headLinks = new StringBuilder();
+
+        // Primary stylesheet selection
+        if (options.CssDelivery == CssDelivery.None) {
+            // Still emit links for additional CSS if Online
+            if (options.AssetMode == AssetMode.Online) {
+                foreach (var href in options.AdditionalCssHrefs.Where(u => !string.IsNullOrWhiteSpace(u)))
+                    headLinks.Append($"<link rel=\"stylesheet\" href=\"{HtmlAttributeUrlEncoder.Encode(href, options)}\">\n");
+            }
+            // AdditionalJs handled later in head (scripts in body for full doc)
+            extraHeadLinks = headLinks.ToString();
+            return string.Empty;
+        }
+
+        bool linkPrimary = false;
+        if (options.CssDelivery == CssDelivery.LinkHref && !string.IsNullOrWhiteSpace(options.CssHref) && options.AssetMode == AssetMode.Online) {
+            linkPrimary = true;
+            cssLinkTag = $"<link rel=\"stylesheet\" href=\"{HtmlAttributeUrlEncoder.Encode(options.CssHref, options)}\">\n";
+            foreach (var href in options.AdditionalCssHrefs.Where(u => !string.IsNullOrWhiteSpace(u)))
+                headLinks.Append($"<link rel=\"stylesheet\" href=\"{HtmlAttributeUrlEncoder.Encode(href, options)}\">\n");
+            extraHeadLinks = headLinks.ToString();
+            // Do not return; we may inline small theme overrides below
+        }
+
+        // Inline or ExternalFile, or LinkHref with Offline mode
+        var cssBuilder = new StringBuilder();
+        if (!linkPrimary && !string.IsNullOrEmpty(baseCss)) cssBuilder.Append(baseCss).Append('\n');
+
+        if (options.CssDelivery == CssDelivery.LinkHref && !string.IsNullOrWhiteSpace(options.CssHref) && options.AssetMode == AssetMode.Offline) {
+            // Attempt to download provided CSS and inline
+            var downloaded = ResolveExternalText(options.CssHref!, options.ExternalTextResolver);
+            if (!string.IsNullOrEmpty(downloaded)) cssBuilder.Append(downloaded).Append('\n');
+        }
+        // Additional CSS URLs
+        foreach (var href in options.AdditionalCssHrefs.Where(u => !string.IsNullOrWhiteSpace(u))) {
+            if (options.AssetMode == AssetMode.Online && options.CssDelivery == CssDelivery.LinkHref) {
+                headLinks.Append($"<link rel=\"stylesheet\" href=\"{HtmlAttributeUrlEncoder.Encode(href, options)}\">\n");
+            } else {
+                var downloaded = ResolveExternalText(href, options.ExternalTextResolver);
+                if (!string.IsNullOrEmpty(downloaded)) cssBuilder.Append(downloaded).Append('\n');
+            }
+        }
+        extraHeadLinks = headLinks.ToString();
+
+        // Theme overrides appended last so they win
+        var overrides = BuildThemeOverrides(options, effectiveVisualTheme);
+        if (!string.IsNullOrEmpty(overrides)) cssBuilder.Append(overrides);
+        var aggregatedCss = cssBuilder.ToString();
+        if (options.CssDelivery == CssDelivery.ExternalFile) {
+            // Renderer expects caller to write this CSS; return empty inline CSS but set writable content
+            cssToWrite = aggregatedCss;
+            var fileName = options.ExternalCssOutputPath != null ? System.IO.Path.GetFileName(options.ExternalCssOutputPath) : "styles.css";
+            var styleId = $"omd-style:{effectiveStyle}";
+            cssLinkTag = $"<link rel=\"stylesheet\" data-asset-id=\"{HtmlTextEncoder.Encode(styleId, options)}\" href=\"{HtmlAttributeUrlEncoder.Encode(fileName, options)}\">\n";
+            return string.Empty;
+        }
+        return aggregatedCss;
+    }
+
+    private static MarkdownVisualTheme? ResolveVisualTheme(HtmlOptions options) {
+        if (options.Theme != null) {
+            return options.Theme.Clone();
+        }
+
+        bool useDefaultTheme = options.ApplyDefaultTheme
+            && (options.Style == HtmlStyle.Clean || options.Style == HtmlStyle.Word);
+        return MarkdownVisualTheme.ResolveOrDefault(null, useDefaultTheme);
+    }
+
+    private static HtmlStyle GetEffectiveStyle(HtmlOptions options, MarkdownVisualTheme? visualTheme) {
+        if (visualTheme != null && options.Style == HtmlStyle.Clean) {
+            return visualTheme.HtmlStyle;
+        }
+
+        return options.Style;
+    }
+
+    private static HtmlStyle NormalizeHtmlStyle(HtmlStyle style) => style switch {
+        HtmlStyle.Plain => style,
+        HtmlStyle.Clean => style,
+        HtmlStyle.GithubLight => style,
+        HtmlStyle.GithubDark => style,
+        HtmlStyle.GithubAuto => style,
+        HtmlStyle.ChatLight => style,
+        HtmlStyle.ChatDark => style,
+        HtmlStyle.ChatAuto => style,
+        HtmlStyle.Word => style,
+        _ => HtmlStyle.Clean
+    };
+
+    private static string BuildThemeOverrides(HtmlOptions options, MarkdownVisualTheme? theme) {
+        MarkdownHtmlColorOverrides t = BuildEffectiveThemeColors(options, theme);
+        bool any = theme != null
+                 || !string.IsNullOrWhiteSpace(t.AccentLight) || !string.IsNullOrWhiteSpace(t.AccentDark)
+                 || !string.IsNullOrWhiteSpace(t.HeadingLight) || !string.IsNullOrWhiteSpace(t.HeadingDark)
+                 || !string.IsNullOrWhiteSpace(t.TocBgLight) || !string.IsNullOrWhiteSpace(t.TocBgDark)
+                 || !string.IsNullOrWhiteSpace(t.TocBorderLight) || !string.IsNullOrWhiteSpace(t.TocBorderDark)
+                 || !string.IsNullOrWhiteSpace(t.ActiveLinkLight) || !string.IsNullOrWhiteSpace(t.ActiveLinkDark);
+        if (!any) return string.Empty;
+        var sb = new StringBuilder();
+        var scope = NormalizeScope(options.CssScopeSelector);
+        // Expose variables on scope for both themes
+        sb.Append('\n');
+        AppendThemeVariableBlock(sb, scope, t.HeadingLight, t.AccentLight, t.TocBgLight, t.TocBorderLight, t.ActiveLinkLight);
+        sb.Append(CombineSelectors("html[data-theme=light]", scope)).Append(" {");
+        if (!string.IsNullOrWhiteSpace(t.HeadingLight)) sb.Append(" --md-heading: ").Append(t.HeadingLight).Append(';');
+        if (!string.IsNullOrWhiteSpace(t.AccentLight)) sb.Append(" --md-accent: ").Append(t.AccentLight).Append(';');
+        if (!string.IsNullOrWhiteSpace(t.TocBgLight)) sb.Append(" --md-toc-bg: ").Append(t.TocBgLight).Append(';');
+        if (!string.IsNullOrWhiteSpace(t.TocBorderLight)) sb.Append(" --md-toc-border: ").Append(t.TocBorderLight).Append(';');
+        if (!string.IsNullOrWhiteSpace(t.ActiveLinkLight)) sb.Append(" --md-active: ").Append(t.ActiveLinkLight).Append(';');
+        sb.Append(" }\n");
+        sb.Append(CombineSelectors("html[data-theme=dark]", scope)).Append(" {");
+        if (!string.IsNullOrWhiteSpace(t.HeadingDark)) sb.Append(" --md-heading: ").Append(t.HeadingDark).Append(';');
+        if (!string.IsNullOrWhiteSpace(t.AccentDark)) sb.Append(" --md-accent: ").Append(t.AccentDark).Append(';');
+        if (!string.IsNullOrWhiteSpace(t.TocBgDark)) sb.Append(" --md-toc-bg: ").Append(t.TocBgDark).Append(';');
+        if (!string.IsNullOrWhiteSpace(t.TocBorderDark)) sb.Append(" --md-toc-border: ").Append(t.TocBorderDark).Append(';');
+        if (!string.IsNullOrWhiteSpace(t.ActiveLinkDark)) sb.Append(" --md-active: ").Append(t.ActiveLinkDark).Append(';');
+        sb.Append(" }\n");
+        // Map variables to elements
+        sb.Append(string.Join(", ", Descendant(scope, "h1"), Descendant(scope, "h2"), Descendant(scope, "h3"),
+            Descendant(scope, "h4"), Descendant(scope, "h5"), Descendant(scope, "h6")))
+          .Append(" { color: var(--md-heading, inherit); }\n");
+        sb.Append(Descendant(scope, "a")).Append(" { color: var(--md-accent, #0969da); }\n");
+        sb.Append(Descendant(scope, "nav.md-toc")).Append(" { background: var(--md-toc-bg, #f6f8fa); border-color: var(--md-toc-border, #d0d7de); }\n");
+        sb.Append(Descendant(scope, "nav.md-toc a.active")).Append(" { color: var(--md-active, var(--md-accent, #0969da)); border-left-color: var(--md-active, var(--md-accent, #0969da)); }\n");
+        // Accented borders and anchors for stronger theme feel
+        sb.Append(Descendant(scope, "h2")).Append(" { border-bottom-color: var(--md-accent, #d8dee4); }\n");
+        sb.Append(Descendant(scope, "blockquote")).Append(" { border-left-color: var(--md-accent, #d0d7de); }\n");
+        sb.Append(Descendant(scope, "blockquote.callout")).Append(" { border-left-color: var(--md-accent, #0969da); background: var(--md-toc-bg, #f6f8fa); }\n");
+        sb.Append(Descendant(scope, ".heading-anchor")).Append(" { color: var(--md-accent, inherit); }\n");
+        if (theme != null) {
+            var palette = theme.PaletteSnapshot;
+            var table = theme.TableSnapshot;
+            sb.Append(scope).Append(" { color: ").Append(palette.Text.ToCssColor()).Append("; background: ").Append(palette.Background.ToCssColor()).Append("; }\n");
+            sb.Append(Descendant(scope, "table")).Append(" { border-color: ").Append(palette.Border.ToCssColor()).Append("; border-width: ").Append(table.BorderWidth.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append("px; }\n");
+            if (table.EmphasizeHeader) {
+                sb.Append(Descendant(scope, "th")).Append(" { background: ").Append(palette.TableHeaderBackground.ToCssColor()).Append("; color: ").Append(palette.TableHeaderText.ToCssColor()).Append("; }\n");
+            } else {
+                sb.Append(Descendant(scope, "th")).Append(" { background: transparent; color: inherit; }\n");
+            }
+
+            sb.Append(Descendant(scope, "th, ")).Append(Descendant(scope, "td")).Append(" { border-color: ").Append(palette.Border.ToCssColor()).Append("; border-width: ")
+              .Append(table.BorderWidth.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append("px; padding: ")
+              .Append(table.CellPaddingY.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append("px ")
+              .Append(table.CellPaddingX.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append("px; }\n");
+            if (table.UseRowStripes) {
+                sb.Append(Descendant(scope, "tbody tr:nth-child(2n)")).Append(" { background-color: ").Append(palette.TableStripeBackground.ToCssColor()).Append("; }\n");
+            } else {
+                sb.Append(Descendant(scope, "tbody tr:nth-child(2n)")).Append(" { background-color: transparent; }\n");
+            }
+            sb.Append(Descendant(scope, "pre")).Append(" { background: ").Append(palette.CodeBackground.ToCssColor()).Append("; border-color: ").Append(palette.Border.ToCssColor()).Append("; }\n");
+            sb.Append(Descendant(scope, "code")).Append(" { color: ").Append(palette.Text.ToCssColor()).Append("; }\n");
+        }
+        return sb.ToString();
+    }
+
+    private static MarkdownHtmlColorOverrides BuildEffectiveThemeColors(HtmlOptions options, MarkdownVisualTheme? visualTheme) {
+        var colors = new MarkdownHtmlColorOverrides();
+        if (visualTheme != null) {
+            MarkdownVisualPalette palette = visualTheme.PaletteSnapshot;
+            colors.AccentLight = palette.Accent.ToCssColor();
+            colors.AccentDark = palette.Accent.ToCssColor();
+            colors.HeadingLight = palette.Heading.ToCssColor();
+            colors.HeadingDark = palette.Heading.ToCssColor();
+            colors.TocBgLight = palette.Surface.ToCssColor();
+            colors.TocBgDark = palette.Surface.ToCssColor();
+            colors.TocBorderLight = palette.Border.ToCssColor();
+            colors.TocBorderDark = palette.Border.ToCssColor();
+            colors.ActiveLinkLight = palette.Accent.ToCssColor();
+            colors.ActiveLinkDark = palette.Accent.ToCssColor();
+        }
+
+        ApplyColorOverrides(colors, options.ColorOverrides);
+        return colors;
+    }
+
+    private static void AppendThemeVariableBlock(StringBuilder sb, string selector, string? heading, string? accent, string? tocBackground, string? tocBorder, string? activeLink) {
+        sb.Append(selector).Append(" {");
+        if (!string.IsNullOrWhiteSpace(heading)) sb.Append(" --md-heading: ").Append(heading).Append(';');
+        if (!string.IsNullOrWhiteSpace(accent)) sb.Append(" --md-accent: ").Append(accent).Append(';');
+        if (!string.IsNullOrWhiteSpace(tocBackground)) sb.Append(" --md-toc-bg: ").Append(tocBackground).Append(';');
+        if (!string.IsNullOrWhiteSpace(tocBorder)) sb.Append(" --md-toc-border: ").Append(tocBorder).Append(';');
+        if (!string.IsNullOrWhiteSpace(activeLink)) sb.Append(" --md-active: ").Append(activeLink).Append(';');
+        sb.Append(" }\n");
+    }
+
+    private static void ApplyColorOverrides(MarkdownHtmlColorOverrides target, MarkdownHtmlColorOverrides? overrides) {
+        if (overrides == null) {
+            return;
+        }
+
+        TryApplyCssColor(overrides.AccentLight, value => target.AccentLight = value);
+        TryApplyCssColor(overrides.AccentDark, value => target.AccentDark = value);
+        TryApplyCssColor(overrides.HeadingLight, value => target.HeadingLight = value);
+        TryApplyCssColor(overrides.HeadingDark, value => target.HeadingDark = value);
+        TryApplyCssColor(overrides.TocBgLight, value => target.TocBgLight = value);
+        TryApplyCssColor(overrides.TocBgDark, value => target.TocBgDark = value);
+        TryApplyCssColor(overrides.TocBorderLight, value => target.TocBorderLight = value);
+        TryApplyCssColor(overrides.TocBorderDark, value => target.TocBorderDark = value);
+        TryApplyCssColor(overrides.ActiveLinkLight, value => target.ActiveLinkLight = value);
+        TryApplyCssColor(overrides.ActiveLinkDark, value => target.ActiveLinkDark = value);
+    }
+
+    private static void TryApplyCssColor(string? value, Action<string> apply) {
+        if (!string.IsNullOrWhiteSpace(value) && OfficeColor.TryParse(value, out OfficeColor color)) {
+            apply(color.ToCssColor());
+        }
+    }
+
+    internal static string ResolveExternalText(string? url, MarkdownExternalTextResolver? resolver) {
+        if (string.IsNullOrWhiteSpace(url)
+            || !Uri.TryCreate(url, UriKind.Absolute, out Uri? uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+            || resolver == null) {
+            return string.Empty;
+        }
+
+        return resolver(uri) ?? string.Empty;
+    }
+
+    internal static string ScopeCss(string? css, string? scopeSelector) {
+        string cssText = css ?? string.Empty;
+        if (cssText.Length == 0) return string.Empty;
+        string scope = NormalizeScope(scopeSelector);
+        // Naive scoping: prefix common selectors with the scope to avoid global bleed.
+        // This is intentionally conservative.
+        var s = cssText.Replace("code[class*=\"language-\"]", scope + " code[class*=\\\"language-\\\"]")
+                   .Replace("pre[class*=\"language-\"]", scope + " pre[class*=\\\"language-\\\"]")
+                   .Replace("pre[class*=\"language-\"] code", scope + " pre[class*=\\\"language-\\\"] code");
+        // Also prefix top-level element rules we own
+        s = s.Replace("article.markdown-body", scope);
+        return s;
+    }
+
+    private static string NormalizeScope(string? scopeSelector) {
+        string selector = scopeSelector ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(selector)) return "body";
+        return selector.Trim();
+    }
+
+    private static string CombineSelectors(string prefix, string scope) {
+        if (string.IsNullOrEmpty(prefix)) return scope;
+        if (string.IsNullOrEmpty(scope)) return prefix;
+        return prefix + " " + scope;
+    }
+
+    private static string Descendant(string scope, string selector) {
+        if (string.IsNullOrEmpty(scope)) return selector;
+        if (string.IsNullOrEmpty(selector)) return scope;
+        return scope + " " + selector;
+    }
+}

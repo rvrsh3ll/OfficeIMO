@@ -1,11 +1,12 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using DocumentFormat.OpenXml.Wordprocessing;
+using OfficeIMO.Examples.Utils;
 using OfficeIMO.Word;
-using Color = SixLabors.ImageSharp.Color;
+using Color = OfficeIMO.Drawing.OfficeColor;
 
 namespace OfficeIMO.Examples.Word {
     internal static partial class PageNumbers {
@@ -15,21 +16,22 @@ namespace OfficeIMO.Examples.Word {
 
             using (WordDocument document = WordDocument.Create(filePath)) {
                 document.Settings.UpdateFieldsOnOpen = true;
-                document.AddTableOfContent(tableOfContentStyle: TableOfContentStyle.Template2);
-                document.AddHeadersAndFooters();
-                var pageNumber = document.Header.Default.AddPageNumber(WordPageNumberStyle.Dots);
-                //var pageNumber = document.Footer.Default.AddPageNumber(WordPageNumberStyle.VerticalOutline2);
-                //var pageNumber = document.Footer.Default.AddPageNumber(WordPageNumberStyle.Dots);
+                document.AddTableOfContent(tableOfContentStyle: WordTableOfContentsStyle.Template2);
+                var pageNumber = document.HeaderDefaultOrCreate.AddPageNumber(WordPageNumberStyle.Dots);
+                //var pageNumber = document.Footer!.Default.AddPageNumber(WordPageNumberStyle.VerticalOutline2);
+                //var pageNumber = document.Footer!.Default.AddPageNumber(WordPageNumberStyle.Dots);
 
-                pageNumber.ParagraphAlignment = JustificationValues.Center;
+                pageNumber.ParagraphAlignment = WordParagraphAlignment.Center;
 
                 document.AddPageBreak();
 
-                document.AddHorizontalLine(BorderValues.Double);
+                document.AddHorizontalLine(WordBorderStyle.Double);
 
-                document.Sections[0].AddHorizontalLine();
+                if (document.Sections.Count > 0) {
+                    document.Sections[0].AddHorizontalLine();
+                }
 
-                var wordListToc = document.AddTableOfContentList(WordListStyle.Headings111);
+                var wordListToc = document.AddTableOfContentList(WordListStyle.Numbered);
 
                 wordListToc.AddItem("This is first item");
 
@@ -46,8 +48,8 @@ namespace OfficeIMO.Examples.Word {
                 wordListToc.AddItem("Text 2.2", 2);
 
                 var para = document.AddParagraph("Let's show everyone how to create a list within already defined list");
-                para.CapsStyle = CapsStyle.Caps;
-                para.Highlight = HighlightColorValues.DarkMagenta;
+                para.CapsStyle = WordCapsStyle.Caps;
+                para.Highlight = WordHighlightColor.DarkMagenta;
 
                 var wordList = document.AddList(WordListStyle.Bulleted);
 
@@ -73,7 +75,7 @@ namespace OfficeIMO.Examples.Word {
                 document.AddPageBreak();
 
                 // lets find a list which has items which suggest it's a TOC attached list
-                WordList wordListToc = null;
+                WordList? wordListToc = null;
                 foreach (var list in document.Lists) {
                     if (list.IsToc) {
                         wordListToc = list;
@@ -86,7 +88,8 @@ namespace OfficeIMO.Examples.Word {
                 }
 
                 document.Settings.UpdateFieldsOnOpen = true;
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
     }

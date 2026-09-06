@@ -1,15 +1,18 @@
-﻿using System;
-using System.Threading.Tasks;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using OfficeIMO.Word;
+using System;
+using System.Threading.Tasks;
 using VerifyXunit;
 using Xunit;
-
-using Color = SixLabors.ImageSharp.Color;
+using Assert = OfficeIMO.VerifyTests.TestAssert;
+using Color = OfficeIMO.Drawing.OfficeColor;
 
 namespace OfficeIMO.VerifyTests.Word;
 
+/// <summary>
+/// Exercises advanced document features such as sections and headers.
+/// </summary>
 public class AdvancedDocumentTests : VerifyTestBase {
 
     private static async Task DoTest(WordprocessingDocument document) {
@@ -29,16 +32,16 @@ public class AdvancedDocumentTests : VerifyTestBase {
         document.Settings.UpdateFieldsOnOpen = true;
 
         // lets add one of multiple added Cover Pages
-        document.AddCoverPage(CoverPageTemplate.IonDark);
+        document.AddCoverPage(WordCoverPageTemplate.IonDark);
 
         // lets add Table of Content (1 of 2)
-        document.AddTableOfContent(TableOfContentStyle.Template1);
+        document.AddTableOfContent(WordTableOfContentsStyle.Template1);
 
         // lets add page break
         document.AddPageBreak();
 
         // lets create a list that will be binded to TOC
-        var wordListToc = document.AddTableOfContentList(WordListStyle.Headings111);
+        var wordListToc = document.AddTableOfContentList(WordListStyle.Numbered);
 
         wordListToc.AddItem("How to add a table to document?");
 
@@ -53,7 +56,7 @@ public class AdvancedDocumentTests : VerifyTestBase {
         table.Rows[3].Cells[3].Paragraphs[0].Text = "Different cell";
 
         document.AddParagraph("As you can see adding a table with some style, and adding content to it ").SetBold()
-            .SetUnderline(UnderlineValues.Dotted).AddText("is not really complicated").SetColor(Color.OrangeRed);
+            .SetUnderline(WordUnderlineStyle.Dotted).AddText("is not really complicated").SetColor(Color.OrangeRed);
 
         wordListToc.AddItem("How to add a list to document?");
 
@@ -70,8 +73,8 @@ public class AdvancedDocumentTests : VerifyTestBase {
         var paragraphWithHyperlink = document.AddHyperLink("Go to Evotec Blogs", new Uri("https://evotec.xyz"),
             true, "URL with tooltip");
         // you can also change the hyperlink text, uri later on using properties
-        paragraphWithHyperlink.Hyperlink.Uri = new Uri("https://evotec.xyz/hub");
-        paragraphWithHyperlink.ParagraphAlignment = JustificationValues.Center;
+        paragraphWithHyperlink.Hyperlink!.Uri = new Uri("https://evotec.xyz/hub");
+        paragraphWithHyperlink.ParagraphAlignment = WordParagraphAlignment.Center;
 
         list.AddItem("3rd element of list, but added after hyperlink", 0);
         list.AddItem("4th element with hyperlink ")
@@ -86,7 +89,7 @@ public class AdvancedDocumentTests : VerifyTestBase {
         listNumbered.AddItem("Different list number 4", 1);
 
         var section = document.AddSection();
-        section.PageOrientation = PageOrientationValues.Landscape;
+        section.PageOrientation = OfficePageOrientation.Landscape;
         section.PageSettings.PageSize = WordPageSize.A4;
 
         wordListToc.AddItem("Adding headers / footers");
@@ -95,26 +98,30 @@ public class AdvancedDocumentTests : VerifyTestBase {
         document.AddHeadersAndFooters();
 
         // adding text to default header
-        document.Header.Default.AddParagraph("Text added to header - Default");
+        var headers = Assert.NotNull(document.Header);
+        var defaultHeader = Assert.IsType<WordHeader>(headers.Default);
+        defaultHeader.AddParagraph("Text added to header - Default");
 
         var section1 = document.AddSection();
-        section1.PageOrientation = PageOrientationValues.Portrait;
+        section1.PageOrientation = OfficePageOrientation.Portrait;
         section1.PageSettings.PageSize = WordPageSize.A5;
 
         wordListToc.AddItem("Adding custom properties and page numbers to document");
 
-        document.CustomDocumentProperties.Add("TestProperty", new WordCustomProperty {Value = DateTime.Today});
+        document.CustomDocumentProperties.Add("TestProperty", new WordCustomProperty { Value = DateTime.Today });
         document.CustomDocumentProperties.Add("MyName", new WordCustomProperty("Some text"));
         document.CustomDocumentProperties.Add("IsTodayGreatDay", new WordCustomProperty(true));
 
         // add page numbers
-        document.Footer.Default.AddPageNumber(WordPageNumberStyle.PlainNumber);
+        var footers = Assert.NotNull(document.Footer);
+        var defaultFooter = Assert.IsType<WordFooter>(footers.Default);
+        defaultFooter.AddPageNumber(WordPageNumberStyle.PlainNumber);
 
         // add watermark
         document.Sections[0].AddWatermark(WordWatermarkStyle.Text, "Draft");
 
-        document.Save();
+        _ = document.ToBytes();
 
-        await DoTest(document._wordprocessingDocument);
+        await DoTest(document._wordprocessingDocument!);
     }
 }

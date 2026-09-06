@@ -1,0 +1,361 @@
+using System;
+using System.IO;
+using System.Text;
+using System.Threading.Tasks;
+using DocumentFormat.OpenXml.Packaging;
+using OpenMcdf;
+using OfficeIMO.Drawing;
+using OfficeIMO.Word;
+using Xunit;
+using Version = OpenMcdf.Version;
+using StorageModeFlags = OpenMcdf.StorageModeFlags;
+
+namespace OfficeIMO.Tests {
+    public partial class Word {
+        private static string CreateDummyVba(string path, params string[] modules) {
+            using var root = RootStorage.Create(path, Version.V3, StorageModeFlags.None);
+            var vba = root.CreateStorage("VBA");
+            using (var dir = vba.CreateStream("dir")) dir.Write(Array.Empty<byte>(), 0, 0);
+            using (var project = vba.CreateStream("_VBA_PROJECT")) project.Write(Array.Empty<byte>(), 0, 0);
+            if (modules == null || modules.Length == 0) modules = new[] { "Module1" };
+            foreach (var module in modules) {
+                using var stream = vba.CreateStream(module);
+                var bytes = Encoding.UTF8.GetBytes("test");
+                stream.Write(bytes, 0, bytes.Length);
+            }
+            using (var projectStream = root.CreateStream("PROJECT")) projectStream.Write(Array.Empty<byte>(), 0, 0);
+            return path;
+        }
+
+        private static string CreateComplexVba(string path) {
+            using var root = RootStorage.Create(path, Version.V3, StorageModeFlags.None);
+            var vba = root.CreateStorage("VBA");
+            using (var dir = vba.CreateStream("dir")) dir.Write(Array.Empty<byte>(), 0, 0);
+            using (var project = vba.CreateStream("_VBA_PROJECT")) project.Write(Array.Empty<byte>(), 0, 0);
+            using (var module = vba.CreateStream("Module1")) {
+                var bytes = Encoding.UTF8.GetBytes("Option Explicit");
+                module.Write(bytes, 0, bytes.Length);
+            }
+
+            var nested = vba.CreateStorage("Nested");
+            using (var hidden = nested.CreateStream("HiddenModule")) {
+                var bytes = Encoding.UTF8.GetBytes("Sub Foo()\nEnd Sub");
+                hidden.Write(bytes, 0, bytes.Length);
+            }
+
+            var extra = root.CreateStorage("Extra");
+            using (var extraStream = extra.CreateStream("ModuleOutside")) {
+                var bytes = Encoding.UTF8.GetBytes("Sub Bar()\nEnd Sub");
+                extraStream.Write(bytes, 0, bytes.Length);
+            }
+
+            using (var projectStream = root.CreateStream("PROJECT")) projectStream.Write(Array.Empty<byte>(), 0, 0);
+            return path;
+        }
+        [Fact]
+        public void Test_CreatingDocmWithMacro() {
+            string macroPath = Path.Combine(_directoryDocuments, "vbaProject.bin");
+            string filePath = Path.Combine(_directoryWithFiles, "DocumentWithMacro.docm");
+            if (File.Exists(filePath)) File.Delete(filePath);
+
+            using (WordDocument document = WordDocument.Create(filePath)) {
+                document.AddMacro(macroPath);
+                Assert.True(document.HasMacros);
+                document.Save();
+            }
+
+            using (WordDocument document = WordDocument.Load(filePath)) {
+                Assert.True(document.HasMacros);
+                byte[] data = document.ExtractMacros();
+                Assert.NotNull(data);
+                Assert.True(data.Length > 0);
+            }
+
+            File.Delete(filePath);
+        }
+
+        [Fact]
+        public void Test_SavingMacroDocumentAsDocxRemovesMacros() {
+            string macroPath = Path.Combine(_directoryDocuments, "vbaProject.bin");
+            string sourcePath = Path.Combine(_directoryWithFiles, "MacroDowngradeSource.docm");
+            string targetPath = Path.Combine(_directoryWithFiles, "MacroDowngradeTarget.docx");
+            File.Delete(sourcePath);
+            File.Delete(targetPath);
+
+            using (WordDocument document = WordDocument.Create(sourcePath)) {
+                document.AddMacro(macroPath);
+                Assert.True(document.HasMacros);
+                document.Save(targetPath);
+            }
+
+            AssertPackageHasNoVbaProject(targetPath);
+            using (WordDocument loaded = WordDocument.Load(targetPath)) {
+                Assert.False(loaded.HasMacros);
+            }
+        }
+
+        [Fact]
+        public void Test_SavingMacroDocumentAsDocmRetainsMacros() {
+            string macroPath = Path.Combine(_directoryDocuments, "vbaProject.bin");
+            string sourcePath = Path.Combine(_directoryWithFiles, "MacroRetainSource.docm");
+            string targetPath = Path.Combine(_directoryWithFiles, "MacroRetainTarget.docm");
+            File.Delete(sourcePath);
+            File.Delete(targetPath);
+
+            using (WordDocument document = WordDocument.Create(sourcePath)) {
+                document.AddMacro(macroPath);
+                Assert.True(document.HasMacros);
+                document.Save(targetPath);
+            }
+
+            using (WordprocessingDocument package = WordprocessingDocument.Open(targetPath, false)) {
+                Assert.NotNull(package.MainDocumentPart?.VbaProjectPart);
+            }
+
+            using (WordDocument loaded = WordDocument.Load(targetPath)) {
+                Assert.True(loaded.HasMacros);
+            }
+        }
+
+        [Fact]
+        public async Task Test_SaveAsyncMacroDocumentAsDocxRemovesMacros() {
+            string macroPath = Path.Combine(_directoryDocuments, "vbaProject.bin");
+            string sourcePath = Path.Combine(_directoryWithFiles, "MacroAsyncDowngradeSource.docm");
+            string targetPath = Path.Combine(_directoryWithFiles, "MacroAsyncDowngradeTarget.docx");
+            File.Delete(sourcePath);
+            File.Delete(targetPath);
+
+            using (WordDocument document = WordDocument.Create(sourcePath)) {
+                document.AddMacro(macroPath);
+                Assert.True(document.HasMacros);
+                await document.SaveAsync(targetPath);
+            }
+
+            AssertPackageHasNoVbaProject(targetPath);
+            using (WordDocument loaded = WordDocument.Load(targetPath)) {
+                Assert.False(loaded.HasMacros);
+            }
+        }
+
+        [Fact]
+        public async Task Test_SaveCopyAsyncMacroDocumentAsDocxRemovesMacros() {
+            string macroPath = Path.Combine(_directoryDocuments, "vbaProject.bin");
+            string sourcePath = Path.Combine(_directoryWithFiles, "MacroAsyncCopyDowngradeSource.docm");
+            string targetPath = Path.Combine(_directoryWithFiles, "MacroAsyncCopyDowngradeTarget.docx");
+            File.Delete(sourcePath);
+            File.Delete(targetPath);
+
+            using (WordDocument document = WordDocument.Create(sourcePath)) {
+                document.AddMacro(macroPath);
+                document.Save();
+                await document.SaveCopyAsync(targetPath);
+
+                Assert.Equal(sourcePath, document.FilePath);
+                Assert.True(document.HasMacros);
+            }
+
+            AssertPackageHasNoVbaProject(targetPath);
+            using (WordDocument loaded = WordDocument.Load(targetPath)) {
+                Assert.False(loaded.HasMacros);
+            }
+        }
+
+        [Fact]
+        public void Test_SavingAndRemovingMacros() {
+            string macroPath = Path.Combine(_directoryDocuments, "vbaProject.bin");
+            string filePath = Path.Combine(_directoryWithFiles, "DocumentWithMacro2.docm");
+            if (File.Exists(filePath)) File.Delete(filePath);
+
+            using (WordDocument document = WordDocument.Create(filePath)) {
+                byte[] data = File.ReadAllBytes(macroPath);
+                document.AddMacro(data);
+                document.Save();
+            }
+
+            string extracted = Path.Combine(_directoryWithFiles, "macroCopy.bin");
+            using (WordDocument document = WordDocument.Load(filePath)) {
+                document.SaveMacros(extracted);
+                Assert.True(File.Exists(extracted));
+                document.RemoveMacros();
+                Assert.False(document.HasMacros);
+                document.Save();
+            }
+
+            using (WordDocument document = WordDocument.Load(filePath)) {
+                Assert.False(document.HasMacros);
+            }
+
+            File.Delete(filePath);
+            File.Delete(extracted);
+        }
+
+        private static void AssertPackageHasNoVbaProject(string filePath) {
+            using WordprocessingDocument package = WordprocessingDocument.Open(filePath, false);
+            Assert.Null(package.MainDocumentPart?.VbaProjectPart);
+        }
+
+        [Fact]
+        public void Test_ListAndRemoveSingleMacro() {
+            string vbaPath = Path.Combine(_directoryDocuments, "dummyVba.bin");
+            CreateDummyVba(vbaPath);
+            string filePath = Path.Combine(_directoryWithFiles, "DocumentWithMacro3.docm");
+            if (File.Exists(filePath)) File.Delete(filePath);
+
+            using (WordDocument document = WordDocument.Create(filePath)) {
+                document.AddMacro(vbaPath);
+                document.Save();
+            }
+
+            using (WordDocument document = WordDocument.Load(filePath)) {
+                Assert.Single(document.Macros);
+                document.Macros[0].Remove();
+                Assert.False(document.HasMacros);
+                document.Save();
+            }
+
+            using (WordDocument document = WordDocument.Load(filePath)) {
+                Assert.False(document.HasMacros);
+            }
+
+            File.Delete(filePath);
+            File.Delete(vbaPath);
+        }
+
+        [Fact]
+        public void Test_RemoveOneOfMultipleMacros() {
+            string vbaPath = Path.Combine(_directoryDocuments, "multiVba.bin");
+            CreateDummyVba(vbaPath, "Module1", "Module2");
+            string filePath = Path.Combine(_directoryWithFiles, "DocumentWithMacroMulti.docm");
+            if (File.Exists(filePath)) File.Delete(filePath);
+
+            using (WordDocument document = WordDocument.Create(filePath)) {
+                document.AddMacro(vbaPath);
+                document.Save();
+            }
+
+            using (WordDocument document = WordDocument.Load(filePath)) {
+                Assert.Equal(2, document.Macros.Count);
+                document.RemoveMacro("Module1");
+                Assert.True(document.HasMacros);
+                Assert.Single(document.Macros);
+                Assert.Equal("Module2", document.Macros[0].Name);
+                document.Save();
+            }
+
+            using (WordDocument document = WordDocument.Load(filePath)) {
+                Assert.True(document.HasMacros);
+                Assert.Single(document.Macros);
+                Assert.Equal("Module2", document.Macros[0].Name);
+            }
+
+            File.Delete(filePath);
+            File.Delete(vbaPath);
+        }
+
+        [Fact]
+        public void Test_EnumeratingMacroNames() {
+            string vbaPath = Path.Combine(_directoryDocuments, "dummyVba.bin");
+            CreateDummyVba(vbaPath);
+            using (WordDocument document = WordDocument.Create(Path.Combine(_directoryWithFiles, "MacroNames.docm"))) {
+                document.AddMacro(vbaPath);
+                Assert.Single(document.Macros);
+                Assert.Equal("Module1", document.Macros[0].Name);
+            }
+            File.Delete(vbaPath);
+            File.Delete(Path.Combine(_directoryWithFiles, "MacroNames.docm"));
+        }
+
+        [Fact]
+        public void Test_ExportImportMacrosBetweenDocuments() {
+            string sourcePath = Path.Combine(_directoryWithFiles, "SourceMacroDoc.docm");
+            string targetPath = Path.Combine(_directoryWithFiles, "TargetMacroDoc.docm");
+            string macroFile = Path.Combine(_directoryWithFiles, "macroSource.bin");
+
+            CreateDummyVba(macroFile);
+            if (File.Exists(sourcePath)) File.Delete(sourcePath);
+            if (File.Exists(targetPath)) File.Delete(targetPath);
+
+            using (WordDocument document = WordDocument.Create(sourcePath)) {
+                document.AddMacro(macroFile);
+                document.Save();
+            }
+
+            byte[] macroData;
+            using (WordDocument document = WordDocument.Load(sourcePath)) {
+                Assert.True(document.HasMacros);
+                macroData = document.ExtractMacros();
+                Assert.NotNull(macroData);
+                Assert.True(macroData.Length > 0);
+            }
+
+            using (WordDocument document = WordDocument.Create(targetPath)) {
+                document.AddMacro(macroData);
+                Assert.True(document.HasMacros);
+                document.Save();
+            }
+
+            using (WordDocument document = WordDocument.Load(targetPath)) {
+                Assert.True(document.HasMacros);
+                Assert.Single(document.Macros);
+                document.RemoveMacros();
+                document.Save();
+            }
+
+            using (WordDocument document = WordDocument.Load(targetPath)) {
+                Assert.False(document.HasMacros);
+            }
+
+            File.Delete(sourcePath);
+            File.Delete(targetPath);
+            File.Delete(macroFile);
+        }
+
+        [Fact]
+        public void Test_MacroParser_IgnoresNonVbaModules() {
+            string vbaPath = Path.Combine(_directoryDocuments, "complexVba.bin");
+            string documentPath = Path.Combine(_directoryWithFiles, "ComplexMacro.docm");
+
+            CreateComplexVba(vbaPath);
+            if (File.Exists(documentPath)) File.Delete(documentPath);
+
+            using (WordDocument document = WordDocument.Create(documentPath)) {
+                document.AddMacro(vbaPath);
+                document.Save();
+            }
+
+            using (WordDocument document = WordDocument.Load(documentPath)) {
+                Assert.True(document.HasMacros);
+                Assert.Single(document.Macros);
+                Assert.Equal("Module1", document.Macros[0].Name);
+            }
+
+            File.Delete(documentPath);
+            File.Delete(vbaPath);
+        }
+
+        [Fact]
+        public void Test_InspectVbaProjectReportsHashModulesAndBounds() {
+            string vbaPath = Path.Combine(_directoryDocuments, "inspectVba.bin");
+            string documentPath = Path.Combine(_directoryWithFiles, "InspectMacro.docm");
+            CreateDummyVba(vbaPath, "Module1", "Module2");
+            File.Delete(documentPath);
+
+            using (WordDocument document = WordDocument.Create(documentPath)) {
+                document.AddMacro(vbaPath);
+                OfficeVbaProjectInfo info = document.InspectVbaProject(includeSha256: true)!;
+                Assert.Equal(new[] { "Module1", "Module2" }, info.ModuleNames);
+                Assert.Equal(new FileInfo(vbaPath).Length, info.Length);
+                Assert.Equal(64, info.Sha256!.Length);
+                Assert.Throws<InvalidDataException>(() =>
+                    document.InspectVbaProject(includeSha256: false,
+                        maxBytes: info.Length - 1));
+                Assert.Throws<InvalidDataException>(() => document.ExtractMacros(info.Length - 1));
+                Assert.Equal(File.ReadAllBytes(vbaPath), document.ExtractMacros(info.Length));
+                document.Save();
+            }
+
+            File.Delete(documentPath);
+            File.Delete(vbaPath);
+        }
+    }
+}

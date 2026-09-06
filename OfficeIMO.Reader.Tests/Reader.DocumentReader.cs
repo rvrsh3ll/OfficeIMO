@@ -1,0 +1,2063 @@
+using OfficeIMO.Excel;
+using OfficeIMO.Excel.LegacyXls.Model;
+using OfficeIMO.Markdown;
+using OfficeIMO.Pdf;
+using OfficeIMO.PowerPoint;
+using OfficeIMO.Reader;
+using OfficeIMO.Reader.Html;
+using OfficeIMO.Word;
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
+using Xunit;
+
+namespace OfficeIMO.Tests;
+
+/// <summary>
+/// Smoke tests for <see cref="OfficeDocumentReader"/> across supported formats.
+/// </summary>
+[Collection("ReaderRegistryNonParallel")]
+public sealed class ReaderDocumentReaderTests {
+    [Fact]
+    public void DocumentReader_CanReadWord() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".docx");
+        try {
+            using (var doc = WordDocument.Create(path)) {
+                doc.AddParagraph("Policy").Style = WordParagraphStyles.Heading1;
+                doc.AddParagraph("This is the body.");
+                doc.Save();
+            }
+
+            var bytes = File.ReadAllBytes(path);
+            var chunks = OfficeIMO.Reader.Tests.ReaderTestReaders.All.Read(bytes, "Policy.docx").ToList();
+            Assert.NotEmpty(chunks);
+            Assert.Contains(chunks, c => c.Kind == ReaderInputKind.Word && (c.Markdown ?? c.Text).Contains("# Policy", StringComparison.Ordinal));
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_CanReadExcel() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".xlsx");
+        try {
+            using (var doc = ExcelDocument.Create(path)) {
+                var sheet = doc.AddWorksheet("Data");
+                sheet.Cell(1, 1, "Name");
+                sheet.Cell(1, 2, "Value");
+                sheet.Cell(2, 1, "A");
+                sheet.Cell(2, 2, 1);
+                doc.Save();
+            }
+
+            var chunks = OfficeIMO.Reader.Tests.ReaderTestReaders.Excel("Data", "A1:B2").Read(path).ToList();
+            Assert.NotEmpty(chunks);
+            Assert.Contains(chunks, c =>
+                c.Kind == ReaderInputKind.Excel &&
+                c.Tables != null &&
+                c.Tables.Count > 0 &&
+                c.Tables[0].Columns.Contains("Name", StringComparer.Ordinal));
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_CanReadLegacyDocThroughWordEngine() {
+        string path = GetRepositoryPath("OfficeIMO.TestAssets", "Documents", "LegacyDocCorpus", "ComSimpleParagraphs.doc");
+
+        var chunks = OfficeIMO.Reader.Tests.ReaderTestReaders.All.Read(path).ToList();
+        var result = OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadDocument(path);
+
+        Assert.Equal(ReaderInputKind.Word, OfficeIMO.Reader.Tests.ReaderTestReaders.All.DetectKind(path));
+        Assert.NotEmpty(chunks);
+        Assert.All(chunks, chunk => Assert.Equal(ReaderInputKind.Word, chunk.Kind));
+        Assert.Contains(chunks, chunk => !string.IsNullOrWhiteSpace(chunk.Markdown ?? chunk.Text));
+        Assert.Contains(chunks.SelectMany(chunk => chunk.Warnings ?? Array.Empty<string>()), warning =>
+            warning.Contains("Legacy DOC import diagnostic", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(ReaderInputKind.Word, result.Kind);
+        Assert.NotEmpty(result.Chunks);
+        Assert.Empty(result.Assets);
+    }
+
+    [Fact]
+    public void DocumentReader_CanReadLegacyXlsThroughExcelEngine() {
+        string path = GetRepositoryPath("OfficeIMO.TestAssets", "Documents", "LegacyXlsCorpus", "openpreserve-format-corpus", "valid.xls");
+
+        var chunks = OfficeIMO.Reader.Tests.ReaderTestReaders.All.Read(path).ToList();
+        var result = OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadDocument(path);
+
+        Assert.Equal(ReaderInputKind.Excel, OfficeIMO.Reader.Tests.ReaderTestReaders.All.DetectKind(path));
+        Assert.NotEmpty(chunks);
+        Assert.All(chunks, chunk => Assert.Equal(ReaderInputKind.Excel, chunk.Kind));
+        Assert.Contains(chunks, chunk => chunk.Tables != null && chunk.Tables.Count > 0);
+        Assert.Equal(ReaderInputKind.Excel, result.Kind);
+        Assert.NotEmpty(result.Tables);
+        Assert.Empty(result.Assets);
+    }
+
+    [Fact]
+    public void DocumentReader_LegacyXlsWarningsIncludePreservedRecords() {
+        string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".xlsx");
+        try {
+            using ExcelDocument document = ExcelDocument.Create(path);
+            document.AddWorksheet("Data").CellValue(1, 1, "Preserved record warning");
+
+            typeof(ExcelDocument)
+                .GetProperty(nameof(ExcelDocument.SourceFormat))!
+                .SetValue(document, ExcelFileFormat.Xls);
+            typeof(ExcelDocument)
+                .GetField("_legacyXlsPreservedFeatures", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .SetValue(document, new[] {
+                    new LegacyXlsPreservedFeatureRecord(
+                        LegacyXlsUnsupportedFeatureKind.Comment,
+                        "XLS-BIFF-FEATURE-COMMENT-UNSUPPORTED",
+                        "Comment metadata was not projected.",
+                        "Data",
+                        recordOffset: 42,
+                        recordType: 0x001c,
+                        payloadLength: 12,
+                        detailCode: "Comment:Record0x001C")
+                });
+
+            IReadOnlyList<string> warnings = OfficeIMO.Reader.Excel.ExcelReaderAdapter.BuildLegacyWarnings(document)!;
+
+            string warning = Assert.Single(warnings);
+            Assert.Contains("Legacy XLS preserved feature", warning, StringComparison.Ordinal);
+            Assert.Contains("XLS-BIFF-FEATURE-COMMENT-UNSUPPORTED", warning, StringComparison.Ordinal);
+            Assert.Contains("Comment metadata was not projected", warning, StringComparison.Ordinal);
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_CanReadEncryptedLegacyXlsWithOpenPassword() {
+        string path = GetRepositoryPath("OfficeIMO.TestAssets", "Documents", "LegacyXlsDiagnosticCorpus", "excel-com-generated", "encrypted-password.xls");
+        var options = new ReaderOptions {
+            OpenPassword = "openpass"
+        };
+
+        OfficeDocumentReader reader = OfficeIMO.Reader.Tests.ReaderTestReaders.Excel("Encrypted", "A1:B2");
+        var pathChunks = reader.Read(path, options).ToList();
+        using var stream = File.OpenRead(path);
+        var streamChunks = reader.Read(stream, "encrypted-password.xls", options).ToList();
+
+        AssertEncryptedLegacyXlsChunks(pathChunks);
+        AssertEncryptedLegacyXlsChunks(streamChunks);
+    }
+
+    [Fact]
+    public void DocumentReader_CanReadEncryptedXlsxWithOpenPassword() {
+        const string password = "openpass";
+        string sourcePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".xlsx");
+        string encryptedPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".xlsx");
+        try {
+            using (var doc = ExcelDocument.Create(sourcePath)) {
+                var sheet = doc.AddWorksheet("SecureData");
+                sheet.Cell(1, 1, "Name");
+                sheet.Cell(1, 2, "Value");
+                sheet.Cell(2, 1, "Token");
+                sheet.Cell(2, 2, 7);
+                doc.SaveEncrypted(encryptedPath, password);
+            }
+
+            var options = new ReaderOptions {
+                OpenPassword = password
+            };
+
+            OfficeDocumentReader reader = OfficeIMO.Reader.Tests.ReaderTestReaders.Excel("SecureData", "A1:B2");
+            var pathChunks = reader.Read(encryptedPath, options).ToList();
+            using var stream = File.OpenRead(encryptedPath);
+            var streamChunks = reader.Read(stream, "encrypted.xlsx", options).ToList();
+            OfficeDocumentReadResult pathResult = OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadDocument(encryptedPath, options);
+            using var resultStream = File.OpenRead(encryptedPath);
+            OfficeDocumentReadResult streamResult = OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadDocument(resultStream, "encrypted.xlsx", options);
+
+            AssertEncryptedXlsxChunks(pathChunks);
+            AssertEncryptedXlsxChunks(streamChunks);
+            AssertEncryptedXlsxChunks(pathResult.Chunks);
+            AssertEncryptedXlsxChunks(streamResult.Chunks);
+            Assert.Empty(pathResult.Assets);
+            Assert.Empty(streamResult.Assets);
+        } finally {
+            if (File.Exists(sourcePath)) File.Delete(sourcePath);
+            if (File.Exists(encryptedPath)) File.Delete(encryptedPath);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_CanReadPowerPoint() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".pptx");
+        try {
+            using (var presentation = PowerPointPresentation.Create(path)) {
+                var slide = presentation.AddSlide();
+                slide.AddTextBox("Hello Reader");
+                slide.Notes.Text = "Notes";
+                presentation.Save();
+            }
+
+            var chunks = OfficeIMO.Reader.Tests.ReaderTestReaders.All.Read(path).ToList();
+            Assert.NotEmpty(chunks);
+            Assert.Contains(chunks, c => c.Kind == ReaderInputKind.PowerPoint && (c.Markdown ?? c.Text).Contains("Hello Reader", StringComparison.Ordinal));
+            Assert.Contains(chunks, c => c.Kind == ReaderInputKind.PowerPoint && (c.Markdown ?? c.Text).Contains("Notes", StringComparison.Ordinal));
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData("ppt")]
+    [InlineData("pot")]
+    [InlineData("pps")]
+    public void DocumentReader_CanReadLegacyPowerPointVariants(
+        string extension) {
+        string source = GetRepositoryPath("OfficeIMO.TestAssets",
+            "Documents", "LegacyPptCorpus", "BasicPowerPoint.ppt");
+        string path = Path.Combine(Path.GetTempPath(),
+            Guid.NewGuid().ToString("N") + "." + extension);
+        try {
+            File.Copy(source, path);
+
+            IReadOnlyList<ReaderChunk> pathChunks =
+                OfficeIMO.Reader.Tests.ReaderTestReaders.All.Read(path).ToArray();
+            using var stream = File.OpenRead(path);
+            IReadOnlyList<ReaderChunk> streamChunks =
+                OfficeIMO.Reader.Tests.ReaderTestReaders.All.Read(stream,
+                    "binary-deck." + extension).ToArray();
+            OfficeDocumentReadResult result =
+                OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadDocument(path);
+            ReaderDetectionResult detection =
+                OfficeIMO.Reader.Tests.ReaderTestReaders.All.Detect(path,
+                    new ReaderDetectionOptions {
+                        Mode = ReaderDetectionMode.ExtensionOnly
+                    });
+
+            AssertLegacyPowerPointChunks(pathChunks);
+            AssertLegacyPowerPointChunks(streamChunks);
+            Assert.Equal(ReaderInputKind.PowerPoint, result.Kind);
+            Assert.NotEmpty(result.Pages);
+            Assert.Contains("officeimo.powerpoint.shape-model",
+                result.CapabilitiesUsed);
+            Assert.Equal(ReaderInputKind.PowerPoint, detection.Kind);
+            Assert.Equal("application/vnd.ms-powerpoint",
+                detection.MediaType);
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_CanReadEncryptedLegacyPowerPointWithOpenPassword() {
+        const string password = "reader-pass";
+        string path = Path.Combine(Path.GetTempPath(),
+            Guid.NewGuid().ToString("N") + ".ppt");
+        try {
+            using (PowerPointPresentation source =
+                   PowerPointPresentation.Create()) {
+                source.AddSlide().AddTextBox("Reader encrypted PPT");
+                source.SaveEncrypted(path, password);
+            }
+            var options = new ReaderOptions { OpenPassword = password };
+
+            IReadOnlyList<ReaderChunk> pathChunks =
+                OfficeIMO.Reader.Tests.ReaderTestReaders.All.Read(path, options).ToArray();
+            using var stream = File.OpenRead(path);
+            OfficeDocumentReadResult streamResult =
+                OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadDocument(stream,
+                    "encrypted.ppt", options);
+
+            Assert.Contains(pathChunks, chunk =>
+                (chunk.Markdown ?? chunk.Text).Contains(
+                    "Reader encrypted PPT", StringComparison.Ordinal));
+            Assert.Contains(streamResult.Chunks, chunk =>
+                (chunk.Markdown ?? chunk.Text).Contains(
+                    "Reader encrypted PPT", StringComparison.Ordinal));
+            Assert.Contains(pathChunks.SelectMany(chunk =>
+                    chunk.Warnings ?? Array.Empty<string>()), warning =>
+                warning.Contains("PPT-ENCRYPTION-DECRYPTED",
+                    StringComparison.Ordinal));
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_CanReadEncryptedOpenXmlPowerPointWithOpenPassword() {
+        const string password = "reader-openxml-pass";
+        string path = Path.Combine(Path.GetTempPath(),
+            Guid.NewGuid().ToString("N") + ".pptx");
+        try {
+            using (PowerPointPresentation source =
+                   PowerPointPresentation.Create()) {
+                source.AddSlide().AddTextBox("Reader encrypted PPTX");
+                source.SaveEncrypted(path, password);
+            }
+            var options = new ReaderOptions { OpenPassword = password };
+
+            IReadOnlyList<ReaderChunk> pathChunks =
+                OfficeIMO.Reader.Tests.ReaderTestReaders.All.Read(path, options).ToArray();
+            using var chunkStream = File.OpenRead(path);
+            IReadOnlyList<ReaderChunk> streamChunks = OfficeIMO.Reader.Tests.ReaderTestReaders
+                .All.Read(chunkStream, "encrypted.pptx", options)
+                .ToArray();
+            OfficeDocumentReadResult pathResult = OfficeIMO.Reader.Tests.ReaderTestReaders
+                .All.ReadDocument(path, options);
+            using var resultStream = File.OpenRead(path);
+            OfficeDocumentReadResult streamResult = OfficeIMO.Reader.Tests.ReaderTestReaders
+                .All.ReadDocument(resultStream, "encrypted.pptx",
+                    options);
+
+            AssertEncryptedPowerPointChunks(pathChunks);
+            AssertEncryptedPowerPointChunks(streamChunks);
+            AssertEncryptedPowerPointChunks(pathResult.Chunks);
+            AssertEncryptedPowerPointChunks(streamResult.Chunks);
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_PreservesWrongPasswordErrorsForEncryptedOpenXmlPowerPoint() {
+        const string password = "reader-correct-pass";
+        string path = Path.Combine(Path.GetTempPath(),
+            Guid.NewGuid().ToString("N") + ".pptx");
+        try {
+            using (PowerPointPresentation source =
+                   PowerPointPresentation.Create()) {
+                source.AddSlide().AddTextBox("Reader encrypted PPTX");
+                source.SaveEncrypted(path, password);
+            }
+            var options = new ReaderOptions {
+                OpenPassword = "reader-wrong-pass"
+            };
+
+            CryptographicException pathException = Assert.Throws<
+                CryptographicException>(() => OfficeIMO.Reader.Tests.ReaderTestReaders.All
+                .Read(path, options).ToArray());
+            using var stream = File.OpenRead(path);
+            CryptographicException streamException = Assert.Throws<
+                CryptographicException>(() => OfficeIMO.Reader.Tests.ReaderTestReaders.All
+                .Read(stream, "encrypted.pptx", options).ToArray());
+
+            Assert.Contains("password is incorrect", pathException.Message,
+                StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("password is incorrect", streamException.Message,
+                StringComparison.OrdinalIgnoreCase);
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_BoundsEncryptedOpenXmlCompoundExpansion() {
+        const string password = "reader-compound-budget";
+        byte[] encrypted;
+        var randomBytes = new byte[32 * 1024];
+        new Random(42).NextBytes(randomBytes);
+        using (PowerPointPresentation source =
+               PowerPointPresentation.Create()) {
+            source.AddSlide().AddTextBox(
+                Convert.ToBase64String(randomBytes));
+            encrypted = source.ToEncryptedBytes(password);
+        }
+        int encryptionInfoEntry = FindReaderCompoundDirectoryEntry(encrypted,
+            "EncryptionInfo");
+        int encryptedPackageEntry = FindReaderCompoundDirectoryEntry(encrypted,
+            "EncryptedPackage");
+        uint packageStart = ReadReaderCompoundUInt32(encrypted,
+            encryptedPackageEntry + 116);
+        ulong packageSize = ReadReaderCompoundUInt64(encrypted,
+            encryptedPackageEntry + 120);
+        Assert.True(packageSize > 4096);
+        WriteReaderCompoundUInt32(encrypted, encryptionInfoEntry + 116,
+            packageStart);
+        WriteReaderCompoundUInt64(encrypted, encryptionInfoEntry + 120,
+            packageSize);
+        Assert.True(packageSize * 2UL > unchecked((ulong)encrypted.Length));
+        var options = new ReaderOptions {
+            OpenPassword = password,
+            MaxInputBytes = encrypted.Length,
+            DetectionMode = ReaderDetectionMode.PreferContent
+        };
+
+        using var stream = new MemoryStream(encrypted, writable: false);
+        ReaderDetectionResult detection = OfficeIMO.Reader.Tests.ReaderTestReaders.All.Detect(
+            stream, "encrypted.pptx");
+        Assert.True(detection.Evidence.Contains(
+                "container:ole-encrypted-openxml-package",
+                StringComparer.Ordinal),
+            string.Join(" | ", detection.Evidence));
+        stream.Position = 0;
+        InvalidDataException exception = Assert.Throws<InvalidDataException>(
+            () => OfficeIMO.Reader.Tests.ReaderTestReaders.All.Read(stream,
+                "encrypted.pptx", options).ToArray());
+
+        Assert.Contains("Compound stream bytes exceed", exception.Message,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void DocumentReader_DetectsExtensionlessEncryptedOpenXmlPowerPointWithOpenPassword() {
+        const string password = "reader-extensionless-pass";
+        string path = Path.Combine(Path.GetTempPath(),
+            Guid.NewGuid().ToString("N"));
+        try {
+            byte[] encrypted;
+            using (PowerPointPresentation source =
+                   PowerPointPresentation.Create()) {
+                source.AddSlide().AddTextBox("Reader encrypted PPTX");
+                encrypted = source.ToEncryptedBytes(password);
+            }
+            File.WriteAllBytes(path, encrypted);
+            var options = new ReaderOptions { OpenPassword = password };
+            IReadOnlyList<ReaderChunk> pathChunks = OfficeIMO.Reader.Tests.ReaderTestReaders
+                .All.Read(path, options).ToArray();
+            using var chunkStream = new MemoryStream(encrypted,
+                writable: false);
+            IReadOnlyList<ReaderChunk> streamChunks = OfficeIMO.Reader.Tests.ReaderTestReaders
+                .All.Read(chunkStream, sourceName: null, options)
+                .ToArray();
+            OfficeDocumentReadResult pathResult = OfficeIMO.Reader.Tests.ReaderTestReaders
+                .All.ReadDocument(path, options);
+            using var stream = new MemoryStream(encrypted,
+                writable: false);
+            OfficeDocumentReadResult streamResult = OfficeIMO.Reader.Tests.ReaderTestReaders
+                .All.ReadDocument(stream, sourceName: null, options);
+
+            Assert.Equal(ReaderInputKind.PowerPoint, pathResult.Kind);
+            Assert.Equal(ReaderInputKind.PowerPoint, streamResult.Kind);
+            AssertEncryptedPowerPointChunks(pathChunks);
+            AssertEncryptedPowerPointChunks(streamChunks);
+            AssertEncryptedPowerPointChunks(pathResult.Chunks);
+            AssertEncryptedPowerPointChunks(streamResult.Chunks);
+            OfficeDocumentDiagnostic detectionDiagnostic = Assert.Single(
+                pathResult.Diagnostics, diagnostic =>
+                    diagnostic.Code == "input-kind-detected");
+            Assert.True(detectionDiagnostic.Attributes.TryGetValue(
+                "evidence", out string? evidence));
+            Assert.NotNull(evidence);
+            Assert.Contains("container:ole-encrypted-openxml-package",
+                evidence!, StringComparison.Ordinal);
+            Assert.Contains("decryption:open-password", evidence!,
+                StringComparison.Ordinal);
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_DetectsExtensionlessEncryptedOpenXmlWordWithOpenPassword() {
+        const string password = "reader-extensionless-word-pass";
+        string path = Path.Combine(Path.GetTempPath(),
+            Guid.NewGuid().ToString("N"));
+        try {
+            byte[] encrypted;
+            using (WordDocument source = WordDocument.Create()) {
+                source.AddParagraph("Reader encrypted Word");
+                using var output = new MemoryStream();
+                source.SaveEncrypted(output, password);
+                encrypted = output.ToArray();
+            }
+            File.WriteAllBytes(path, encrypted);
+            var options = new ReaderOptions { OpenPassword = password };
+
+            OfficeDocumentReadResult pathResult = OfficeIMO.Reader.Tests.ReaderTestReaders
+                .All.ReadDocument(path, options);
+            using var stream = new MemoryStream(encrypted,
+                writable: false);
+            OfficeDocumentReadResult streamResult = OfficeIMO.Reader.Tests.ReaderTestReaders
+                .All.ReadDocument(stream, sourceName: null, options);
+
+            foreach (OfficeDocumentReadResult result in new[] {
+                         pathResult, streamResult
+                     }) {
+                Assert.Equal(ReaderInputKind.Word, result.Kind);
+                Assert.Contains("Reader encrypted Word",
+                    result.Markdown ?? string.Empty,
+                    StringComparison.Ordinal);
+            }
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_LegacyPowerPointWarningsExposeImportDiagnostics() {
+        string path = GetRepositoryPath("OfficeIMO.TestAssets", "Documents",
+            "LegacyPptCorpus", "AccessibilityPowerPoint.ppt");
+
+        IReadOnlyList<ReaderChunk> chunks =
+            OfficeIMO.Reader.Tests.ReaderTestReaders.All.Read(path).ToArray();
+
+        Assert.Contains(chunks.SelectMany(chunk =>
+                chunk.Warnings ?? Array.Empty<string>()), warning =>
+            warning.Contains("Legacy PPT import diagnostic",
+                StringComparison.Ordinal)
+            && warning.Contains("PPT-SHAPE-STYLE-PARTIAL",
+                StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void DocumentReader_LegacyPowerPointProjectsImageAssets() {
+        string path = GetRepositoryPath("OfficeIMO.TestAssets", "Documents",
+            "LegacyPptCorpus", "PicturePowerPoint.ppt");
+
+        OfficeDocumentReadResult pathResult =
+            OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadDocument(path);
+        using var stream = File.OpenRead(path);
+        OfficeDocumentReadResult streamResult =
+            OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadDocument(stream,
+                "pictures.ppt");
+
+        Assert.NotEmpty(pathResult.Assets);
+        Assert.NotEmpty(streamResult.Assets);
+        Assert.All(pathResult.Assets, asset => {
+            Assert.Equal("image", asset.Kind);
+            Assert.NotNull(asset.Location.Slide);
+            Assert.True(asset.PayloadHashMatches(out _));
+        });
+        Assert.Equal(pathResult.Assets.Count, streamResult.Assets.Count);
+        Assert.Contains(pathResult.Metadata, entry =>
+            entry.Category == "reader.summary"
+            && entry.Name == "AssetCount"
+            && entry.Value == pathResult.Assets.Count.ToString(
+                CultureInfo.InvariantCulture));
+    }
+
+    private static void AssertLegacyPowerPointChunks(
+        IReadOnlyList<ReaderChunk> chunks) {
+        Assert.NotEmpty(chunks);
+        Assert.All(chunks, chunk =>
+            Assert.Equal(ReaderInputKind.PowerPoint, chunk.Kind));
+        Assert.Contains(chunks, chunk =>
+            (chunk.Markdown ?? chunk.Text).Contains(
+                "OfficeIMO PowerPoint Basics", StringComparison.Ordinal));
+    }
+
+    private static void AssertEncryptedLegacyXlsChunks(IReadOnlyList<ReaderChunk> chunks) {
+        Assert.NotEmpty(chunks);
+        Assert.All(chunks, chunk => Assert.Equal(ReaderInputKind.Excel, chunk.Kind));
+        ReaderChunk chunk = Assert.Single(chunks, item => item.Tables != null && item.Tables.Count > 0);
+        Assert.Equal("Encrypted", chunk.Location.Sheet);
+        Assert.Contains("Secret", chunk.Markdown ?? chunk.Text, StringComparison.Ordinal);
+        Assert.Contains("Synthetic", chunk.Markdown ?? chunk.Text, StringComparison.Ordinal);
+        Assert.Contains("42", chunk.Markdown ?? chunk.Text, StringComparison.Ordinal);
+        Assert.NotNull(chunk.Tables);
+        Assert.Equal(new[] { "Secret", "Amount" }, chunk.Tables![0].Columns);
+        Assert.Equal("Synthetic", chunk.Tables[0].Rows[0][0]);
+        Assert.Equal("42", chunk.Tables[0].Rows[0][1]);
+    }
+
+    private static void AssertEncryptedXlsxChunks(IReadOnlyList<ReaderChunk> chunks) {
+        Assert.NotEmpty(chunks);
+        Assert.All(chunks, chunk => Assert.Equal(ReaderInputKind.Excel, chunk.Kind));
+        ReaderChunk chunk = Assert.Single(chunks, item => item.Tables != null && item.Tables.Count > 0);
+        Assert.Equal("SecureData", chunk.Location.Sheet);
+        Assert.Contains("Name", chunk.Markdown ?? chunk.Text, StringComparison.Ordinal);
+        Assert.Contains("Token", chunk.Markdown ?? chunk.Text, StringComparison.Ordinal);
+        Assert.Contains("7", chunk.Markdown ?? chunk.Text, StringComparison.Ordinal);
+        Assert.NotNull(chunk.Tables);
+        Assert.Equal(new[] { "Name", "Value" }, chunk.Tables![0].Columns);
+        Assert.Equal("Token", chunk.Tables[0].Rows[0][0]);
+        Assert.Equal("7", chunk.Tables[0].Rows[0][1]);
+    }
+
+    private static void AssertEncryptedPowerPointChunks(
+        IReadOnlyList<ReaderChunk> chunks) {
+        Assert.Contains(chunks, chunk => chunk.Kind
+            == ReaderInputKind.PowerPoint
+            && (chunk.Markdown ?? chunk.Text).Contains(
+                "Reader encrypted PPTX", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void DocumentReader_CanReadMarkdown() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
+        try {
+            File.WriteAllText(path, "# Top\n\nPara 1.\n\n## Child\n\nPara 2.\n");
+
+            using var fs = File.OpenRead(path);
+            var chunks = OfficeIMO.Reader.Tests.ReaderTestReaders.All.Read(fs, "Notes.md").ToList();
+            Assert.True(chunks.Count >= 2);
+            Assert.Contains(chunks, c => c.Kind == ReaderInputKind.Markdown && (c.Location.HeadingPath?.Contains("Top", StringComparison.Ordinal) ?? false));
+            var markdownChunks = chunks.Where(static c => c.Kind == ReaderInputKind.Markdown).ToList();
+            Assert.Collection(
+                markdownChunks.Select(c => c.Location.StartLine),
+                line => Assert.Equal(1, line),
+                line => Assert.Equal(5, line));
+            Assert.Collection(
+                markdownChunks.Select(c => c.Location.EndLine),
+                line => Assert.Equal(3, line),
+                line => Assert.Equal(7, line));
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_MarkdownChunking_RecognizesSetextHeadings() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
+        try {
+            File.WriteAllText(path, "Top\r\n===\r\n\r\nPara 1.\r\n\r\nChild\r\n---\r\n\r\nPara 2.\r\n");
+
+            var chunks = OfficeIMO.Reader.Tests.ReaderTestReaders.All.Read(path).Where(static c => c.Kind == ReaderInputKind.Markdown).ToList();
+
+            Assert.True(chunks.Count >= 2);
+            Assert.Contains(chunks, c => string.Equals(c.Location.HeadingPath, "Top", StringComparison.Ordinal));
+            Assert.Contains(chunks, c => string.Equals(c.Location.HeadingPath, "Top > Child", StringComparison.Ordinal));
+            Assert.Contains(chunks, c => (c.Markdown ?? string.Empty).Contains("# Top", StringComparison.Ordinal));
+            Assert.Contains(chunks, c => (c.Markdown ?? string.Empty).Contains("## Child", StringComparison.Ordinal));
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_MarkdownChunking_DoesNotTreatCodeFenceContentAsHeading() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
+        try {
+            File.WriteAllText(path,
+                "# Top\n\n```text\n# not a heading\nline 2\n```\n\nAfter fence.\n\n## Child\n\nDone.\n");
+
+            var chunks = OfficeIMO.Reader.Tests.ReaderTestReaders.All.Read(path).Where(static c => c.Kind == ReaderInputKind.Markdown).ToList();
+
+            Assert.Equal(2, chunks.Count);
+            Assert.Equal("Top", chunks[0].Location.HeadingPath);
+            Assert.Contains("```text", chunks[0].Markdown ?? string.Empty, StringComparison.Ordinal);
+            Assert.Contains("# not a heading", chunks[0].Markdown ?? string.Empty, StringComparison.Ordinal);
+            Assert.Equal("Top > Child", chunks[1].Location.HeadingPath);
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_MarkdownChunking_PreservesWholeBlocksWhenTheyExceedMaxChars() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
+        try {
+            var largePayload = new string('x', 320);
+            File.WriteAllText(path,
+                "# Top\n\nIntro paragraph.\n\n```text\n" + largePayload + "\n```\n\nTail paragraph.\n");
+
+            var chunks = OfficeIMO.Reader.Tests.ReaderTestReaders.All.Read(path, new ReaderOptions { MaxChars = 256 }).Where(static c => c.Kind == ReaderInputKind.Markdown).ToList();
+
+            Assert.True(chunks.Count >= 3);
+            Assert.Contains(chunks, c => (c.Warnings?.Any(w => w.Contains("single markdown block exceeded MaxChars", StringComparison.OrdinalIgnoreCase)) ?? false));
+
+            var codeChunk = chunks.Single(c => (c.Markdown ?? string.Empty).Contains("```text", StringComparison.Ordinal));
+            Assert.Contains(largePayload, codeChunk.Markdown ?? string.Empty, StringComparison.Ordinal);
+            Assert.Contains("```", codeChunk.Markdown ?? string.Empty, StringComparison.Ordinal);
+            Assert.Equal("Top", codeChunk.Location.HeadingPath);
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_MarkdownChunking_ExtractsMarkdownTables() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
+        try {
+            File.WriteAllText(path,
+                "# Data\n\n| Name | Value |\n| --- | ---: |\n| A | 1 |\n| B | 2 |\n");
+
+            var chunk = OfficeIMO.Reader.Tests.ReaderTestReaders.All.Read(path).Single(c => c.Kind == ReaderInputKind.Markdown && (c.Tables?.Count ?? 0) > 0);
+
+            Assert.Equal("Data", chunk.Location.HeadingPath);
+            Assert.NotNull(chunk.Tables);
+            Assert.Single(chunk.Tables!);
+            Assert.Equal(new[] { "Name", "Value" }, chunk.Tables![0].Columns);
+            Assert.Equal(2, chunk.Tables[0].ColumnProfiles.Count);
+            Assert.Equal(ReaderTableColumnKind.Text, chunk.Tables[0].ColumnProfiles[0].Kind);
+            Assert.Equal(ReaderTableColumnKind.Numeric, chunk.Tables[0].ColumnProfiles[1].Kind);
+            Assert.True(chunk.Tables[0].ColumnProfiles[1].IsNumeric);
+            Assert.Equal(2, chunk.Tables[0].TotalRowCount);
+            Assert.Equal("A", chunk.Tables[0].Rows[0][0]);
+            Assert.Equal("2", chunk.Tables[0].Rows[1][1]);
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_ExtractMarkdownTables_HonorsRowCapsAndColumnProfiles() {
+        var markdown =
+            "| Name | Value |\n" +
+            "| --- | ---: |\n" +
+            "| A | 1 |\n" +
+            "| B | 2 |\n" +
+            "| C | 3 |\n";
+
+        var table = Assert.Single(OfficeIMO.Reader.Tests.ReaderTestReaders.All.ExtractMarkdownTables(
+            markdown,
+            new ReaderOptions { MaxTableRows = 2 }));
+
+        Assert.Equal(new[] { "Name", "Value" }, table.Columns);
+        Assert.Equal(3, table.TotalRowCount);
+        Assert.True(table.Truncated);
+        Assert.Equal(2, table.Rows.Count);
+        Assert.Equal(2, table.ColumnProfiles.Count);
+        Assert.Equal(ReaderTableColumnKind.Text, table.ColumnProfiles[0].Kind);
+        Assert.Equal(ReaderTableColumnKind.Numeric, table.ColumnProfiles[1].Kind);
+        Assert.Equal(2, table.ColumnProfiles[1].NonEmptyCellCount);
+        Assert.Equal(2, table.ColumnProfiles[1].NumericCellCount);
+    }
+
+    [Fact]
+    public void DocumentReader_MarkdownChunking_RespectsTableRowCapsAndFallbackHeaders() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
+        try {
+            File.WriteAllText(path,
+                "# Data\n\n| A | 1 |\n| B | 2 |\n| C | 3 |\n");
+
+            var chunk = OfficeIMO.Reader.Tests.ReaderTestReaders.All.Read(path, new ReaderOptions { MaxTableRows = 2 })
+                .Single(c => c.Kind == ReaderInputKind.Markdown && (c.Tables?.Count ?? 0) > 0);
+
+            Assert.NotNull(chunk.Tables);
+            Assert.Single(chunk.Tables!);
+            Assert.Equal(new[] { "Column1", "Column2" }, chunk.Tables![0].Columns);
+            Assert.Equal(3, chunk.Tables[0].TotalRowCount);
+            Assert.True(chunk.Tables[0].Truncated);
+            Assert.Equal(2, chunk.Tables[0].Rows.Count);
+            Assert.Equal("A", chunk.Tables[0].Rows[0][0]);
+            Assert.Equal("2", chunk.Tables[0].Rows[1][1]);
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_MarkdownChunking_ExtractsIxDataViewTables() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
+        var raw = "{\"title\":\"Replication Summary\",\"summary\":\"Latest replication posture\",\"kind\":\"ix_tool_dataview_v1\",\"call_id\":\"call_123\",\"rows\":[[\"Server\",\"Fails\"],[\"AD0\",\"0\"],[\"AD1\",\"1\"]]}";
+        try {
+            File.WriteAllText(path,
+                "# Visual\n\n```ix-dataview\n" + raw + "\n```\n");
+
+            var chunk = OfficeIMO.Reader.Tests.ReaderTestReaders.All.Read(path).Single(c => c.Kind == ReaderInputKind.Markdown && (c.Tables?.Count ?? 0) > 0);
+
+            Assert.Equal("Visual", chunk.Location.HeadingPath);
+            Assert.NotNull(chunk.Tables);
+            Assert.Single(chunk.Tables!);
+            Assert.Equal("Replication Summary", chunk.Tables![0].Title);
+            Assert.Equal("ix_tool_dataview_v1", chunk.Tables[0].Kind);
+            Assert.Equal("call_123", chunk.Tables[0].CallId);
+            Assert.Equal("Latest replication posture", chunk.Tables[0].Summary);
+            Assert.Equal(ComputeShortHash(raw), chunk.Tables[0].PayloadHash);
+            Assert.Equal(new[] { "Server", "Fails" }, chunk.Tables[0].Columns);
+            Assert.Equal(ReaderTableColumnKind.Text, chunk.Tables[0].ColumnProfiles[0].Kind);
+            Assert.Equal(ReaderTableColumnKind.Numeric, chunk.Tables[0].ColumnProfiles[1].Kind);
+            Assert.Equal(2, chunk.Tables[0].ColumnProfiles[1].NonEmptyCellCount);
+            Assert.Equal(2, chunk.Tables[0].ColumnProfiles[1].NumericCellCount);
+            Assert.Equal(2, chunk.Tables[0].TotalRowCount);
+            Assert.Equal("AD0", chunk.Tables[0].Rows[0][0]);
+            Assert.Equal("1", chunk.Tables[0].Rows[1][1]);
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_MarkdownChunking_ExtractsVisualFenceMetadata() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
+        var mermaid = "graph TD\nA --> B";
+        var chart = "{\"type\":\"bar\",\"data\":{\"labels\":[\"A\"],\"datasets\":[{\"data\":[1]}]}}";
+        var network = "{\"nodes\":[{\"id\":1,\"label\":\"AD0\"}],\"edges\":[]}";
+        try {
+            File.WriteAllText(path,
+                "# Visuals\n\n```mermaid\n" + mermaid + "\n```\n\n```ix-chart\n" + chart + "\n```\n\n```ix-network\n" + network + "\n```\n");
+
+            var chunk = OfficeIMO.Reader.Tests.ReaderTestReaders.All.Read(path)
+                .Single(c => c.Kind == ReaderInputKind.Markdown && (c.Visuals?.Count ?? 0) > 0);
+
+            Assert.Equal("Visuals", chunk.Location.HeadingPath);
+            Assert.NotNull(chunk.Visuals);
+            Assert.Equal(3, chunk.Visuals!.Count);
+
+            Assert.Equal("mermaid", chunk.Visuals[0].Kind);
+            Assert.Equal("mermaid", chunk.Visuals[0].Language);
+            Assert.Equal(ComputeShortHash(chunk.Visuals[0].Content), chunk.Visuals[0].PayloadHash);
+            Assert.Contains("graph TD", chunk.Visuals[0].Content, StringComparison.Ordinal);
+            Assert.Contains("A --> B", chunk.Visuals[0].Content, StringComparison.Ordinal);
+
+            Assert.Equal("chart", chunk.Visuals[1].Kind);
+            Assert.Equal("ix-chart", chunk.Visuals[1].Language);
+            Assert.Equal(ComputeShortHash(chunk.Visuals[1].Content), chunk.Visuals[1].PayloadHash);
+            Assert.Contains("\"type\":\"bar\"", chunk.Visuals[1].Content, StringComparison.Ordinal);
+
+            Assert.Equal("network", chunk.Visuals[2].Kind);
+            Assert.Equal("ix-network", chunk.Visuals[2].Language);
+            Assert.Equal(ComputeShortHash(chunk.Visuals[2].Content), chunk.Visuals[2].PayloadHash);
+            Assert.Contains("\"label\":\"AD0\"", chunk.Visuals[2].Content, StringComparison.Ordinal);
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_MarkdownChunking_DoesNotDuplicateIxDataViewAsVisualMetadata() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
+        try {
+            File.WriteAllText(path,
+                "# Visual\n\n```ix-dataview\n{\"rows\":[[\"Server\",\"Fails\"],[\"AD0\",\"0\"]]}\n```\n");
+
+            var chunk = OfficeIMO.Reader.Tests.ReaderTestReaders.All.Read(path)
+                .Single(c => c.Kind == ReaderInputKind.Markdown && (c.Tables?.Count ?? 0) > 0);
+
+            Assert.NotNull(chunk.Tables);
+            Assert.Null(chunk.Visuals);
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    private static string ComputeShortHash(string input) {
+        var normalized = (input ?? string.Empty).TrimEnd('\r', '\n');
+        var data = Encoding.UTF8.GetBytes(normalized);
+        byte[] hash;
+        using (var sha = SHA256.Create()) {
+            hash = sha.ComputeHash(data);
+        }
+
+        var sb = new StringBuilder(16);
+        for (int i = 0; i < 8 && i < hash.Length; i++) {
+            sb.Append(hash[i].ToString("x2", CultureInfo.InvariantCulture));
+        }
+
+        return sb.ToString();
+    }
+
+    [Fact]
+    public void DocumentReader_MarkdownChunking_ExtractsIxDataViewColumnsAndObjectRecords() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
+        try {
+            File.WriteAllText(path,
+                "# Visual\n\n```ix-dataview\n{\"kind\":\"ix_tool_dataview_v1\",\"columns\":[\"Server\",\"Fails\"],\"records\":[{\"Server\":\"AD0\",\"Fails\":0},{\"Server\":\"AD1\",\"Fails\":1}]}\n```\n");
+
+            var chunk = OfficeIMO.Reader.Tests.ReaderTestReaders.All.Read(path).Single(c => c.Kind == ReaderInputKind.Markdown && (c.Tables?.Count ?? 0) > 0);
+
+            Assert.NotNull(chunk.Tables);
+            Assert.Single(chunk.Tables!);
+            Assert.Equal("ix_tool_dataview_v1", chunk.Tables![0].Title);
+            Assert.Equal(new[] { "Server", "Fails" }, chunk.Tables[0].Columns);
+            Assert.Equal(2, chunk.Tables[0].TotalRowCount);
+            Assert.Equal("AD0", chunk.Tables[0].Rows[0][0]);
+            Assert.Equal("1", chunk.Tables[0].Rows[1][1]);
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_MarkdownChunking_RespectsIxDataViewRowCaps() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
+        try {
+            File.WriteAllText(path,
+                "# Visual\n\n```ix-dataview\n{\"rows\":[[\"Server\",\"Fails\"],[\"AD0\",\"0\"],[\"AD1\",\"1\"],[\"AD2\",\"2\"]]}\n```\n");
+
+            var chunk = OfficeIMO.Reader.Tests.ReaderTestReaders.All.Read(path, new ReaderOptions { MaxTableRows = 2 })
+                .Single(c => c.Kind == ReaderInputKind.Markdown && (c.Tables?.Count ?? 0) > 0);
+
+            Assert.NotNull(chunk.Tables);
+            Assert.Single(chunk.Tables!);
+            Assert.Equal(new[] { "Server", "Fails" }, chunk.Tables![0].Columns);
+            Assert.Equal(3, chunk.Tables[0].TotalRowCount);
+            Assert.True(chunk.Tables[0].Truncated);
+            Assert.Equal(2, chunk.Tables[0].Rows.Count);
+            Assert.Equal("AD0", chunk.Tables[0].Rows[0][0]);
+            Assert.Equal("1", chunk.Tables[0].Rows[1][1]);
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_MarkdownChunking_CanNormalize_CompactIxDataViewFenceBodies() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
+        try {
+            File.WriteAllText(path,
+                "# Visual\n\n```ix-dataview{\"kind\":\"ix_tool_dataview_v1\",\"rows\":[[\"Server\",\"Fails\"],[\"AD0\",\"0\"]]}\n```\n");
+
+            OfficeDocumentReader reader = OfficeIMO.Reader.Tests.ReaderTestReaders.Markdown(new MarkdownReaderOptions {
+                InputNormalization = new MarkdownInputNormalizationOptions {
+                    NormalizeCompactFenceBodyBoundaries = true
+                }
+            });
+            var chunk = reader.Read(path).Single(c => c.Kind == ReaderInputKind.Markdown && (c.Tables?.Count ?? 0) > 0);
+
+            Assert.NotNull(chunk.Tables);
+            Assert.Single(chunk.Tables!);
+            Assert.Equal("ix_tool_dataview_v1", chunk.Tables![0].Title);
+            Assert.Equal(new[] { "Server", "Fails" }, chunk.Tables[0].Columns);
+            Assert.Equal("AD0", chunk.Tables[0].Rows[0][0]);
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_MarkdownChunking_EmitsLineRangesAndBlockKinds() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
+        try {
+            File.WriteAllText(path,
+                "# Top\n\nPara 1.\n\n## Child\n\nPara 2.\n");
+
+            var chunks = OfficeIMO.Reader.Tests.ReaderTestReaders.All.Read(path).Where(static c => c.Kind == ReaderInputKind.Markdown).ToList();
+
+            var topChunk = chunks.Single(c => string.Equals(c.Location.HeadingPath, "Top", StringComparison.Ordinal));
+            Assert.Equal(1, topChunk.Location.StartLine);
+            Assert.Equal(3, topChunk.Location.EndLine);
+            Assert.Equal(1, topChunk.Location.NormalizedStartLine);
+            Assert.Equal(3, topChunk.Location.NormalizedEndLine);
+            Assert.Equal("top", topChunk.Location.HeadingSlug);
+            Assert.Equal("heading", topChunk.Location.SourceBlockKind);
+            Assert.Equal("top", topChunk.Location.BlockAnchor);
+            Assert.Equal(0, topChunk.Location.SourceBlockIndex);
+
+            var childChunk = chunks.Single(c => string.Equals(c.Location.HeadingPath, "Top > Child", StringComparison.Ordinal));
+            Assert.Equal(5, childChunk.Location.StartLine);
+            Assert.Equal(7, childChunk.Location.EndLine);
+            Assert.Equal(5, childChunk.Location.NormalizedStartLine);
+            Assert.Equal(7, childChunk.Location.NormalizedEndLine);
+            Assert.Equal("child", childChunk.Location.HeadingSlug);
+            Assert.Equal("heading", childChunk.Location.SourceBlockKind);
+            Assert.Equal("child", childChunk.Location.BlockAnchor);
+            Assert.Equal(2, childChunk.Location.SourceBlockIndex);
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_MarkdownChunking_CanApply_InputNormalization() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
+        try {
+            File.WriteAllText(path, "## Wynik ogólny- **Replication:** wcześniej zdrowa ✅- **FSMO:** technicznie OK");
+
+            OfficeDocumentReader reader = OfficeIMO.Reader.Tests.ReaderTestReaders.Markdown(new MarkdownReaderOptions {
+                InputNormalization = new MarkdownInputNormalizationOptions {
+                    NormalizeHeadingListBoundaries = true,
+                    NormalizeCompactStrongLabelListBoundaries = true
+                }
+            });
+            var chunks = reader.Read(path).Where(static c => c.Kind == ReaderInputKind.Markdown).ToList();
+
+            var chunk = Assert.Single(chunks);
+            Assert.Equal("Wynik ogólny", chunk.Location.HeadingPath);
+            Assert.Contains("## Wynik ogólny", chunk.Markdown ?? string.Empty, StringComparison.Ordinal);
+            Assert.Contains("- **Replication:**", chunk.Markdown ?? string.Empty, StringComparison.Ordinal);
+            Assert.Contains("- **FSMO:**", chunk.Markdown ?? string.Empty, StringComparison.Ordinal);
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_MarkdownChunking_CanRepair_BrokenStrongArrowLabels() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
+        try {
+            File.WriteAllText(path, "# Summary\n\n- Signal **No current failures -> **Why it matters:** transport/auth issues");
+
+            OfficeDocumentReader reader = OfficeIMO.Reader.Tests.ReaderTestReaders.Markdown(new MarkdownReaderOptions {
+                InputNormalization = new MarkdownInputNormalizationOptions {
+                    NormalizeBrokenStrongArrowLabels = true
+                }
+            });
+            var chunk = reader.Read(path).Single(c => c.Kind == ReaderInputKind.Markdown);
+
+            Assert.Contains("**No current failures** -> **Why it matters:**", chunk.Markdown ?? string.Empty, StringComparison.Ordinal);
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_MarkdownChunking_CanNormalize_RepeatedStrongDelimiterRuns() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
+        try {
+            File.WriteAllText(path, "# Summary\n\n- Overall health ****healthy****");
+
+            OfficeDocumentReader reader = OfficeIMO.Reader.Tests.ReaderTestReaders.Markdown(new MarkdownReaderOptions {
+                InputNormalization = new MarkdownInputNormalizationOptions {
+                    NormalizeLooseStrongDelimiters = true
+                }
+            });
+            var chunk = reader.Read(path).Single(c => c.Kind == ReaderInputKind.Markdown);
+
+            Assert.Contains("**healthy**", chunk.Markdown ?? string.Empty, StringComparison.Ordinal);
+            Assert.DoesNotContain("****healthy****", chunk.Markdown ?? string.Empty, StringComparison.Ordinal);
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_MarkdownChunking_CanApply_BlockBoundaryNormalization() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
+        try {
+            File.WriteAllText(path, "previous shutdown was unexpected### Reason- **Unplanned / unexpected reboot**");
+
+            OfficeDocumentReader reader = OfficeIMO.Reader.Tests.ReaderTestReaders.Markdown(new MarkdownReaderOptions {
+                InputNormalization = new MarkdownInputNormalizationOptions {
+                    NormalizeCompactHeadingBoundaries = true,
+                    NormalizeHeadingListBoundaries = true,
+                    NormalizeCompactStrongLabelListBoundaries = true
+                }
+            });
+            var chunks = reader.Read(path).Where(static c => c.Kind == ReaderInputKind.Markdown).ToList();
+
+            Assert.Equal(2, chunks.Count);
+            Assert.Equal("Reason", chunks[1].Location.HeadingPath);
+            Assert.Contains("### Reason", chunks[1].Markdown ?? string.Empty, StringComparison.Ordinal);
+            Assert.Contains("- **Unplanned / unexpected reboot**", chunks[1].Markdown ?? string.Empty, StringComparison.Ordinal);
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_MarkdownChunking_AssignsSubBlockAnchorsWhenChunksSplitWithinAHeading() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
+        try {
+            var largePayload = new string('x', 320);
+            File.WriteAllText(path,
+                "# Top\n\nIntro paragraph.\n\n```text\n" + largePayload + "\n```\n\nTail paragraph.\n");
+
+            var chunks = OfficeIMO.Reader.Tests.ReaderTestReaders.All.Read(path, new ReaderOptions { MaxChars = 256 })
+                .Where(static c => c.Kind == ReaderInputKind.Markdown)
+                .ToList();
+
+            Assert.True(chunks.Count >= 3);
+
+            var headingChunk = chunks.Single(c => string.Equals(c.Location.BlockAnchor, "top", StringComparison.Ordinal));
+            Assert.Contains("# Top", headingChunk.Markdown ?? string.Empty, StringComparison.Ordinal);
+
+            var codeChunk = chunks.Single(c => string.Equals(c.Location.BlockAnchor, "top--code-2", StringComparison.Ordinal));
+            Assert.Equal("code", codeChunk.Location.SourceBlockKind);
+            Assert.Equal("top", codeChunk.Location.HeadingSlug);
+            Assert.Contains("```text", codeChunk.Markdown ?? string.Empty, StringComparison.Ordinal);
+
+            var trailingParagraphChunk = chunks.Single(c => string.Equals(c.Location.BlockAnchor, "top--paragraph-3", StringComparison.Ordinal));
+            Assert.Equal("paragraph", trailingParagraphChunk.Location.SourceBlockKind);
+            Assert.Equal("top", trailingParagraphChunk.Location.HeadingSlug);
+            Assert.Contains("Tail paragraph.", trailingParagraphChunk.Markdown ?? string.Empty, StringComparison.Ordinal);
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_MarkdownChunking_AssignsUniqueHeadingSlugsForDuplicateHeadings() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
+        try {
+            File.WriteAllText(path,
+                "# Repeat\n\nOne.\n\n## Child\n\nA.\n\n# Repeat\n\nTwo.\n");
+
+            var chunks = OfficeIMO.Reader.Tests.ReaderTestReaders.All.Read(path).Where(static c => c.Kind == ReaderInputKind.Markdown).ToList();
+
+            Assert.Contains(chunks, c => string.Equals(c.Location.HeadingPath, "Repeat", StringComparison.Ordinal) && string.Equals(c.Location.HeadingSlug, "repeat", StringComparison.Ordinal));
+            Assert.Contains(chunks, c => string.Equals(c.Location.HeadingPath, "Repeat > Child", StringComparison.Ordinal) && string.Equals(c.Location.HeadingSlug, "child", StringComparison.Ordinal));
+            Assert.Contains(chunks, c => string.Equals(c.Location.HeadingPath, "Repeat", StringComparison.Ordinal) && string.Equals(c.Location.HeadingSlug, "repeat-1", StringComparison.Ordinal));
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_MarkdownChunking_AssignsDeterministicSlugsForNonAsciiHeadings() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
+        try {
+            File.WriteAllText(path,
+                "# !!!\n\nOne.\n\n# !!!\n\nTwo.\n\n# ążźć\n\nThree.\n");
+
+            var chunks = OfficeIMO.Reader.Tests.ReaderTestReaders.All.Read(path).Where(static c => c.Kind == ReaderInputKind.Markdown).ToList();
+
+            var punctuationChunks = chunks.Where(c => string.Equals(c.Location.HeadingPath, "!!!", StringComparison.Ordinal)).ToList();
+            Assert.Equal(2, punctuationChunks.Count);
+            Assert.All(punctuationChunks, c => Assert.StartsWith("heading-", c.Location.HeadingSlug ?? string.Empty, StringComparison.Ordinal));
+            Assert.NotEqual(punctuationChunks[0].Location.HeadingSlug, punctuationChunks[1].Location.HeadingSlug);
+
+            var nonAsciiChunk = chunks.Single(c => string.Equals(c.Location.HeadingPath, "ążźć", StringComparison.Ordinal));
+            Assert.StartsWith("heading-", nonAsciiChunk.Location.HeadingSlug ?? string.Empty, StringComparison.Ordinal);
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_CanReadPdf() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".pdf");
+        try {
+            var pdf = PdfDocument.Create(new PdfOptions {
+                PageWidth = 420,
+                PageHeight = 360,
+                MarginLeft = 36,
+                MarginRight = 36,
+                MarginTop = 36,
+                MarginBottom = 36,
+                DefaultFontSize = 10
+            });
+            pdf.H1("PDF Title");
+            pdf.Paragraph(p => p.Text("This is a PDF body."));
+            pdf.Save(path);
+
+            var chunks = OfficeIMO.Reader.Tests.ReaderTestReaders.All.Read(path).ToList();
+            Assert.NotEmpty(chunks);
+            Assert.Contains(chunks, c => c.Kind == ReaderInputKind.Pdf);
+            Assert.Contains(chunks, c => c.Location.Page.HasValue && c.Location.Page.Value >= 1);
+            var pdfChunk = Assert.Single(chunks, c => c.Kind == ReaderInputKind.Pdf);
+            Assert.NotNull(pdfChunk.Markdown);
+            Assert.Contains("# PDF Title", pdfChunk.Markdown, StringComparison.Ordinal);
+            Assert.Contains("ThisisaPDFbody.", NormalizeWhitespace(pdfChunk.Markdown!), StringComparison.Ordinal);
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_ReadFolder_IsDeterministicWithMaxFiles() {
+        var folder = Path.Combine(Path.GetTempPath(), "officeimo-reader-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        var a = Path.Combine(folder, "a.md");
+        var b = Path.Combine(folder, "b.md");
+
+        try {
+            File.WriteAllText(a, "alpha");
+            File.WriteAllText(b, "beta");
+
+            var chunks = OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadFolder(
+                folderPath: folder,
+                folderOptions: new ReaderFolderOptions {
+                    Recurse = false,
+                    MaxFiles = 1,
+                    DeterministicOrder = true
+                }).ToList();
+
+            Assert.NotEmpty(chunks);
+            Assert.All(chunks, c => Assert.Contains("a.md", c.Location.Path ?? string.Empty, StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(chunks, c => (c.Text ?? string.Empty).Contains("beta", StringComparison.OrdinalIgnoreCase));
+        } finally {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_ReadFolder_SkipsBrokenFilesAndContinues() {
+        var folder = Path.Combine(Path.GetTempPath(), "officeimo-reader-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        var badDocx = Path.Combine(folder, "broken.docx");
+        var goodMarkdown = Path.Combine(folder, "good.md");
+
+        try {
+            // Not a real DOCX package; this should fail to parse and be skipped.
+            File.WriteAllText(badDocx, "not-a-zip-package");
+            File.WriteAllText(goodMarkdown, "# Ok\n\nBody");
+
+            var chunks = OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadFolder(
+                folderPath: folder,
+                folderOptions: new ReaderFolderOptions {
+                    Recurse = false,
+                    MaxFiles = 10,
+                    DeterministicOrder = true
+                }).ToList();
+
+            Assert.NotEmpty(chunks);
+            Assert.Contains(chunks, c => c.Kind == ReaderInputKind.Markdown && (c.Text ?? string.Empty).Contains("Body", StringComparison.Ordinal));
+            Assert.Contains(chunks, c =>
+                c.Kind == ReaderInputKind.Unknown &&
+                string.Equals(c.Location.Path, badDocx, StringComparison.OrdinalIgnoreCase) &&
+                (c.Warnings?.Any(w => w.Contains("read error", StringComparison.OrdinalIgnoreCase)) ?? false));
+        } finally {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_ReadFolder_RespectsRecursionAndExtensionFilter() {
+        var folder = Path.Combine(Path.GetTempPath(), "officeimo-reader-" + Guid.NewGuid().ToString("N"));
+        var nested = Path.Combine(folder, "nested");
+        Directory.CreateDirectory(folder);
+        Directory.CreateDirectory(nested);
+
+        var rootMarkdown = Path.Combine(folder, "root.md");
+        var nestedMarkdown = Path.Combine(nested, "nested.md");
+        var nestedText = Path.Combine(nested, "ignored.txt");
+
+        try {
+            File.WriteAllText(rootMarkdown, "# Root");
+            File.WriteAllText(nestedMarkdown, "# Nested");
+            File.WriteAllText(nestedText, "Ignore me");
+
+            var noRecurse = OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadFolder(
+                folderPath: folder,
+                folderOptions: new ReaderFolderOptions {
+                    Recurse = false,
+                    Extensions = new[] { ".md" },
+                    DeterministicOrder = true
+                }).ToList();
+
+            Assert.Contains(noRecurse, c => string.Equals(c.Location.Path, rootMarkdown, StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(noRecurse, c => string.Equals(c.Location.Path, nestedMarkdown, StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(noRecurse, c => string.Equals(c.Location.Path, nestedText, StringComparison.OrdinalIgnoreCase));
+
+            var recurse = OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadFolder(
+                folderPath: folder,
+                folderOptions: new ReaderFolderOptions {
+                    Recurse = true,
+                    Extensions = new[] { ".md" },
+                    DeterministicOrder = true
+                }).ToList();
+
+            Assert.Contains(recurse, c => string.Equals(c.Location.Path, rootMarkdown, StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(recurse, c => string.Equals(c.Location.Path, nestedMarkdown, StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(recurse, c => string.Equals(c.Location.Path, nestedText, StringComparison.OrdinalIgnoreCase));
+        } finally {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_ReadFolder_EmitsWarningWhenFileExceedsMaxInputBytes() {
+        var folder = Path.Combine(Path.GetTempPath(), "officeimo-reader-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+
+        var smallMarkdown = Path.Combine(folder, "small.md");
+        var largeMarkdown = Path.Combine(folder, "large.md");
+
+        try {
+            File.WriteAllText(smallMarkdown, "# Small\n\nok");
+            File.WriteAllText(largeMarkdown, new string('x', 1024));
+
+            var chunks = OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadFolder(
+                folderPath: folder,
+                folderOptions: new ReaderFolderOptions {
+                    Recurse = false,
+                    DeterministicOrder = true
+                },
+                options: new ReaderOptions {
+                    MaxInputBytes = 128
+                }).ToList();
+
+            Assert.Contains(chunks, c => string.Equals(c.Location.Path, smallMarkdown, StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(chunks, c =>
+                c.Kind == ReaderInputKind.Unknown &&
+                string.Equals(c.Location.Path, largeMarkdown, StringComparison.OrdinalIgnoreCase) &&
+                (c.Warnings?.Any(w => w.Contains("MaxInputBytes", StringComparison.OrdinalIgnoreCase)) ?? false));
+        } finally {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_ReadFolderDetailed_ReturnsSummaryAndFileStatuses() {
+        var folder = Path.Combine(Path.GetTempPath(), "officeimo-reader-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+
+        var goodMarkdown = Path.Combine(folder, "good.md");
+        var badDocx = Path.Combine(folder, "broken.docx");
+
+        try {
+            File.WriteAllText(goodMarkdown, "# Good\n\nBody");
+            File.WriteAllText(badDocx, "not-a-zip-package");
+
+            var result = OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadFolderDetailed(
+                folderPath: folder,
+                folderOptions: new ReaderFolderOptions {
+                    Recurse = false,
+                    DeterministicOrder = true
+                },
+                options: new ReaderOptions {
+                    ComputeHashes = true
+                },
+                includeChunks: true);
+
+            Assert.NotNull(result);
+            Assert.True(result.FilesScanned >= 2);
+            Assert.True(result.FilesParsed >= 1);
+            Assert.True(result.FilesSkipped >= 1);
+            Assert.NotEmpty(result.Files);
+            Assert.NotEmpty(result.Chunks);
+
+            var good = result.Files.FirstOrDefault(f => string.Equals(f.Path, goodMarkdown, StringComparison.OrdinalIgnoreCase));
+            Assert.NotNull(good);
+            Assert.True(good!.Parsed);
+            Assert.False(string.IsNullOrWhiteSpace(good.SourceId));
+            Assert.False(string.IsNullOrWhiteSpace(good.SourceHash));
+
+            var bad = result.Files.FirstOrDefault(f => string.Equals(f.Path, badDocx, StringComparison.OrdinalIgnoreCase));
+            Assert.NotNull(bad);
+            Assert.False(bad!.Parsed);
+            Assert.True((bad.Warnings?.Count ?? 0) > 0);
+            Assert.Contains(bad.Warnings!, w => w.Contains("read error", StringComparison.OrdinalIgnoreCase));
+        } finally {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_ReadFolder_ProgressCallback_EmitsLifecycleEvents() {
+        var folder = Path.Combine(Path.GetTempPath(), "officeimo-reader-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        var goodMarkdown = Path.Combine(folder, "good.md");
+        var badDocx = Path.Combine(folder, "broken.docx");
+        var events = new System.Collections.Generic.List<ReaderProgress>();
+
+        try {
+            File.WriteAllText(goodMarkdown, "# Good\n\nBody");
+            File.WriteAllText(badDocx, "not-a-zip-package");
+
+            var chunks = OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadFolder(
+                folderPath: folder,
+                folderOptions: new ReaderFolderOptions {
+                    Recurse = false,
+                    DeterministicOrder = true
+                },
+                options: new ReaderOptions(),
+                onProgress: p => events.Add(p)).ToList();
+
+            Assert.NotEmpty(chunks);
+            Assert.NotEmpty(events);
+            Assert.Contains(events, e => e.Kind == ReaderProgressEventKind.FileStarted);
+            Assert.Contains(events, e => e.Kind == ReaderProgressEventKind.FileCompleted);
+            Assert.Contains(events, e => e.Kind == ReaderProgressEventKind.FileSkipped);
+            Assert.Contains(events, e => e.Kind == ReaderProgressEventKind.Completed);
+
+            var final = events.Last();
+            Assert.Equal(ReaderProgressEventKind.Completed, final.Kind);
+            Assert.True(final.FilesScanned >= 2);
+            Assert.True(final.FilesParsed >= 1);
+            Assert.True(final.FilesSkipped >= 1);
+        } finally {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_Read_EmitsSourceAndChunkMetadata() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
+        try {
+            File.WriteAllText(path, "# Title\n\nBody");
+
+            var chunks = OfficeIMO.Reader.Tests.ReaderTestReaders.All.Read(path, new ReaderOptions { ComputeHashes = true }).ToList();
+            Assert.NotEmpty(chunks);
+            Assert.All(chunks, c => {
+                Assert.False(string.IsNullOrWhiteSpace(c.SourceId));
+                Assert.False(string.IsNullOrWhiteSpace(c.SourceHash));
+                Assert.False(string.IsNullOrWhiteSpace(c.ChunkHash));
+                Assert.True(c.TokenEstimate.HasValue && c.TokenEstimate.Value >= 1);
+                Assert.True(c.SourceLengthBytes.HasValue && c.SourceLengthBytes.Value > 0);
+            });
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_ReadFolderDocuments_ReturnsPerFilePayloadsForDatabaseIngestion() {
+        var folder = Path.Combine(Path.GetTempPath(), "officeimo-reader-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+
+        var goodMarkdown = Path.Combine(folder, "good.md");
+        var badDocx = Path.Combine(folder, "broken.docx");
+
+        try {
+            File.WriteAllText(goodMarkdown, "# Good\n\nBody");
+            File.WriteAllText(badDocx, "not-a-zip-package");
+
+            var docs = OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadFolderDocuments(
+                folderPath: folder,
+                folderOptions: new ReaderFolderOptions {
+                    Recurse = false,
+                    DeterministicOrder = true
+                },
+                options: new ReaderOptions {
+                    ComputeHashes = true
+                }).ToList();
+
+            Assert.NotEmpty(docs);
+            Assert.True(docs.Count >= 2);
+
+            var good = docs.FirstOrDefault(d => string.Equals(d.Path, goodMarkdown, StringComparison.OrdinalIgnoreCase));
+            Assert.NotNull(good);
+            Assert.True(good!.Parsed);
+            Assert.False(string.IsNullOrWhiteSpace(good.SourceId));
+            Assert.False(string.IsNullOrWhiteSpace(good.SourceHash));
+            Assert.True(good.ChunksProduced > 0);
+            Assert.True(good.TokenEstimateTotal > 0);
+            Assert.NotEmpty(good.Chunks);
+
+            var bad = docs.FirstOrDefault(d => string.Equals(d.Path, badDocx, StringComparison.OrdinalIgnoreCase));
+            Assert.NotNull(bad);
+            Assert.False(bad!.Parsed);
+            Assert.Equal(0, bad.ChunksProduced);
+            Assert.Equal(0, bad.TokenEstimateTotal);
+            Assert.Empty(bad.Chunks);
+            Assert.True((bad.Warnings?.Count ?? 0) > 0);
+            Assert.Contains(bad.Warnings!, w => w.Contains("read error", StringComparison.OrdinalIgnoreCase));
+        } finally {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_ReadFolderDocuments_ProgressCallback_EmitsCompletedWhenMaxTotalBytesStopsEnumeration() {
+        var folder = Path.Combine(Path.GetTempPath(), "officeimo-reader-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        var firstMarkdown = Path.Combine(folder, "a.md");
+        var secondMarkdown = Path.Combine(folder, "b.md");
+        var events = new System.Collections.Generic.List<ReaderProgress>();
+
+        try {
+            File.WriteAllText(firstMarkdown, "# A\n\nalpha");
+            File.WriteAllText(secondMarkdown, "# B\n\nbeta");
+
+            var documents = OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadFolderDocuments(
+                folderPath: folder,
+                folderOptions: new ReaderFolderOptions {
+                    Recurse = false,
+                    DeterministicOrder = true,
+                    MaxTotalBytes = new FileInfo(firstMarkdown).Length
+                },
+                options: new ReaderOptions(),
+                onProgress: p => events.Add(p)).ToList();
+
+            Assert.NotEmpty(documents);
+            Assert.Contains(events, e => e.Kind == ReaderProgressEventKind.FileSkipped && (e.Message?.Contains("MaxTotalBytes", StringComparison.OrdinalIgnoreCase) ?? false));
+            Assert.Single(events, e => e.Kind == ReaderProgressEventKind.Completed);
+        } finally {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_ReadFolderDocuments_SkipsOverBudgetFilesBeforeInvokingTheirHandler() {
+        const string extension = ".budgetix";
+        string folder = Path.Combine(Path.GetTempPath(), "officeimo-reader-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        string acceptedPath = Path.Combine(folder, "a" + extension);
+        string skippedPath = Path.Combine(folder, "b" + extension);
+        int handlerInvocations = 0;
+
+        try {
+            File.WriteAllText(acceptedPath, "first");
+            File.WriteAllText(skippedPath, "second file");
+            OfficeDocumentReader reader = new OfficeDocumentReaderBuilder()
+                .AddHandler(new ReaderHandlerRegistration {
+                    Id = "officeimo.tests.folder-budget",
+                    Kind = ReaderInputKind.Text,
+                    Extensions = new[] { extension },
+                    ReadPath = (path, _, cancellationToken) => {
+                        handlerInvocations++;
+                        cancellationToken.ThrowIfCancellationRequested();
+                        return new[] {
+                            new ReaderChunk {
+                                Id = Path.GetFileName(path),
+                                Kind = ReaderInputKind.Text,
+                                Text = File.ReadAllText(path)
+                            }
+                        };
+                    }
+                })
+                .Build();
+
+            IReadOnlyList<ReaderSourceDocument> documents = reader.ReadFolderDocuments(
+                folder,
+                new ReaderFolderOptions {
+                    Recurse = false,
+                    DeterministicOrder = true,
+                    MaxTotalBytes = new FileInfo(acceptedPath).Length
+                }).ToArray();
+
+            Assert.Equal(2, documents.Count);
+            Assert.Equal(1, handlerInvocations);
+            Assert.True(documents[0].Parsed);
+            Assert.False(documents[1].Parsed);
+            Assert.Contains("before parsing", Assert.Single(documents[1].Warnings!),
+                StringComparison.OrdinalIgnoreCase);
+        } finally {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_ReadFolderDocuments_ProgressCallback_UsesZeroChunkCountForSkippedFiles() {
+        var folder = Path.Combine(Path.GetTempPath(), "officeimo-reader-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        var largeMarkdown = Path.Combine(folder, "large.md");
+        var events = new List<ReaderProgress>();
+
+        try {
+            File.WriteAllText(largeMarkdown, new string('x', 512));
+
+            var documents = OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadFolderDocuments(
+                folderPath: folder,
+                folderOptions: new ReaderFolderOptions {
+                    Recurse = false,
+                    DeterministicOrder = true
+                },
+                options: new ReaderOptions {
+                    MaxInputBytes = 128
+                },
+                onProgress: p => events.Add(p)).ToList();
+
+            var document = Assert.Single(documents);
+            Assert.False(document.Parsed);
+            Assert.Equal(0, document.ChunksProduced);
+
+            var skippedEvent = Assert.Single(events, e =>
+                e.Kind == ReaderProgressEventKind.FileSkipped &&
+                string.Equals(e.Path, largeMarkdown, StringComparison.OrdinalIgnoreCase));
+
+            Assert.Equal(0, skippedEvent.CurrentFileChunks);
+            Assert.Contains("MaxInputBytes", skippedEvent.Message!, StringComparison.OrdinalIgnoreCase);
+        } finally {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_ReadFolderDocuments_SizeSkippedFiles_DoNotComputeSourceHash() {
+        var folder = Path.Combine(Path.GetTempPath(), "officeimo-reader-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        var largeMarkdown = Path.Combine(folder, "large.md");
+
+        try {
+            File.WriteAllText(largeMarkdown, new string('x', 512));
+
+            var document = Assert.Single(OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadFolderDocuments(
+                folderPath: folder,
+                folderOptions: new ReaderFolderOptions {
+                    Recurse = false,
+                    DeterministicOrder = true
+                },
+                options: new ReaderOptions {
+                    ComputeHashes = true,
+                    MaxInputBytes = 128
+                }));
+
+            Assert.False(document.Parsed);
+            Assert.Null(document.SourceHash);
+            Assert.Contains("MaxInputBytes", document.Warnings![0], StringComparison.OrdinalIgnoreCase);
+        } finally {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_ReadPathDocumentsDetailed_CanReadSingleFile() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
+
+        try {
+            File.WriteAllText(path, "# Title\n\nBody");
+
+            var result = OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadPathDocumentsDetailed(
+                path,
+                options: new ReaderOptions {
+                    ComputeHashes = true
+                },
+                includeDocumentChunks: true,
+                maxReturnedChunks: 10);
+
+            Assert.NotNull(result);
+            Assert.False(result.Truncated);
+            Assert.Single(result.Files);
+            Assert.Single(result.Documents);
+            Assert.Equal(1, result.FilesScanned);
+            Assert.Equal(1, result.FilesParsed);
+            Assert.Equal(0, result.FilesSkipped);
+            Assert.True(result.ChunksProduced >= 1);
+            Assert.True(result.ChunksReturned >= 1);
+            Assert.True(result.TokenEstimateReturned > 0);
+
+            var document = result.Documents[0];
+            Assert.True(document.Parsed);
+            Assert.Equal(path, document.Path, ignoreCase: true);
+            Assert.False(string.IsNullOrWhiteSpace(document.SourceId));
+            Assert.False(string.IsNullOrWhiteSpace(document.SourceHash));
+            Assert.NotEmpty(document.Chunks);
+            Assert.All(document.Chunks, chunk => Assert.Equal(document.SourceHash, chunk.SourceHash));
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_ReadPathDocumentsDetailed_SkipsOversizedSingleFileInsteadOfThrowing() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
+
+        try {
+            File.WriteAllText(path, "# Title\n\nBody");
+
+            var result = OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadPathDocumentsDetailed(
+                path,
+                options: new ReaderOptions {
+                    MaxInputBytes = 8,
+                    ComputeHashes = true
+                },
+                includeDocumentChunks: true);
+
+            Assert.NotNull(result);
+            Assert.Single(result.Files);
+            Assert.Single(result.Documents);
+            Assert.Equal(1, result.FilesScanned);
+            Assert.Equal(0, result.FilesParsed);
+            Assert.Equal(1, result.FilesSkipped);
+            Assert.Equal(0, result.ChunksProduced);
+            Assert.Equal(0, result.ChunksReturned);
+
+            var document = result.Documents[0];
+            Assert.False(document.Parsed);
+            Assert.Empty(document.Chunks);
+            Assert.Null(document.SourceHash);
+            Assert.True((document.Warnings?.Any(w => w.Contains("MaxInputBytes", StringComparison.OrdinalIgnoreCase)) ?? false));
+            Assert.True((result.Warnings?.Any(w => w.Contains("MaxInputBytes", StringComparison.OrdinalIgnoreCase)) ?? false));
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_ReadPathDocumentsDetailed_SkipsMalformedLegacyDocSingleFileWithoutComputingSourceHash() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".doc");
+
+        try {
+            File.WriteAllText(path, "legacy-binary-placeholder");
+
+            var result = OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadPathDocumentsDetailed(
+                path,
+                options: new ReaderOptions {
+                    ComputeHashes = true
+                },
+                includeDocumentChunks: false);
+
+            Assert.NotNull(result);
+            Assert.Single(result.Files);
+            Assert.Single(result.Documents);
+            Assert.Equal(1, result.FilesScanned);
+            Assert.Equal(0, result.FilesParsed);
+            Assert.Equal(1, result.FilesSkipped);
+
+            var document = result.Documents[0];
+            Assert.False(document.Parsed);
+            Assert.Null(document.SourceHash);
+            Assert.NotEmpty(document.Warnings ?? Array.Empty<string>());
+            Assert.All(document.Warnings!, warning => Assert.Contains("Skipped", warning, StringComparison.OrdinalIgnoreCase));
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_ReadPathDocumentsDetailed_RespectsReturnedChunkBudgetAcrossFolder() {
+        var folder = Path.Combine(Path.GetTempPath(), "officeimo-reader-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+
+        try {
+            File.WriteAllText(Path.Combine(folder, "a.md"), "# A\n\nalpha");
+            File.WriteAllText(Path.Combine(folder, "b.md"), "# B\n\nbeta");
+
+            var result = OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadPathDocumentsDetailed(
+                folder,
+                folderOptions: new ReaderFolderOptions {
+                    Recurse = false,
+                    DeterministicOrder = true
+                },
+                options: new ReaderOptions {
+                    ComputeHashes = true
+                },
+                includeDocumentChunks: true,
+                maxReturnedChunks: 1);
+
+            Assert.NotNull(result);
+            Assert.True(result.Truncated);
+            Assert.Equal(2, result.FilesScanned);
+            Assert.Equal(2, result.FilesParsed);
+            Assert.Equal(0, result.FilesSkipped);
+            Assert.Equal(2, result.Documents.Count);
+            Assert.True(result.ChunksProduced >= 2);
+            Assert.Equal(1, result.ChunksReturned);
+            Assert.True(result.TokenEstimateReturned > 0);
+            Assert.Contains(result.Warnings ?? Array.Empty<string>(), w => w.Contains("MaxReturnedChunks", StringComparison.OrdinalIgnoreCase));
+
+            Assert.Single(result.Documents[0].Chunks);
+            Assert.Empty(result.Documents[1].Chunks);
+            Assert.True((result.Documents[1].Warnings?.Any(w => w.Contains("MaxReturnedChunks", StringComparison.OrdinalIgnoreCase)) ?? false));
+        } finally {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_ReadPathDocumentsDetailed_ReadsSingleFileAndRespectsReturnedChunkBudget() {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
+        try {
+            File.WriteAllText(path, "# Top" + Environment.NewLine + Environment.NewLine + "Paragraph 1." + Environment.NewLine + Environment.NewLine + "## Child" + Environment.NewLine + Environment.NewLine + "Paragraph 2.");
+
+            var result = OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadPathDocumentsDetailed(
+                path: path,
+                options: new ReaderOptions {
+                    ComputeHashes = true
+                },
+                includeDocumentChunks: true,
+                maxReturnedChunks: 1);
+
+            Assert.Single(result.Files);
+            Assert.Single(result.Documents);
+            Assert.Equal(1, result.FilesScanned);
+            Assert.Equal(1, result.FilesParsed);
+            Assert.Equal(0, result.FilesSkipped);
+            Assert.True(result.ChunksProduced >= 2);
+            Assert.Equal(1, result.ChunksReturned);
+            Assert.True(result.TokenEstimateReturned > 0);
+            Assert.True(result.Truncated);
+
+            var document = result.Documents[0];
+            Assert.True(document.Parsed);
+            Assert.True(document.ChunksProduced >= 2);
+            Assert.Single(document.Chunks);
+            Assert.False(string.IsNullOrWhiteSpace(document.SourceId));
+            Assert.False(string.IsNullOrWhiteSpace(document.SourceHash));
+            Assert.True((document.Warnings?.Any(w => w.Contains("MaxReturnedChunks", StringComparison.OrdinalIgnoreCase)) ?? false));
+            Assert.Contains(result.Warnings ?? Array.Empty<string>(), w => w.Contains("MaxReturnedChunks", StringComparison.OrdinalIgnoreCase));
+        } finally {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_ReadPathDocumentsDetailed_CanReturnDocumentSummariesWithoutChunkPayloads() {
+        var folder = Path.Combine(Path.GetTempPath(), "officeimo-reader-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+
+        var goodMarkdown = Path.Combine(folder, "good.md");
+        var badDocx = Path.Combine(folder, "broken.docx");
+
+        try {
+            File.WriteAllText(goodMarkdown, "# Good" + Environment.NewLine + Environment.NewLine + "Body");
+            File.WriteAllText(badDocx, "not-a-zip-package");
+
+            var result = OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadPathDocumentsDetailed(
+                path: folder,
+                folderOptions: new ReaderFolderOptions {
+                    Recurse = false,
+                    DeterministicOrder = true
+                },
+                options: new ReaderOptions {
+                    ComputeHashes = true
+                },
+                includeDocumentChunks: false);
+
+            Assert.True(result.FilesScanned >= 2);
+            Assert.True(result.FilesParsed >= 1);
+            Assert.True(result.FilesSkipped >= 1);
+            Assert.Equal(0, result.ChunksReturned);
+            Assert.False(result.Truncated);
+            Assert.NotEmpty(result.Files);
+            Assert.NotEmpty(result.Documents);
+
+            var good = result.Documents.FirstOrDefault(d => string.Equals(d.Path, goodMarkdown, StringComparison.OrdinalIgnoreCase));
+            Assert.NotNull(good);
+            Assert.True(good!.Parsed);
+            Assert.True(good.ChunksProduced > 0);
+            Assert.Empty(good.Chunks);
+
+            var bad = result.Documents.FirstOrDefault(d => string.Equals(d.Path, badDocx, StringComparison.OrdinalIgnoreCase));
+            Assert.NotNull(bad);
+            Assert.False(bad!.Parsed);
+            Assert.True((bad.Warnings?.Count ?? 0) > 0);
+        } finally {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_ReadFolder_ProgressCallback_EmitsCompletedWhenMaxTotalBytesStopsEnumeration() {
+        var folder = Path.Combine(Path.GetTempPath(), "officeimo-reader-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        var firstMarkdown = Path.Combine(folder, "a.md");
+        var secondMarkdown = Path.Combine(folder, "b.md");
+        var events = new System.Collections.Generic.List<ReaderProgress>();
+
+        try {
+            File.WriteAllText(firstMarkdown, "# A\n\nalpha");
+            File.WriteAllText(secondMarkdown, "# B\n\nbeta");
+
+            var chunks = OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadFolder(
+                folderPath: folder,
+                folderOptions: new ReaderFolderOptions {
+                    Recurse = false,
+                    DeterministicOrder = true,
+                    MaxTotalBytes = new FileInfo(firstMarkdown).Length
+                },
+                options: new ReaderOptions(),
+                onProgress: p => events.Add(p)).ToList();
+
+            Assert.NotEmpty(chunks);
+            Assert.Contains(events, e => e.Kind == ReaderProgressEventKind.FileSkipped && (e.Message?.Contains("MaxTotalBytes", StringComparison.OrdinalIgnoreCase) ?? false));
+            var completedEvent = Assert.Single(events, e => e.Kind == ReaderProgressEventKind.Completed);
+            Assert.Equal(chunks.Count, completedEvent.ChunksProduced);
+        } finally {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_ReadFolder_ProgressCallback_TracksSkippedWarningChunksInCounts() {
+        var folder = Path.Combine(Path.GetTempPath(), "officeimo-reader-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        var smallMarkdown = Path.Combine(folder, "small.md");
+        var largeMarkdown = Path.Combine(folder, "large.md");
+        var events = new System.Collections.Generic.List<ReaderProgress>();
+
+        try {
+            File.WriteAllText(smallMarkdown, "# Small\n\nok");
+            File.WriteAllText(largeMarkdown, new string('x', 1024));
+
+            var chunks = OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadFolder(
+                folderPath: folder,
+                folderOptions: new ReaderFolderOptions {
+                    Recurse = false,
+                    DeterministicOrder = true
+                },
+                options: new ReaderOptions {
+                    MaxInputBytes = 128
+                },
+                onProgress: p => events.Add(p)).ToList();
+
+            var skippedEvent = Assert.Single(events, e =>
+                e.Kind == ReaderProgressEventKind.FileSkipped &&
+                string.Equals(e.Path, largeMarkdown, StringComparison.OrdinalIgnoreCase));
+
+            Assert.Equal(1, skippedEvent.CurrentFileChunks);
+
+            var completedEvent = Assert.Single(events, e => e.Kind == ReaderProgressEventKind.Completed);
+            Assert.Equal(chunks.Count, completedEvent.ChunksProduced);
+        } finally {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_ReadFolder_SizeSkippedWarningChunks_DoNotComputeSourceHash() {
+        var folder = Path.Combine(Path.GetTempPath(), "officeimo-reader-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        var largeMarkdown = Path.Combine(folder, "large.md");
+
+        try {
+            File.WriteAllText(largeMarkdown, new string('x', 512));
+
+            var warningChunk = Assert.Single(OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadFolder(
+                folderPath: folder,
+                folderOptions: new ReaderFolderOptions {
+                    Recurse = false,
+                    DeterministicOrder = true
+                },
+                options: new ReaderOptions {
+                    ComputeHashes = true,
+                    MaxInputBytes = 128
+                }));
+
+            Assert.Null(warningChunk.SourceHash);
+            Assert.Contains("MaxInputBytes", warningChunk.Warnings![0], StringComparison.OrdinalIgnoreCase);
+        } finally {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_ReadFolderDocuments_DeduplicatesRepeatedChunkWarningsAtSourceLevel() {
+        var folder = Path.Combine(Path.GetTempPath(), "officeimo-reader-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+
+        var htmlPath = Path.Combine(folder, "oversized.html");
+
+        try {
+            OfficeDocumentReader reader = new OfficeDocumentReaderBuilder().AddHtmlHandler().Build();
+
+            var html = "<html><body><p>" + new string('x', 2048) + "</p></body></html>";
+            File.WriteAllText(htmlPath, html);
+
+            var document = Assert.Single(reader.ReadFolderDocuments(
+                folderPath: folder,
+                folderOptions: new ReaderFolderOptions {
+                    Recurse = false,
+                    DeterministicOrder = true
+                },
+                options: new ReaderOptions {
+                    MaxChars = 64
+                }));
+
+            Assert.True(document.Parsed);
+            Assert.True(document.ChunksProduced >= 2);
+            Assert.NotNull(document.Warnings);
+            Assert.Single(document.Warnings!);
+            Assert.Contains("split due to MaxChars", document.Warnings![0], StringComparison.OrdinalIgnoreCase);
+        } finally {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_ReadFolderDetailed_AggregatesParsedFileWarningsWithoutDuplicates() {
+        var folder = Path.Combine(Path.GetTempPath(), "officeimo-reader-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+
+        var htmlPath = Path.Combine(folder, "oversized.html");
+
+        try {
+            OfficeDocumentReader reader = new OfficeDocumentReaderBuilder().AddHtmlHandler().Build();
+
+            var html = "<html><body><p>" + new string('x', 2048) + "</p></body></html>";
+            File.WriteAllText(htmlPath, html);
+
+            var result = reader.ReadFolderDetailed(
+                folderPath: folder,
+                folderOptions: new ReaderFolderOptions {
+                    Recurse = false,
+                    DeterministicOrder = true
+                },
+                options: new ReaderOptions {
+                    MaxChars = 64
+                },
+                includeChunks: false);
+
+            var file = Assert.Single(result.Files);
+            Assert.True(file.Parsed);
+            Assert.True(file.ChunksProduced >= 2);
+            Assert.NotNull(file.Warnings);
+            Assert.Single(file.Warnings!);
+            Assert.Contains("split due to MaxChars", file.Warnings![0], StringComparison.OrdinalIgnoreCase);
+
+            Assert.NotNull(result.Warnings);
+            Assert.Single(result.Warnings!);
+            Assert.Contains("split due to MaxChars", result.Warnings![0], StringComparison.OrdinalIgnoreCase);
+            Assert.Empty(result.Chunks);
+            Assert.Equal(file.ChunksProduced, result.ChunksProduced);
+        } finally {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_ReadFolderDetailed_SkippedFiles_ReportWarningChunkCount() {
+        var folder = Path.Combine(Path.GetTempPath(), "officeimo-reader-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+
+        var largeMarkdown = Path.Combine(folder, "large.md");
+
+        try {
+            File.WriteAllText(largeMarkdown, new string('x', 1024));
+
+            var result = OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadFolderDetailed(
+                folderPath: folder,
+                folderOptions: new ReaderFolderOptions {
+                    Recurse = false,
+                    DeterministicOrder = true
+                },
+                options: new ReaderOptions {
+                    MaxInputBytes = 128
+                },
+                includeChunks: false);
+
+            var file = Assert.Single(result.Files);
+            Assert.False(file.Parsed);
+            Assert.Equal(1, file.ChunksProduced);
+            Assert.Equal(1, result.ChunksProduced);
+            Assert.NotNull(file.Warnings);
+            Assert.Contains("MaxInputBytes", file.Warnings![0], StringComparison.OrdinalIgnoreCase);
+        } finally {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DocumentReader_ReadFolderDetailed_IncludeChunksTrue_KeepsSummaryChunkCountAlignedForSkippedFiles() {
+        var folder = Path.Combine(Path.GetTempPath(), "officeimo-reader-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+
+        var largeMarkdown = Path.Combine(folder, "large.md");
+
+        try {
+            File.WriteAllText(largeMarkdown, new string('x', 1024));
+
+            var result = OfficeIMO.Reader.Tests.ReaderTestReaders.All.ReadFolderDetailed(
+                folderPath: folder,
+                folderOptions: new ReaderFolderOptions {
+                    Recurse = false,
+                    DeterministicOrder = true
+                },
+                options: new ReaderOptions {
+                    MaxInputBytes = 128
+                },
+                includeChunks: true);
+
+            var file = Assert.Single(result.Files);
+            Assert.False(file.Parsed);
+            Assert.Single(result.Chunks);
+            Assert.Equal(1, file.ChunksProduced);
+            Assert.Equal(result.Chunks.Count, result.ChunksProduced);
+            Assert.Contains("MaxInputBytes", result.Chunks[0].Warnings![0], StringComparison.OrdinalIgnoreCase);
+        } finally {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    private static string GetRepositoryPath(params string[] parts) {
+        DirectoryInfo? directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory != null) {
+            string candidate = Path.Combine(new[] { directory.FullName }.Concat(parts).ToArray());
+            if (File.Exists(candidate) || Directory.Exists(candidate)) {
+                return candidate;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new DirectoryNotFoundException("Could not locate repository path: " + Path.Combine(parts));
+    }
+
+    private static string NormalizeWhitespace(string text) {
+        return new string(text.Where(ch => !char.IsWhiteSpace(ch)).ToArray());
+    }
+
+    private static int FindReaderCompoundDirectoryEntry(byte[] bytes,
+        string name) {
+        byte[] encoded = Encoding.Unicode.GetBytes(name + '\0');
+        for (int offset = 512; offset <= bytes.Length - encoded.Length;
+             offset += 128) {
+            if (bytes.AsSpan(offset, encoded.Length)
+                .SequenceEqual(encoded)) return offset;
+        }
+        throw new InvalidDataException(
+            $"The compound directory entry '{name}' was not found.");
+    }
+
+    private static uint ReadReaderCompoundUInt32(byte[] bytes, int offset) =>
+        unchecked((uint)(bytes[offset]
+            | bytes[offset + 1] << 8
+            | bytes[offset + 2] << 16
+            | bytes[offset + 3] << 24));
+
+    private static ulong ReadReaderCompoundUInt64(byte[] bytes, int offset) =>
+        ReadReaderCompoundUInt32(bytes, offset)
+        | unchecked((ulong)ReadReaderCompoundUInt32(bytes, offset + 4) << 32);
+
+    private static void WriteReaderCompoundUInt32(byte[] bytes, int offset,
+        uint value) {
+        bytes[offset] = unchecked((byte)value);
+        bytes[offset + 1] = unchecked((byte)(value >> 8));
+        bytes[offset + 2] = unchecked((byte)(value >> 16));
+        bytes[offset + 3] = unchecked((byte)(value >> 24));
+    }
+
+    private static void WriteReaderCompoundUInt64(byte[] bytes, int offset,
+        ulong value) {
+        WriteReaderCompoundUInt32(bytes, offset, unchecked((uint)value));
+        WriteReaderCompoundUInt32(bytes, offset + 4,
+            unchecked((uint)(value >> 32)));
+    }
+}

@@ -1,15 +1,17 @@
-﻿using System;
-using System.Threading.Tasks;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using OfficeIMO.Word;
+using System;
+using System.Threading.Tasks;
 using VerifyXunit;
 using Xunit;
-
-using Color = SixLabors.ImageSharp.Color;
+using Color = OfficeIMO.Drawing.OfficeColor;
 
 namespace OfficeIMO.VerifyTests.Word;
 
+/// <summary>
+/// Verifies custom and built‑in document property handling.
+/// </summary>
 public class CustomAndBuiltinPropertiesTests : VerifyTestBase {
 
     private static async Task DoTest(WordprocessingDocument document) {
@@ -21,13 +23,13 @@ public class CustomAndBuiltinPropertiesTests : VerifyTestBase {
     public async Task ValidateDocument() {
         using var document = WordDocument.Create();
         var paragraph = document.AddParagraph("Basic paragraph - Page 4");
-        paragraph.ParagraphAlignment = JustificationValues.Center;
+        paragraph.ParagraphAlignment = WordParagraphAlignment.Center;
 
         document.CustomDocumentProperties.Add("TestProperty", new WordCustomProperty { Value = DateTime.Today });
         document.CustomDocumentProperties.Add("MyName", new WordCustomProperty("Some text"));
         document.CustomDocumentProperties.Add("IsTodayGreatDay", new WordCustomProperty(true));
 
-        document.Save();
+        _ = document.ToBytes();
 
         await DoTest(document._wordprocessingDocument);
     }
@@ -40,10 +42,10 @@ public class CustomAndBuiltinPropertiesTests : VerifyTestBase {
         document.BuiltinDocumentProperties.Keywords = "word, docx, test";
 
         var paragraph = document.AddParagraph("Basic paragraph");
-        paragraph.ParagraphAlignment = JustificationValues.Center;
+        paragraph.ParagraphAlignment = WordParagraphAlignment.Center;
         paragraph.Color = Color.Red;
 
-        document.Save();
+        _ = document.ToBytes();
 
         await DoTest(document._wordprocessingDocument);
     }

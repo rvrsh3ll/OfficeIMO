@@ -1,121 +1,419 @@
+using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Wordprocessing;
+using System.Text.RegularExpressions;
 
 namespace OfficeIMO.Word {
-    public enum TableOfContentStyle {
+    /// <summary>
+    /// Defines template styles that can be used when generating a table of contents.
+    /// </summary>
+    public enum WordTableOfContentsStyle {
+        /// <summary>
+        /// Built-in layout with a heading followed by entries.
+        /// </summary>
         Template1,
+
+        /// <summary>
+        /// Alternative layout with the same structure but different identifiers.
+        /// </summary>
         Template2
     }
 
-    public class WordTableOfContent : WordElement {
+    /// <summary>
+    /// Represents a table of contents within a Word document.
+    /// </summary>
+    public partial class WordTableOfContent : WordElement {
+        private static readonly string TocLevelSwitchPattern = @"\\o\s+(?:""\d+-\d+""|&quot;\d+-\d+&quot;)";
         private readonly WordDocument _document;
         private readonly SdtBlock _sdtBlock;
 
+        /// <summary>
+        /// Exposes the underlying structured document tag for this table of contents.
+        /// </summary>
+        internal SdtBlock SdtBlock => _sdtBlock;
+
+        /// <summary>
+        /// Gets the template style used to create this table of contents.
+        /// </summary>
+        public WordTableOfContentsStyle Style { get; }
+
+        /// <summary>
+        /// Gets the minimum heading level included by the TOC field switch.
+        /// </summary>
+        public int MinLevel {
+            get {
+                var levels = GetConfiguredLevels();
+                return levels.MinLevel;
+            }
+        }
+
+        /// <summary>
+        /// Gets the maximum heading level included by the TOC field switch.
+        /// </summary>
+        public int MaxLevel {
+            get {
+                var levels = GetConfiguredLevels();
+                return levels.MaxLevel;
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets the heading text displayed for the table of contents.
+        /// </summary>
         public string Text {
             get {
-                if (_sdtBlock != null) {
-                    var paragraphs = _sdtBlock.SdtContentBlock.ChildElements.OfType<Paragraph>();
-                    foreach (var paragraph in paragraphs) {
-                        var run = paragraph.OfType<Run>().FirstOrDefault();
-                        if (run != null) {
-                            Text text = run.OfType<Text>().FirstOrDefault();
-                            if (text != null) {
-                                return text.Text;
-                            }
-                        }
-                    }
-                }
-                return "";
+                return GetTitleTextElement()?.Text ?? string.Empty;
             }
             set {
-                if (_sdtBlock != null) {
-                    var paragraphs = _sdtBlock.SdtContentBlock.ChildElements.OfType<Paragraph>();
-                    foreach (var paragraph in paragraphs) {
-                        var run = paragraph.OfType<Run>().FirstOrDefault();
-                        if (run != null) {
-                            Text text = run.OfType<Text>().FirstOrDefault();
-                            if (text != null) {
-                                text.Text = value;
-                            }
-                        }
-                    }
+                var text = GetTitleTextElement();
+                if (text != null) {
+                    text.Text = value;
                 }
             }
         }
+
+        /// <summary>
+        /// Gets or sets the text shown when the document has no entries for the table of contents.
+        /// </summary>
         public string TextNoContent {
             get {
-                if (_sdtBlock != null) {
-                    var paragraphs = _sdtBlock.SdtContentBlock.ChildElements.OfType<Paragraph>();
-                    foreach (var paragraph in paragraphs) {
-                        var simpleField = paragraph.OfType<SimpleField>().FirstOrDefault();
-                        if (simpleField != null) {
-                            var run = simpleField.OfType<Run>().FirstOrDefault();
-                            if (run != null) {
-                                Text text = run.OfType<Text>().FirstOrDefault();
-                                if (text != null) {
-                                    return text.Text;
-                                }
-                            }
+                var contentBlock = _sdtBlock?.SdtContentBlock;
+                if (contentBlock != null) {
+                    foreach (var paragraph in contentBlock.ChildElements.OfType<Paragraph>()) {
+                        var text = paragraph
+                            .OfType<SimpleField>()
+                            .FirstOrDefault()?
+                            .OfType<Run>()
+                            .FirstOrDefault()?
+                            .OfType<Text>()
+                            .FirstOrDefault()?.Text;
+                        if (text != null) {
+                            return text;
                         }
                     }
                 }
-                return "";
+                return string.Empty;
             }
             set {
-                if (_sdtBlock != null) {
-                    var paragraphs = _sdtBlock.SdtContentBlock.ChildElements.OfType<Paragraph>();
-                    foreach (var paragraph in paragraphs) {
-                        var simpleField = paragraph.OfType<SimpleField>().FirstOrDefault();
-                        if (simpleField != null) {
-                            var run = simpleField.OfType<Run>().FirstOrDefault();
-                            if (run != null) {
-                                Text text = run.OfType<Text>().FirstOrDefault();
-                                if (text != null) {
-                                    text.Text = value;
-                                }
-                            }
+                var contentBlock = _sdtBlock?.SdtContentBlock;
+                if (contentBlock != null) {
+                    foreach (var paragraph in contentBlock.ChildElements.OfType<Paragraph>()) {
+                        var text = paragraph
+                            .OfType<SimpleField>()
+                            .FirstOrDefault()?
+                            .OfType<Run>()
+                            .FirstOrDefault()?
+                            .OfType<Text>()
+                            .FirstOrDefault();
+                        if (text != null) {
+                            text.Text = value;
                         }
                     }
                 }
             }
         }
 
+        private Text? GetTitleTextElement() {
+            var contentBlock = _sdtBlock?.SdtContentBlock;
+            if (contentBlock == null) {
+                return null;
+            }
 
+            foreach (var paragraph in contentBlock.ChildElements.OfType<Paragraph>()) {
+                if (paragraph.Descendants<SimpleField>().Any()) {
+                    continue;
+                }
 
-        public WordTableOfContent(WordDocument wordDocument, TableOfContentStyle tableOfContentStyle) {
-            this._document = wordDocument;
-            this._sdtBlock = GetStyle(tableOfContentStyle);
-            this._document._wordprocessingDocument.MainDocumentPart.Document.Body.Append(_sdtBlock);
+                var text = paragraph.Descendants<Text>().FirstOrDefault();
+                if (text != null) {
+                    return text;
+                }
+            }
 
-            //var currentStdBlock = this._document._wordprocessingDocument.MainDocumentPart.Document.Body.OfType<SdtBlock>();
-            //if (currentStdBlock.ToList().Count > 0) {
-            //    this._document._wordprocessingDocument.MainDocumentPart.Document.Body.InsertAt(_sdtBlock, 1);
-            //} else {
-            //    this._document._wordprocessingDocument.MainDocumentPart.Document.Body.InsertAt(_sdtBlock, 0);
-            //}
+            return null;
         }
 
-        public WordTableOfContent(WordDocument wordDocument, SdtBlock sdtBlock) {
-            this._document = wordDocument;
-            this._sdtBlock = sdtBlock;
+
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="WordTableOfContent"/> class and appends it to the document body.
+        /// </summary>
+        /// <param name="wordDocument">Parent document where the table of contents will be created.</param>
+        /// <param name="tableOfContentStyle">Template style used to generate the table of contents.</param>
+        /// <param name="minLevel">Minimum heading level to include (1..9).</param>
+        /// <param name="maxLevel">Maximum heading level to include (1..9).</param>
+        public WordTableOfContent(WordDocument wordDocument, WordTableOfContentsStyle tableOfContentStyle, int minLevel = 1, int maxLevel = 3)
+            : this(
+                wordDocument,
+                PrepareTemplate(wordDocument, tableOfContentStyle),
+                tableOfContentStyle,
+                appendToBody: true,
+                queueUpdateOnOpen: true,
+                minLevel: minLevel,
+                maxLevel: maxLevel) {
         }
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="WordTableOfContent"/> class using an existing structured document tag.
+        /// </summary>
+        /// <param name="wordDocument">Parent document that owns the table of contents.</param>
+        /// <param name="sdtBlock">Structured document tag representing the table of contents.</param>
+        internal WordTableOfContent(WordDocument wordDocument, SdtBlock sdtBlock)
+            : this(wordDocument, sdtBlock, WordTableOfContentsStyle.Template1, appendToBody: false, queueUpdateOnOpen: true) {
+        }
+
+        internal WordTableOfContent(WordDocument wordDocument, SdtBlock sdtBlock, bool queueUpdateOnOpen)
+            : this(wordDocument, sdtBlock, WordTableOfContentsStyle.Template1, appendToBody: false, queueUpdateOnOpen: queueUpdateOnOpen) {
+        }
+
+        private WordTableOfContent(
+            WordDocument wordDocument,
+            SdtBlock sdtBlock,
+            WordTableOfContentsStyle style,
+            bool appendToBody,
+            bool queueUpdateOnOpen,
+            int? minLevel = null,
+            int? maxLevel = null) {
+            this._document = wordDocument ?? throw new ArgumentNullException(nameof(wordDocument));
+            this._sdtBlock = sdtBlock ?? throw new ArgumentNullException(nameof(sdtBlock));
+            this.Style = style;
+
+            if (appendToBody) {
+                this._document.AppendBlockToBody(_sdtBlock);
+            }
+
+            if (minLevel.HasValue && maxLevel.HasValue) {
+                var (normalizedMin, normalizedMax) = NormalizeLevels(minLevel.Value, maxLevel.Value);
+                // Avoid mutating the template when the caller requests the default 1-3 range.
+                if (normalizedMin != 1 || normalizedMax != 3) {
+                    ConfigureLevels(normalizedMin, normalizedMax);
+                }
+            }
+
+            if (queueUpdateOnOpen) {
+                QueueUpdateOnOpen();
+            }
+        }
+
+        /// <summary>
+        /// Flags the document to update this table of contents when the file is opened.
+        /// </summary>
         public void Update() {
-            this._document.Settings.UpdateFieldsOnOpen = true;
+            QueueUpdateOnOpen(force: true);
         }
 
-        private static SdtBlock GetStyle(TableOfContentStyle style) {
+        internal void QueueUpdateOnOpen(bool force = false) {
+            if (force) {
+                MarkFieldsAsDirty();
+            } else if (!MarkFieldsAsDirty()) {
+                return;
+            }
+
+            this._document.Settings.UpdateFieldsOnOpen = true;
+            this._document.NotifyTableOfContentUpdateQueued();
+        }
+
+        /// <summary>
+        /// Updates the heading levels included by the TOC field switch (for example: \o "1-5").
+        /// </summary>
+        /// <param name="minLevel">Minimum heading level to include (1..9).</param>
+        /// <param name="maxLevel">Maximum heading level to include (1..9).</param>
+        public void SetLevels(int minLevel, int maxLevel) {
+            ConfigureLevels(minLevel, maxLevel);
+            QueueUpdateOnOpen(force: true);
+        }
+
+        /// <summary>
+        /// Marks all fields that participate in the table of contents as dirty so Word refreshes them on open.
+        /// </summary>
+        /// <returns>
+        /// <c>true</c> when an update should be queued. This includes corrupted tables of contents that no longer expose
+        /// any fields so the caller can still request a refresh without throwing.
+        /// </returns>
+        private bool MarkFieldsAsDirty() {
+            if (_sdtBlock?.SdtContentBlock == null) {
+                return false;
+            }
+
+            var fieldsFound = false;
+            var marked = false;
+
+            foreach (var simpleField in _sdtBlock.Descendants<SimpleField>()) {
+                fieldsFound = true;
+                if (simpleField.Dirty?.Value != true) {
+                    simpleField.Dirty = true;
+                    marked = true;
+                }
+            }
+
+            foreach (var fieldChar in _sdtBlock.Descendants<FieldChar>()) {
+                fieldsFound = true;
+                if (fieldChar.Dirty?.Value != true) {
+                    fieldChar.Dirty = true;
+                    marked = true;
+                }
+            }
+
+            return fieldsFound ? marked : true;
+        }
+
+        private void ConfigureLevels(int minLevel, int maxLevel) {
+            var (normalizedMin, normalizedMax) = NormalizeLevels(minLevel, maxLevel);
+            var levelSwitch = $"\\o \"{normalizedMin}-{normalizedMax}\"";
+
+            foreach (var simpleField in _sdtBlock.Descendants<SimpleField>()) {
+                var instruction = simpleField.Instruction?.Value ?? simpleField.Instruction;
+                if (string.IsNullOrWhiteSpace(instruction)) {
+                    continue;
+                }
+
+                if (instruction!.IndexOf("TOC", StringComparison.OrdinalIgnoreCase) < 0) {
+                    continue;
+                }
+
+                var instructionText = instruction!;
+                var hadLevelSwitch = Regex.IsMatch(instructionText, TocLevelSwitchPattern);
+                string updated;
+                if (hadLevelSwitch) {
+                    updated = Regex.Replace(instructionText, TocLevelSwitchPattern, levelSwitch);
+                } else {
+                    updated = instructionText.TrimEnd() + " " + levelSwitch + " ";
+                }
+
+                simpleField.Instruction = updated;
+                simpleField.Dirty = true;
+            }
+
+            // Word often converts TOC fields into complex fields (FieldChar/FieldCode).
+            // Update those instructions as well so SetLevels works on existing documents.
+            foreach (var fieldCode in _sdtBlock.Descendants<FieldCode>()) {
+                var instructionText = fieldCode.Text;
+                if (string.IsNullOrWhiteSpace(instructionText)) {
+                    continue;
+                }
+
+                if (instructionText.IndexOf("TOC", StringComparison.OrdinalIgnoreCase) < 0) {
+                    continue;
+                }
+
+                var hadLevelSwitch = Regex.IsMatch(instructionText, TocLevelSwitchPattern);
+                string updated;
+                if (hadLevelSwitch) {
+                    updated = Regex.Replace(instructionText, TocLevelSwitchPattern, levelSwitch);
+                } else {
+                    updated = instructionText.TrimEnd() + " " + levelSwitch + " ";
+                }
+
+                fieldCode.Text = updated;
+            }
+
+            foreach (var fieldChar in _sdtBlock.Descendants<FieldChar>()) {
+                if (fieldChar.Dirty?.Value != true) {
+                    fieldChar.Dirty = true;
+                }
+            }
+        }
+
+        private (int MinLevel, int MaxLevel) GetConfiguredLevels() {
+            if (_sdtBlock == null) {
+                return (1, 3);
+            }
+
+            foreach (var simpleField in _sdtBlock.Descendants<SimpleField>()) {
+                string? instruction = simpleField.Instruction?.Value ?? simpleField.Instruction;
+                if (TryParseLevelSwitch(instruction, out int minLevel, out int maxLevel)) {
+                    return (minLevel, maxLevel);
+                }
+            }
+
+            foreach (var fieldCode in _sdtBlock.Descendants<FieldCode>()) {
+                if (TryParseLevelSwitch(fieldCode.Text, out int minLevel, out int maxLevel)) {
+                    return (minLevel, maxLevel);
+                }
+            }
+
+            return (1, 3);
+        }
+
+        private static bool TryParseLevelSwitch(string? instruction, out int minLevel, out int maxLevel) {
+            minLevel = 1;
+            maxLevel = 3;
+            if (string.IsNullOrWhiteSpace(instruction) ||
+                instruction!.IndexOf("TOC", StringComparison.OrdinalIgnoreCase) < 0) {
+                return false;
+            }
+
+            Match match = Regex.Match(instruction!, @"\\o\s+(?:""(?<min>\d+)-(?<max>\d+)""|&quot;(?<min>\d+)-(?<max>\d+)&quot;)");
+            if (!match.Success ||
+                !int.TryParse(match.Groups["min"].Value, out int parsedMin) ||
+                !int.TryParse(match.Groups["max"].Value, out int parsedMax)) {
+                return false;
+            }
+
+            (minLevel, maxLevel) = NormalizeLevels(parsedMin, parsedMax);
+            return true;
+        }
+
+        private static (int MinLevel, int MaxLevel) NormalizeLevels(int minLevel, int maxLevel) {
+            var min = ClampLevel(minLevel);
+            var max = ClampLevel(maxLevel);
+            if (min > max) {
+                (min, max) = (max, min);
+            }
+            return (min, max);
+        }
+
+        private static int ClampLevel(int level) {
+            if (level < 1) {
+                return 1;
+            }
+            if (level > 9) {
+                return 9;
+            }
+            return level;
+        }
+
+        /// <summary>
+        /// Deletes this table of contents from the parent document.
+        /// </summary>
+        public void Remove() {
+            _document.RemoveTableOfContent();
+        }
+
+        /// <summary>
+        /// Removes this table of contents and creates a new one in the same location.
+        /// </summary>
+        /// <returns>The newly created <see cref="WordTableOfContent"/> instance.</returns>
+        public WordTableOfContent Regenerate() {
+            return _document.RegenerateTableOfContent();
+        }
+
+        /// <summary>
+        /// Returns a predefined structured document tag matching the chosen style.
+        /// </summary>
+        /// <param name="document">Document that will own the structured document tag.</param>
+        /// <param name="style">Template identifier to retrieve.</param>
+        private static SdtBlock PrepareTemplate(WordDocument document, WordTableOfContentsStyle style) {
+            var block = GetStyle(style);
+            document.AssignNewSdtIds(block);
+            return block;
+        }
+
+        private static SdtBlock GetStyle(WordTableOfContentsStyle style) {
             switch (style) {
-                case TableOfContentStyle.Template1: return Template1;
-                case TableOfContentStyle.Template2: return Template2;
+                case WordTableOfContentsStyle.Template1: return Template1;
+                case WordTableOfContentsStyle.Template2: return Template2;
             }
             throw new ArgumentOutOfRangeException(nameof(style));
         }
+        /// <summary>
+        /// Structured document tag implementing the default table-of-contents layout.
+        /// </summary>
         private static SdtBlock Template1 {
             get {
                 SdtBlock sdtBlock1 = new SdtBlock();
 
                 SdtProperties sdtProperties1 = new SdtProperties();
-                SdtId sdtId1 = new SdtId() { Val = -619995952 };
+                SdtId sdtId1 = new SdtId();
 
                 SdtContentDocPartObject sdtContentDocPartObject1 = new SdtContentDocPartObject();
                 DocPartGallery docPartGallery1 = new DocPartGallery() { Val = "Table of Contents" };
@@ -200,13 +498,16 @@ namespace OfficeIMO.Word {
 
             }
         }
+        /// <summary>
+        /// Alternative layout used for table-of-contents generation.
+        /// </summary>
         private static SdtBlock Template2 {
             get {
 
                 SdtBlock sdtBlock1 = new SdtBlock();
 
                 SdtProperties sdtProperties1 = new SdtProperties();
-                SdtId sdtId1 = new SdtId() { Val = -909075344 };
+                SdtId sdtId1 = new SdtId();
 
                 SdtContentDocPartObject sdtContentDocPartObject1 = new SdtContentDocPartObject();
                 DocPartGallery docPartGallery1 = new DocPartGallery() { Val = "Table of Contents" };

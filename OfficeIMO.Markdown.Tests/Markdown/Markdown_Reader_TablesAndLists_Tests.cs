@@ -1,0 +1,1300 @@
+using System.Text;
+using OfficeIMO.Markdown;
+using Xunit;
+
+namespace OfficeIMO.Tests.MarkdownSuite {
+    public class Markdown_Reader_TablesAndLists_Tests {
+        [Fact]
+        public void Table_Shaped_Paragraph_Stays_Literal_When_Tables_Are_Disabled() {
+            const string md = """
+First paragraph
+| A |
+|---|
+| B |
+""";
+            var options = MarkdownReaderOptions.CreateCommonMarkProfile();
+
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md, options);
+            var paragraph = Assert.IsType<ParagraphBlock>(Assert.Single(doc.Blocks));
+
+            Assert.Equal("First paragraph \\| A \\| \\|---\\| \\| B \\|", paragraph.Inlines.RenderMarkdown());
+        }
+
+        [Fact]
+        public void Table_Parsing_Does_Not_Split_Escaped_Pipes() {
+            string md = """
+| Col1 | Col2 |
+| --- | --- |
+| a \| b | c |
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var table = Assert.IsType<TableBlock>(doc.Blocks[0]);
+            Assert.Equal(2, table.Headers.Count);
+            Assert.Single(table.Rows);
+            Assert.Equal(2, table.Rows[0].Count);
+            Assert.Equal("a | b", table.Rows[0][0]);
+        }
+
+        [Fact]
+        public void Table_Parsing_Does_Not_Split_Pipes_Inside_Code_Spans() {
+            string md = """
+| Col1 | Col2 |
+| --- | --- |
+| `a|b` | c |
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var table = Assert.IsType<TableBlock>(doc.Blocks[0]);
+            Assert.Equal(2, table.Headers.Count);
+            Assert.Single(table.Rows);
+            Assert.Equal(2, table.Rows[0].Count);
+
+            var html = doc.ToHtmlFragment();
+            Assert.Contains("<code>a|b</code>", html);
+        }
+
+        [Fact]
+        public void Table_Parsing_Does_Not_Treat_Unmatched_Single_Backticks_As_Code_Spans() {
+            string md = """
+| Col1 | Col2 |
+| --- | --- |
+| `a | b |
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var table = Assert.IsType<TableBlock>(doc.Blocks[0]);
+            Assert.Equal(2, table.Headers.Count);
+            Assert.Single(table.Rows);
+            Assert.Equal(2, table.Rows[0].Count);
+            Assert.Equal("`a", table.Rows[0][0]);
+            Assert.Equal("b", table.Rows[0][1]);
+
+            var html = doc.ToHtmlFragment();
+            Assert.DoesNotContain("<code>`a</code>", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Structured_Table_Cells_Preserve_GenericAttribute_Options_When_Reparsed() {
+            const string md = """
+| Col |
+| --- |
+| {#cell}<br># Cell |
+""";
+            var options = MarkdownReaderOptions.CreateGitHubFlavoredMarkdownProfile();
+            options.ParseTableCellBlocks = true;
+            options.GenericAttributes = true;
+
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md, options);
+            var table = Assert.IsType<TableBlock>(Assert.Single(doc.Blocks));
+            var cell = Assert.Single(Assert.Single(table.BodyRows).Cells);
+            var heading = Assert.IsType<HeadingBlock>(Assert.Single(cell.ChildBlocks));
+            var html = doc.ToHtmlFragment();
+
+            Assert.Equal("cell", heading.Attributes.ElementId);
+            Assert.Contains("<h1 id=\"cell\">Cell</h1>", html, StringComparison.Ordinal);
+            Assert.DoesNotContain("{#cell}", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Standalone_Image_Trailing_GenericAttributes_Parse_Quoted_Braces() {
+            const string md = "![alt](img.png){title=\"a}b\"}{width=320}";
+            var options = MarkdownReaderOptions.CreatePortableProfile();
+            options.GenericAttributes = true;
+            options.StandaloneImageBlocks = true;
+
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md, options);
+            var image = Assert.IsType<ImageBlock>(Assert.Single(doc.Blocks));
+
+            Assert.Equal("a}b", image.Attributes.Attributes["title"]);
+            Assert.Equal(320, image.Width);
+            Assert.Contains("{title=\"a}b\"}", doc.ToMarkdown(), StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Table_RenderMarkdown_Escapes_Pipes_In_GenericAttribute_Suffix() {
+            const string md = """
+{title="a|b"}
+| A |
+| --- |
+| B |
+""";
+            var options = MarkdownReaderOptions.CreatePortableProfile();
+            options.GenericAttributes = true;
+
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md, options);
+            var written = doc.ToMarkdown(new MarkdownWriteOptions { OutputLineEnding = "\n" });
+
+            Assert.Contains("{title=\"a\\|b\"}", written, StringComparison.Ordinal);
+
+            var reparsed = OfficeIMO.Markdown.MarkdownReader.Parse(written, options);
+            var table = Assert.IsType<TableBlock>(Assert.Single(reparsed.Blocks));
+            Assert.Single(table.Headers);
+            Assert.Equal("a|b", table.Attributes.Attributes["title"]);
+        }
+
+        [Fact]
+        public void Structured_Table_Cells_Preserve_Autolink_Rejection_Options_When_Reparsed() {
+            const string md = """
+| Col |
+| --- |
+| # Visit https://exa_mple.com |
+""";
+            var options = MarkdownReaderOptions.CreateGitHubFlavoredMarkdownProfile();
+            options.ParseTableCellBlocks = true;
+            options.AutolinkRejectUnderscoreInUrlHost = true;
+
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md, options);
+            var html = doc.ToHtmlFragment(new HtmlOptions { Style = HtmlStyle.Plain, CssDelivery = CssDelivery.None, BodyClass = null });
+
+            Assert.Contains(">Visit https://exa_mple.com</h1>", html, StringComparison.Ordinal);
+            Assert.DoesNotContain("href=\"https://exa_mple.com\"", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Structured_Table_Cells_Preserve_ListExtras_When_Reparsed() {
+            const string md = """
+| Col |
+| --- |
+| a. Alpha<br>b. Beta |
+""";
+            var options = MarkdownReaderOptions.CreateGitHubFlavoredMarkdownProfile();
+            options.ParseTableCellBlocks = true;
+            options.ListExtras = true;
+
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md, options);
+            var table = Assert.IsType<TableBlock>(Assert.Single(doc.Blocks));
+            var cell = Assert.Single(Assert.Single(table.BodyRows).Cells);
+            var list = Assert.IsType<OrderedListBlock>(Assert.Single(cell.ChildBlocks));
+
+            Assert.Equal(MarkdownOrderedListMarkerStyle.LowerAlpha, list.MarkerStyle);
+            Assert.Collection(list.Items,
+                item => Assert.Equal("Alpha", item.Content.RenderMarkdown()),
+                item => Assert.Equal("Beta", item.Content.RenderMarkdown()));
+        }
+
+        [Fact]
+        public void Structured_Table_Cells_Preserve_Callout_Title_Mode_When_Reparsed() {
+            const string md = """
+| Col |
+| --- |
+| > [!NOTE] Title<br>> body |
+""";
+            var options = MarkdownReaderOptions.CreateGitHubFlavoredMarkdownProfile();
+            options.ParseTableCellBlocks = true;
+            options.Callouts = true;
+            options.CalloutTitleMode = MarkdownCalloutTitleMode.MarkdigCompatible;
+
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md, options);
+            var table = Assert.IsType<TableBlock>(Assert.Single(doc.Blocks));
+            var cell = Assert.Single(Assert.Single(table.BodyRows).Cells);
+
+            Assert.IsType<QuoteBlock>(Assert.Single(cell.ChildBlocks));
+            Assert.DoesNotContain(cell.ChildBlocks, block => block is CalloutBlock);
+        }
+
+        [Fact]
+        public void ListExtras_Ordered_List_Interrupts_Paragraph_When_Enabled() {
+            const string md = """
+intro
+a. alpha
+""";
+            var options = MarkdownReaderOptions.CreateCommonMarkProfile();
+            options.ListExtras = true;
+
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md, options);
+
+            var paragraph = Assert.IsType<ParagraphBlock>(doc.Blocks[0]);
+            var list = Assert.IsType<OrderedListBlock>(doc.Blocks[1]);
+
+            Assert.Equal("intro", paragraph.Inlines.RenderMarkdown());
+            Assert.Equal(MarkdownOrderedListMarkerStyle.LowerAlpha, list.MarkerStyle);
+            Assert.Equal("alpha", Assert.Single(list.Items).Content.RenderMarkdown());
+        }
+
+        [Fact]
+        public void ListExtras_Ordered_Item_Preserves_Indented_Code_Lead() {
+            const string md = "a.     code\n";
+            var options = MarkdownReaderOptions.CreateCommonMarkProfile();
+            options.ListExtras = true;
+
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md, options);
+            var list = Assert.IsType<OrderedListBlock>(Assert.Single(doc.Blocks));
+            var item = Assert.Single(list.Items);
+            var code = Assert.IsType<CodeBlock>(Assert.Single(item.NestedBlocks));
+
+            Assert.Equal(MarkdownOrderedListMarkerStyle.LowerAlpha, list.MarkerStyle);
+            Assert.Equal("code", code.Content);
+        }
+
+        [Fact]
+        public void Delimited_Table_Stops_Before_ListExtras_Ordered_List_When_Body_Pipes_Are_Optional() {
+            const string md = """
+| A |
+|---|
+body row
+a. alpha
+""";
+            var options = MarkdownReaderOptions.CreateGitHubFlavoredMarkdownProfile();
+            options.ListExtras = true;
+            options.RequireTableBodyRowPipes = false;
+
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md, options);
+
+            Assert.Equal(2, doc.Blocks.Count);
+            var table = Assert.IsType<TableBlock>(doc.Blocks[0]);
+            var list = Assert.IsType<OrderedListBlock>(doc.Blocks[1]);
+
+            Assert.Equal(new[] { "body row" }, Assert.Single(table.Rows));
+            Assert.Equal(MarkdownOrderedListMarkerStyle.LowerAlpha, list.MarkerStyle);
+            Assert.Equal("alpha", Assert.Single(list.Items).Content.RenderMarkdown());
+        }
+
+        [Fact]
+        public void Delimited_Table_Stops_Before_Custom_Container_When_Body_Pipes_Are_Optional() {
+            const string md = """
+| A |
+|---|
+body row
+::: note
+inside
+:::
+""";
+            var options = MarkdownReaderOptions.CreateGitHubFlavoredMarkdownProfile();
+            options.CustomContainers = true;
+            options.RequireTableBodyRowPipes = false;
+
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md, options);
+
+            Assert.Equal(2, doc.Blocks.Count);
+            var table = Assert.IsType<TableBlock>(doc.Blocks[0]);
+            var container = Assert.IsType<CustomContainerBlock>(doc.Blocks[1]);
+
+            Assert.Equal(new[] { "body row" }, Assert.Single(table.Rows));
+            Assert.Equal("note", container.Info);
+        }
+
+        [Fact]
+        public void Delimited_Table_Stops_Before_Plain_Paragraph_Line() {
+            const string md = """
+| A |
+|---|
+| B |
+plain text
+""";
+
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+
+            Assert.IsType<TableBlock>(doc.Blocks[0]);
+            var paragraph = Assert.IsType<ParagraphBlock>(doc.Blocks[1]);
+            Assert.Equal("plain text", paragraph.Inlines.RenderMarkdown());
+        }
+
+        [Fact]
+        public void Table_Parsing_Does_Not_Treat_Unmatched_Multi_Backticks_As_Code_Spans() {
+            string md = """
+| Col1 | Col2 |
+| --- | --- |
+| ``a | b |
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var table = Assert.IsType<TableBlock>(doc.Blocks[0]);
+            Assert.Equal(2, table.Headers.Count);
+            Assert.Single(table.Rows);
+            Assert.Equal(2, table.Rows[0].Count);
+            Assert.Equal("``a", table.Rows[0][0]);
+            Assert.Equal("b", table.Rows[0][1]);
+
+            var html = doc.ToHtmlFragment();
+            Assert.DoesNotContain("<code>", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Table_Headers_Render_Inline_Markup() {
+            string md = """
+| **H** | `C` |
+| --- | --- |
+| a | b |
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var table = Assert.IsType<TableBlock>(doc.Blocks[0]);
+            Assert.Equal(2, table.HeaderInlines.Count);
+            Assert.Single(table.RowInlines);
+            Assert.Equal("**H**", table.HeaderInlines[0].RenderMarkdown());
+            Assert.Equal("`C`", table.HeaderInlines[1].RenderMarkdown());
+            var html = doc.ToHtmlFragment();
+            Assert.Contains("<th><strong>H</strong></th>", html);
+            Assert.Contains("<th><code>C</code></th>", html);
+        }
+
+        [Fact]
+        public void Table_Cells_Are_Exposed_As_Typed_Block_Content() {
+            string md = """
+| **H** | `C` |
+| --- | --- |
+| [a](https://example.com) | b |
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var table = Assert.IsType<TableBlock>(doc.Blocks[0]);
+
+            Assert.Collection(table.HeaderCells,
+                cell => Assert.Equal("**H**", Assert.IsType<ParagraphBlock>(Assert.Single(cell.ChildBlocks)).Inlines.RenderMarkdown()),
+                cell => Assert.Equal("`C`", Assert.IsType<ParagraphBlock>(Assert.Single(cell.ChildBlocks)).Inlines.RenderMarkdown()));
+
+            Assert.Single(table.RowCells);
+            Assert.Collection(table.RowCells[0],
+                cell => Assert.Equal("[a](https://example.com)", Assert.IsType<ParagraphBlock>(Assert.Single(cell.ChildBlocks)).Inlines.RenderMarkdown()),
+                cell => Assert.Equal("b", Assert.IsType<ParagraphBlock>(Assert.Single(cell.ChildBlocks)).Inlines.RenderMarkdown()));
+        }
+
+        [Fact]
+        public void Table_Cells_Can_Parse_MultiBlock_Markdown_Content_From_Cell_Body() {
+            string md = """
+| Section | Notes |
+| --- | --- |
+| Alpha | Intro<br><br>> Quoted |
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var table = Assert.IsType<TableBlock>(Assert.Single(doc.Blocks));
+
+            Assert.Collection(table.RowCells[0][1].ChildBlocks,
+                block => Assert.Equal("Intro", Assert.IsType<ParagraphBlock>(block).Inlines.RenderMarkdown()),
+                block => Assert.IsType<QuoteBlock>(block));
+
+            var markdown = doc.ToMarkdown().Replace("\r\n", "\n");
+            Assert.Contains("Intro<br><br>> Quoted", markdown, StringComparison.Ordinal);
+
+            var html = doc.ToHtmlFragment(new HtmlOptions { Style = HtmlStyle.Plain, CssDelivery = CssDelivery.None, BodyClass = null });
+            Assert.Contains("<td><p>Intro</p><blockquote><p>Quoted</p></blockquote></td>", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Table_Cells_Keep_SingleBreak_Content_As_A_Paragraph() {
+            string md = """
+| Notes |
+| --- |
+| First<br>Second |
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var table = Assert.IsType<TableBlock>(Assert.Single(doc.Blocks));
+
+            var cell = table.RowCells[0][0];
+            var paragraph = Assert.IsType<ParagraphBlock>(Assert.Single(cell.ChildBlocks));
+            Assert.DoesNotContain(cell.ChildBlocks, block => block is QuoteBlock or UnorderedListBlock or OrderedListBlock);
+            Assert.Contains("First", paragraph.Inlines.RenderMarkdown(), StringComparison.Ordinal);
+            Assert.Contains("Second", paragraph.Inlines.RenderMarkdown(), StringComparison.Ordinal);
+
+            var html = doc.ToHtmlFragment(new HtmlOptions { Style = HtmlStyle.Plain, CssDelivery = CssDelivery.None, BodyClass = null });
+            Assert.Contains("First<br", html, StringComparison.Ordinal);
+            Assert.Contains("Second", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Table_Cells_Can_Parse_List_Content_From_Cell_Body() {
+            string md = """
+| Section | Notes |
+| --- | --- |
+| Alpha | Intro<br><br>- first<br>- second |
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var table = Assert.IsType<TableBlock>(Assert.Single(doc.Blocks));
+
+            Assert.Collection(table.RowCells[0][1].ChildBlocks,
+                block => Assert.Equal("Intro", Assert.IsType<ParagraphBlock>(block).Inlines.RenderMarkdown()),
+                block => {
+                    var list = Assert.IsType<UnorderedListBlock>(block);
+                    Assert.Equal(new[] { "first", "second" }, list.Items.Select(item => item.Content.RenderMarkdown()).ToArray());
+                });
+
+            var html = doc.ToHtmlFragment(new HtmlOptions { Style = HtmlStyle.Plain, CssDelivery = CssDelivery.None, BodyClass = null });
+            Assert.Contains("<td><p>Intro</p><ul><li>first</li><li>second</li></ul></td>", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Table_Cells_Can_Parse_SingleLine_List_Content() {
+            string md = """
+| Notes |
+| --- |
+| - first |
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var table = Assert.IsType<TableBlock>(Assert.Single(doc.Blocks));
+
+            var list = Assert.IsType<UnorderedListBlock>(Assert.Single(table.RowCells[0][0].ChildBlocks));
+            Assert.Equal("first", list.Items[0].Content.RenderMarkdown());
+
+            var roundtrip = doc.ToMarkdown().Replace("\r\n", "\n");
+            Assert.Contains("| - first |", roundtrip, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Table_Cells_Can_Parse_SingleLine_Heading_Content() {
+            string md = """
+| Notes |
+| --- |
+| ## Important |
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var table = Assert.IsType<TableBlock>(Assert.Single(doc.Blocks));
+
+            var heading = Assert.IsType<HeadingBlock>(Assert.Single(table.RowCells[0][0].ChildBlocks));
+            Assert.Equal(2, heading.Level);
+            Assert.Equal("Important", heading.Text);
+
+            var html = doc.ToHtmlFragment(new HtmlOptions { Style = HtmlStyle.Plain, CssDelivery = CssDelivery.None, BodyClass = null });
+            Assert.Contains("<td><h2", html, StringComparison.Ordinal);
+            Assert.Contains("Important", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Table_Cells_Can_Parse_Details_Block_Content_Without_RawHtml_Children() {
+            string md = """
+| Notes |
+| --- |
+| <details><summary>More</summary>Alpha</details> |
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var table = Assert.IsType<TableBlock>(Assert.Single(doc.Blocks));
+
+            var details = Assert.IsType<DetailsBlock>(Assert.Single(table.RowCells[0][0].ChildBlocks));
+            Assert.NotNull(details.Summary);
+            Assert.Equal("More", details.Summary!.Inlines.RenderMarkdown());
+            Assert.Equal("Alpha", Assert.IsType<ParagraphBlock>(Assert.Single(details.ChildBlocks)).Inlines.RenderMarkdown());
+
+            var html = doc.ToHtmlFragment(new HtmlOptions { Style = HtmlStyle.Plain, CssDelivery = CssDelivery.None, BodyClass = null });
+            Assert.Contains("<details", html, StringComparison.Ordinal);
+            Assert.Contains("<summary>More</summary>", html, StringComparison.Ordinal);
+            Assert.Contains("<p>Alpha</p>", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Table_Cells_Can_Parse_Callout_Block_Content() {
+            string md = """
+| Notes |
+| --- |
+| > [!NOTE] Important<br>> Body |
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var table = Assert.IsType<TableBlock>(Assert.Single(doc.Blocks));
+
+            var callout = Assert.IsType<CalloutBlock>(Assert.Single(table.RowCells[0][0].ChildBlocks));
+            Assert.Equal("note", callout.Kind);
+            Assert.Equal("Important", callout.TitleInlines.RenderMarkdown());
+            Assert.Equal("Body", Assert.IsType<ParagraphBlock>(Assert.Single(callout.ChildBlocks)).Inlines.RenderMarkdown());
+
+            var html = doc.ToHtmlFragment(new HtmlOptions { Style = HtmlStyle.Plain, CssDelivery = CssDelivery.None, BodyClass = null });
+            Assert.Contains("class=\"callout note\"", html, StringComparison.Ordinal);
+            Assert.Contains("<strong>Important</strong>", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Table_Cells_Do_Not_Promote_Details_With_RawHtml_Children_To_Structured_Blocks() {
+            string md = """
+| Notes |
+| --- |
+| <details><summary>More</summary><script>alert(1)</script></details> |
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var table = Assert.IsType<TableBlock>(Assert.Single(doc.Blocks));
+
+            var paragraph = Assert.IsType<ParagraphBlock>(Assert.Single(table.RowCells[0][0].ChildBlocks));
+            Assert.Contains("details", paragraph.Inlines.RenderHtml(), StringComparison.Ordinal);
+
+            var html = doc.ToHtmlFragment(new HtmlOptions { Style = HtmlStyle.Plain, CssDelivery = CssDelivery.None, BodyClass = null });
+            Assert.DoesNotContain("<script>", html, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("<details", html, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("details", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Table_Cells_Do_Not_Promote_Textarea_RawHtml_To_Structured_Blocks() {
+            string md = """
+| Notes |
+| --- |
+| <textarea>draft</textarea> |
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var table = Assert.IsType<TableBlock>(Assert.Single(doc.Blocks));
+
+            var paragraph = Assert.IsType<ParagraphBlock>(Assert.Single(table.RowCells[0][0].ChildBlocks));
+            Assert.Contains("textarea", paragraph.Inlines.RenderHtml(), StringComparison.Ordinal);
+
+            var html = doc.ToHtmlFragment(new HtmlOptions { Style = HtmlStyle.Plain, CssDelivery = CssDelivery.None, BodyClass = null });
+            Assert.DoesNotContain("<textarea", html, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("&lt;textarea&gt;draft&lt;/textarea&gt;", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Table_Cells_Can_Parse_Indented_Code_Block_Content_From_Cell_Body() {
+            string md = """
+| Section | Notes |
+| --- | --- |
+| Alpha | Intro<br><br>    code line 1<br>    code line 2 |
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var table = Assert.IsType<TableBlock>(Assert.Single(doc.Blocks));
+
+            Assert.Collection(table.RowCells[0][1].ChildBlocks,
+                block => Assert.Equal("Intro", Assert.IsType<ParagraphBlock>(block).Inlines.RenderMarkdown()),
+                block => {
+                    var code = Assert.IsType<CodeBlock>(block);
+                    Assert.Contains("code line 1", code.Content, StringComparison.Ordinal);
+                    Assert.Contains("code line 2", code.Content, StringComparison.Ordinal);
+                });
+
+            var html = doc.ToHtmlFragment(new HtmlOptions { Style = HtmlStyle.Plain, CssDelivery = CssDelivery.None, BodyClass = null });
+            Assert.Contains("<td><p>Intro</p><pre><code>code line 1", html, StringComparison.Ordinal);
+            Assert.Contains("code line 2", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Table_Cells_Resolve_Reference_Links() {
+            string md = """
+| Col |
+| --- |
+| [x][r] |
+
+[r]: https://example.com
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var table = Assert.IsType<TableBlock>(doc.Blocks[0]);
+            Assert.Single(table.RowInlines);
+            Assert.Equal("[x](https://example.com)", table.RowInlines[0][0].RenderMarkdown());
+            var html = doc.ToHtmlFragment(new HtmlOptions { Style = HtmlStyle.Plain, CssDelivery = CssDelivery.None, BodyClass = null });
+            Assert.Contains("<a href=\"https://example.com\">x</a>", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Table_RenderHtml_Falls_Back_To_Current_StringCells_After_Mutation() {
+            string md = """
+| Header |
+| --- |
+| value |
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var table = Assert.IsType<TableBlock>(doc.Blocks[0]);
+
+            table.Headers[0] = "**Changed**";
+            table.Rows[0] = new[] { "[fresh](https://example.com)" };
+
+            var html = ((IMarkdownBlock)table).RenderHtml();
+
+            Assert.Contains("<th><strong>Changed</strong></th>", html, StringComparison.Ordinal);
+            Assert.Contains("<a href=\"https://example.com\">fresh</a>", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Table_InlineCells_Follow_Current_String_Content_After_Mutation() {
+            string md = """
+| Header |
+| --- |
+| value |
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var table = Assert.IsType<TableBlock>(doc.Blocks[0]);
+
+            table.Headers[0] = "**Changed**";
+            table.Rows[0] = new[] { "[fresh](https://example.com)" };
+
+            Assert.Equal("**Changed**", table.HeaderInlines[0].RenderMarkdown());
+            Assert.Single(table.RowInlines);
+            Assert.Equal("[fresh](https://example.com)", table.RowInlines[0][0].RenderMarkdown());
+        }
+
+        [Fact]
+        public void Table_Cells_Respect_Url_Policy() {
+            string md = """
+| Col |
+| --- |
+| [x](file:///c:/test) |
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md, new MarkdownReaderOptions { DisallowFileUrls = true, HtmlBlocks = false, InlineHtml = false });
+            var html = doc.ToHtmlFragment(new HtmlOptions { Style = HtmlStyle.Plain, CssDelivery = CssDelivery.None, BodyClass = null });
+            Assert.DoesNotContain("file:", html, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(">x<", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Table_Does_Not_Trigger_On_Two_Lines_With_Pipes_Without_Alignment_Row() {
+            string md = """
+a | b
+c | d
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            Assert.IsType<ParagraphBlock>(doc.Blocks[0]);
+            Assert.DoesNotContain(doc.Blocks, b => b is TableBlock);
+        }
+
+        [Fact]
+        public void Table_Does_Not_Parse_Single_Explicit_Outer_Pipe_Row_As_Headerless_Table() {
+            string md = "| a | b |";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var paragraph = Assert.IsType<ParagraphBlock>(doc.Blocks[0]);
+            var plainText = new StringBuilder();
+            ((IPlainTextMarkdownInline)paragraph.Inlines).AppendPlainText(plainText);
+            Assert.Equal("| a | b |", plainText.ToString());
+        }
+
+        [Fact]
+        public void Table_Parses_Headerless_Tables_With_Outer_Pipes_And_Two_Rows() {
+            string md = """
+| a | b |
+| c | d |
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var table = Assert.IsType<TableBlock>(doc.Blocks[0]);
+            Assert.Empty(table.Headers);
+            Assert.Equal(2, table.Rows.Count);
+            Assert.Equal("a", table.Rows[0][0].Trim());
+            Assert.Equal("d", table.Rows[1][1].Trim());
+        }
+
+        [Fact]
+        public void Builder_Paragraph_AutoSpacing_Remains_Convenient() {
+            var doc = MarkdownDoc.Create().P(p => p.Text("Hello").Bold("World"));
+            var md = doc.ToMarkdown().Replace("\r", "");
+            Assert.Contains("Hello **World**", md);
+        }
+
+        [Fact]
+        public void List_Item_Allows_Multiple_Paragraphs_When_Indented() {
+            string md = """
+- first paragraph
+
+  second paragraph
+- next item
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var list = Assert.IsType<UnorderedListBlock>(doc.Blocks[0]);
+            Assert.Equal(2, list.Items.Count);
+            Assert.Single(list.Items[0].AdditionalParagraphs);
+            Assert.Equal(2, list.Items[0].ParagraphBlocks.Count);
+            Assert.Equal("first paragraph", list.Items[0].ParagraphBlocks[0].Inlines.RenderMarkdown());
+            Assert.Equal("second paragraph", list.Items[0].ParagraphBlocks[1].Inlines.RenderMarkdown());
+            Assert.Collection(
+                list.Items[0].ChildBlocks,
+                block => Assert.Equal("first paragraph", Assert.IsType<ParagraphBlock>(block).Inlines.RenderMarkdown()),
+                block => Assert.Equal("second paragraph", Assert.IsType<ParagraphBlock>(block).Inlines.RenderMarkdown()));
+
+            var html = doc.ToHtmlFragment();
+            Assert.Contains("<li><p>first paragraph</p><p>second paragraph</p></li>", html);
+        }
+
+        [Fact]
+        public void Unordered_List_Item_Allows_Lazy_Continuation() {
+            const string md = """
+- item
+continuation
+""";
+
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var list = Assert.IsType<UnorderedListBlock>(doc.Blocks[0]);
+            Assert.Single(list.Items);
+
+            var html = doc.ToHtmlFragment(new HtmlOptions { Style = HtmlStyle.Plain, CssDelivery = CssDelivery.None, BodyClass = null });
+            Assert.Contains("<ul><li>item\ncontinuation</li></ul>", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Ordered_List_Item_Allows_Lazy_Continuation() {
+            const string md = """
+1. item
+continuation
+""";
+
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var list = Assert.IsType<OrderedListBlock>(doc.Blocks[0]);
+            Assert.Single(list.Items);
+
+            var html = doc.ToHtmlFragment(new HtmlOptions { Style = HtmlStyle.Plain, CssDelivery = CssDelivery.None, BodyClass = null });
+            Assert.Contains("<ol><li>item\ncontinuation</li></ol>", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void List_Item_PostMarker_Padding_Can_Push_Shallow_Continuation_Out_Of_The_List() {
+            const string md = """
+ -    one
+
+     two
+""";
+
+            var html = OfficeIMO.Markdown.MarkdownReader.Parse(md, MarkdownReaderOptions.CreateCommonMarkProfile())
+                .ToHtmlFragment(new HtmlOptions { Style = HtmlStyle.Plain, CssDelivery = CssDelivery.None, BodyClass = null });
+
+            Assert.Equal("<ul><li>one</li></ul><pre><code> two\n</code></pre>", html);
+        }
+
+        [Fact]
+        public void List_Item_PostMarker_Padding_Keeps_Deep_Enough_Continuation_Inside_The_List() {
+            const string md = """
+ -    one
+
+      two
+""";
+
+            var html = OfficeIMO.Markdown.MarkdownReader.Parse(md, MarkdownReaderOptions.CreateCommonMarkProfile())
+                .ToHtmlFragment(new HtmlOptions { Style = HtmlStyle.Plain, CssDelivery = CssDelivery.None, BodyClass = null });
+
+            Assert.Equal("<ul><li><p>one</p><p>two</p></li></ul>", html);
+        }
+
+        [Fact]
+        public void Unordered_List_Item_Second_Paragraph_Allows_Lazy_Continuation() {
+            const string md = """
+- item
+
+    code
+after
+""";
+
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var list = Assert.IsType<UnorderedListBlock>(doc.Blocks[0]);
+            Assert.Single(list.Items);
+
+            var html = doc.ToHtmlFragment(new HtmlOptions { Style = HtmlStyle.Plain, CssDelivery = CssDelivery.None, BodyClass = null });
+            Assert.Contains("<ul><li><p>item</p><p>code\nafter</p></li></ul>", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Unordered_List_Becomes_Loose_When_Later_Item_Has_Second_Paragraph() {
+            const string md = """
+- a
+- b
+
+  second paragraph
+""";
+
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+
+            var html = doc.ToHtmlFragment(new HtmlOptions { Style = HtmlStyle.Plain, CssDelivery = CssDelivery.None, BodyClass = null });
+            Assert.Contains("<ul><li><p>a</p></li><li><p>b</p><p>second paragraph</p></li></ul>", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Ordered_List_Becomes_Loose_When_Later_Item_Has_Second_Paragraph() {
+            const string md = """
+10. a
+11. b
+
+    second paragraph
+""";
+
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+
+            var html = doc.ToHtmlFragment(new HtmlOptions { Style = HtmlStyle.Plain, CssDelivery = CssDelivery.None, BodyClass = null });
+            Assert.Contains("<ol start=\"10\"><li><p>a</p></li><li><p>b</p><p>second paragraph</p></li></ol>", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void List_Item_Can_Contain_Nested_Ordered_List() {
+            string md = """
+- outer
+  1. one
+  2. two
+- next
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var list = Assert.IsType<UnorderedListBlock>(doc.Blocks[0]);
+            Assert.Equal(2, list.Items.Count);
+            Assert.Single(list.Items[0].NestedBlocks);
+            Assert.IsType<OrderedListBlock>(list.Items[0].NestedBlocks[0]);
+
+            var html = doc.ToHtmlFragment();
+            Assert.Contains("<li>outer<ol>", html);
+        }
+
+        [Fact]
+        public void List_Item_Can_Contain_Nested_Unordered_List() {
+            string md = """
+- outer
+  - one
+  - two
+- next
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var list = Assert.IsType<UnorderedListBlock>(doc.Blocks[0]);
+            Assert.Equal(2, list.Items.Count);
+            Assert.Single(list.Items[0].NestedBlocks);
+            Assert.IsType<UnorderedListBlock>(list.Items[0].NestedBlocks[0]);
+
+            var html = doc.ToHtmlFragment();
+            Assert.Contains("<li>outer<ul><li>one</li><li>two</li></ul></li>", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Ordered_List_Item_Can_Contain_Nested_Ordered_List() {
+            string md = """
+1. outer
+   1. one
+   2. two
+2. next
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var list = Assert.IsType<OrderedListBlock>(doc.Blocks[0]);
+            Assert.Equal(2, list.Items.Count);
+            Assert.Single(list.Items[0].NestedBlocks);
+            Assert.IsType<OrderedListBlock>(list.Items[0].NestedBlocks[0]);
+
+            var html = doc.ToHtmlFragment();
+            Assert.Contains("<li>outer<ol><li>one</li><li>two</li></ol></li>", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void List_Item_Can_Contain_Nested_Fenced_Code_Block() {
+            string md = """
+- outer
+  ```csharp
+  Console.WriteLine(1);
+  ```
+- next
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var list = Assert.IsType<UnorderedListBlock>(doc.Blocks[0]);
+            Assert.Equal(2, list.Items.Count);
+            Assert.Single(list.Items[0].NestedBlocks);
+            var code = Assert.IsType<CodeBlock>(list.Items[0].NestedBlocks[0]);
+            Assert.Equal("csharp", code.Language);
+
+            var html = doc.ToHtmlFragment();
+            Assert.Contains("<li>outer<pre><code class=\"language-csharp\">", html);
+            Assert.Contains("Console.WriteLine(1);", html);
+        }
+
+        [Fact]
+        public void List_Item_Can_Contain_Nested_Indented_Code_Block() {
+            // Inside a list item, indented code is typically "continuation indent + 4 spaces".
+            string md = """
+- outer
+      line1
+      line2
+- next
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var list = Assert.IsType<UnorderedListBlock>(doc.Blocks[0]);
+            Assert.Equal(2, list.Items.Count);
+            Assert.Single(list.Items[0].NestedBlocks);
+            var code = Assert.IsType<CodeBlock>(list.Items[0].NestedBlocks[0]);
+            Assert.Contains("line1", code.Content);
+
+            var html = doc.ToHtmlFragment();
+            Assert.Contains("<pre><code>", html);
+            Assert.Contains("line1", html);
+        }
+
+        [Fact]
+        public void List_Item_Can_Contain_Nested_Blockquote() {
+            string md = """
+- outer
+  > quote 1
+  > quote 2
+- next
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var list = Assert.IsType<UnorderedListBlock>(doc.Blocks[0]);
+            Assert.Equal(2, list.Items.Count);
+            Assert.Single(list.Items[0].NestedBlocks);
+            Assert.IsType<QuoteBlock>(list.Items[0].NestedBlocks[0]);
+
+            var html = doc.ToHtmlFragment();
+            Assert.Contains("<blockquote>", html);
+            Assert.Contains("quote 1", html);
+        }
+
+        [Fact]
+        public void List_Item_Can_Contain_BlankLine_Separated_Nested_Blockquote() {
+            string md = """
+- outer
+
+  > quote 1
+  > quote 2
+- next
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var list = Assert.IsType<UnorderedListBlock>(doc.Blocks[0]);
+            Assert.Equal(2, list.Items.Count);
+            Assert.Single(list.Items[0].NestedBlocks);
+            Assert.IsType<QuoteBlock>(list.Items[0].NestedBlocks[0]);
+            Assert.True(list.Items[0].ForceLoose);
+
+            var html = doc.ToHtmlFragment();
+            Assert.Contains("<li><p>outer</p><blockquote>", html, StringComparison.Ordinal);
+            Assert.Contains("quote 1", html);
+        }
+
+        [Fact]
+        public void List_Item_Can_Contain_Nested_Unordered_List_After_Nested_Blockquote() {
+            string md = """
+- item
+  > quote
+  continuation
+  - nested
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var list = Assert.IsType<UnorderedListBlock>(doc.Blocks[0]);
+            Assert.Single(list.Items);
+            Assert.Contains(list.Items[0].NestedBlocks, b => b is QuoteBlock);
+            Assert.Contains(list.Items[0].NestedBlocks, b => b is UnorderedListBlock);
+
+            var html = doc.ToHtmlFragment();
+            Assert.Contains("<blockquote><p>quote\ncontinuation</p></blockquote><ul><li>nested</li></ul>", html, StringComparison.Ordinal);
+            Assert.DoesNotContain("<p>- nested</p>", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void List_Item_Nested_Blockquote_Can_Lazily_Continue_Within_Tight_List() {
+            string md = """
+- item
+  > quote
+  continuation
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var list = Assert.IsType<UnorderedListBlock>(doc.Blocks[0]);
+            Assert.Single(list.Items);
+            var quote = Assert.IsType<QuoteBlock>(list.Items[0].NestedBlocks[0]);
+
+            var html = doc.ToHtmlFragment();
+            Assert.Contains("<li>item<blockquote><p>quote\ncontinuation</p></blockquote></li>", html, StringComparison.Ordinal);
+            Assert.Single(quote.ChildBlocks);
+        }
+
+        [Fact]
+        public void List_Item_Nested_Blockquote_Can_Lazily_Continue_Within_Loose_List() {
+            string md = """
+- item
+
+  > quote
+  continuation
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var list = Assert.IsType<UnorderedListBlock>(doc.Blocks[0]);
+            Assert.Single(list.Items);
+            var quote = Assert.IsType<QuoteBlock>(list.Items[0].NestedBlocks[0]);
+
+            var html = doc.ToHtmlFragment();
+            Assert.Contains("<blockquote><p>quote\ncontinuation</p></blockquote>", html, StringComparison.Ordinal);
+            Assert.Single(quote.ChildBlocks);
+        }
+
+        [Fact]
+        public void List_Item_Can_Contain_Nested_Table() {
+            string md = """
+- outer
+  | A | B |
+  | --- | ---: |
+  | 1 | 2 |
+- next
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var list = Assert.IsType<UnorderedListBlock>(doc.Blocks[0]);
+            Assert.Equal(2, list.Items.Count);
+            Assert.Single(list.Items[0].NestedBlocks);
+            var table = Assert.IsType<TableBlock>(list.Items[0].NestedBlocks[0]);
+            Assert.Equal(2, table.Headers.Count);
+
+            var html = doc.ToHtmlFragment();
+            Assert.Contains("<table>", html);
+            Assert.Contains(">A<", html);
+        }
+
+        [Fact]
+        public void List_Item_Can_Contain_BlankLine_Separated_Nested_Table() {
+            string md = """
+- outer
+
+  | A | B |
+  | --- | ---: |
+  | 1 | 2 |
+- next
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var list = Assert.IsType<UnorderedListBlock>(doc.Blocks[0]);
+            Assert.Equal(2, list.Items.Count);
+            Assert.Single(list.Items[0].NestedBlocks);
+            var table = Assert.IsType<TableBlock>(list.Items[0].NestedBlocks[0]);
+            Assert.Equal(2, table.Headers.Count);
+            Assert.True(list.Items[0].ForceLoose);
+
+            var html = doc.ToHtmlFragment();
+            Assert.Contains("<li><p>outer</p><table>", html, StringComparison.Ordinal);
+            Assert.Contains(">A<", html);
+        }
+
+        [Fact]
+        public void List_Item_Can_Contain_BlankLine_Separated_Nested_Indented_Code_Block() {
+            string md = """
+- outer
+
+      line1
+      line2
+- next
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var list = Assert.IsType<UnorderedListBlock>(doc.Blocks[0]);
+            Assert.Equal(2, list.Items.Count);
+            Assert.Single(list.Items[0].NestedBlocks);
+            var code = Assert.IsType<CodeBlock>(list.Items[0].NestedBlocks[0]);
+            Assert.Contains("line1", code.Content);
+            Assert.True(list.Items[0].ForceLoose);
+
+            var html = doc.ToHtmlFragment();
+            Assert.Contains("<li><p>outer</p><pre><code>", html, StringComparison.Ordinal);
+            Assert.Contains("line1", html);
+        }
+
+        [Fact]
+        public void List_Item_Keeps_Trailing_Paragraph_After_Nested_Blockquote() {
+            string md = """
+- item
+  > quote
+
+  trailing
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var list = Assert.IsType<UnorderedListBlock>(doc.Blocks[0]);
+            Assert.Single(list.Items);
+            Assert.Equal(2, list.Items[0].NestedBlocks.Count);
+            Assert.IsType<QuoteBlock>(list.Items[0].NestedBlocks[0]);
+            Assert.IsType<ParagraphBlock>(list.Items[0].NestedBlocks[1]);
+            Assert.Collection(
+                list.Items[0].ChildBlocks,
+                block => Assert.Equal("item", Assert.IsType<ParagraphBlock>(block).Inlines.RenderMarkdown()),
+                block => Assert.IsType<QuoteBlock>(block),
+                block => Assert.Equal("trailing", Assert.IsType<ParagraphBlock>(block).Inlines.RenderMarkdown()));
+            Assert.True(list.Items[0].ForceLoose);
+
+            var html = doc.ToHtmlFragment();
+            Assert.Contains("<li><p>item</p><blockquote><p>quote</p></blockquote><p>trailing</p></li>", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void List_Item_Keeps_Trailing_Paragraph_After_BlankLine_Separated_Nested_Blockquote() {
+            string md = """
+- item
+
+  > quote
+
+  trailing
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var list = Assert.IsType<UnorderedListBlock>(doc.Blocks[0]);
+            Assert.Single(list.Items);
+            Assert.Equal(2, list.Items[0].NestedBlocks.Count);
+            Assert.IsType<QuoteBlock>(list.Items[0].NestedBlocks[0]);
+            Assert.IsType<ParagraphBlock>(list.Items[0].NestedBlocks[1]);
+            Assert.Collection(
+                list.Items[0].ChildBlocks,
+                block => Assert.Equal("item", Assert.IsType<ParagraphBlock>(block).Inlines.RenderMarkdown()),
+                block => Assert.IsType<QuoteBlock>(block),
+                block => Assert.Equal("trailing", Assert.IsType<ParagraphBlock>(block).Inlines.RenderMarkdown()));
+            Assert.True(list.Items[0].ForceLoose);
+
+            var html = doc.ToHtmlFragment();
+            Assert.Contains("<li><p>item</p><blockquote><p>quote</p></blockquote><p>trailing</p></li>", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void List_Item_Can_Contain_Nested_Details_Block() {
+            string md = """
+- outer
+  <details>
+  <summary>More</summary>
+
+  inner
+  </details>
+- next
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var list = Assert.IsType<UnorderedListBlock>(doc.Blocks[0]);
+            Assert.Equal(2, list.Items.Count);
+            Assert.Contains(list.Items[0].NestedBlocks, b => b is DetailsBlock);
+            Assert.Contains(list.Items[0].ChildBlocks, b => b is DetailsBlock);
+
+            var html = doc.ToHtmlFragment();
+            Assert.Contains("<details", html);
+            Assert.Contains("<summary>More</summary>", html);
+            Assert.Contains("inner", html);
+        }
+
+        [Fact]
+        public void Unordered_List_Allows_Indented_Continuation_Lines() {
+            string md = """
+- first line
+  second line
+- next
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var list = Assert.IsType<UnorderedListBlock>(doc.Blocks[0]);
+            Assert.Equal(2, list.Items.Count);
+
+            var html = doc.ToHtmlFragment();
+            Assert.Contains("first line second line", html);
+        }
+
+        [Fact]
+        public void Unordered_List_Allows_Tab_Indented_Continuation_Lines() {
+            string md = "- first line\n\tsecond line\n- next";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var list = Assert.IsType<UnorderedListBlock>(doc.Blocks[0]);
+            Assert.Equal(2, list.Items.Count);
+            Assert.Empty(list.Items[0].AdditionalParagraphs);
+
+            var html = doc.ToHtmlFragment();
+            Assert.Contains("first line second line", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Ordered_List_Allows_Indented_Continuation_Lines() {
+            string md = """
+1. first line
+   second line
+2. next
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var list = Assert.IsType<OrderedListBlock>(doc.Blocks[0]);
+            Assert.Equal(2, list.Items.Count);
+
+            var html = doc.ToHtmlFragment();
+            Assert.Contains("first line second line", html);
+        }
+
+        [Fact]
+        public void Ordered_List_Allows_Tab_Indented_Continuation_Lines() {
+            string md = "1. first line\n\tsecond line\n2. next";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var list = Assert.IsType<OrderedListBlock>(doc.Blocks[0]);
+            Assert.Equal(2, list.Items.Count);
+            Assert.Empty(list.Items[0].AdditionalParagraphs);
+
+            var html = doc.ToHtmlFragment();
+            Assert.Contains("first line second line", html, StringComparison.Ordinal);
+        }
+
+        [Theory]
+        [InlineData("- item\n  heading\n  -------", "<ul><li><h2", ">item heading</h2></li></ul>")]
+        [InlineData("1. item\n   heading\n   -------", "<ol><li><h2", ">item heading</h2></li></ol>")]
+        public void List_Item_Can_Render_Setext_Heading(string md, string expectedPrefix, string expectedSuffix) {
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+
+            var html = doc.ToHtmlFragment(new HtmlOptions { Style = HtmlStyle.Plain, CssDelivery = CssDelivery.None, BodyClass = null });
+            Assert.Contains(expectedPrefix, html, StringComparison.Ordinal);
+            Assert.Contains(expectedSuffix, html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void List_Item_Setext_Heading_Parses_Inline_Markup() {
+            const string md = """
+                - **item**
+                  `heading`
+                  -------
+                """;
+
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+
+            var html = doc.ToHtmlFragment(new HtmlOptions { Style = HtmlStyle.Plain, CssDelivery = CssDelivery.None, BodyClass = null });
+            Assert.Contains("<li><h2 id=\"item-heading\"><strong>item</strong> <code>heading</code></h2></li>", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void List_Item_Setext_Heading_Does_Not_Emit_Empty_Paragraphs_Before_Nested_Blocks() {
+            string md = """
+- item
+  heading
+  -------
+
+  > quote
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+
+            var html = doc.ToHtmlFragment(new HtmlOptions { Style = HtmlStyle.Plain, CssDelivery = CssDelivery.None, BodyClass = null });
+            Assert.Contains("<li><h2", html, StringComparison.Ordinal);
+            Assert.Contains("<blockquote><p>quote</p></blockquote>", html, StringComparison.Ordinal);
+            Assert.DoesNotContain("<p></p>", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void List_Item_Setext_Heading_Can_Be_Followed_By_Paragraph_In_Same_Group() {
+            const string md = """
+- item
+  heading
+  -------
+  after
+""";
+
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+
+            var html = doc.ToHtmlFragment(new HtmlOptions { Style = HtmlStyle.Plain, CssDelivery = CssDelivery.None, BodyClass = null });
+            Assert.Contains("<li><h2", html, StringComparison.Ordinal);
+            Assert.Contains(">item heading</h2>after</li>", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void List_Item_Blank_Line_Then_Setext_Heading_Starts_A_New_Block() {
+            const string md = """
+- item
+
+  Heading
+  ---
+  text
+""";
+
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+
+            var html = doc.ToHtmlFragment(new HtmlOptions { Style = HtmlStyle.Plain, CssDelivery = CssDelivery.None, BodyClass = null });
+            Assert.Contains("<ul><li><p>item</p><h2", html, StringComparison.Ordinal);
+            Assert.Contains(">Heading</h2><p>text</p></li></ul>", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void NonOne_Ordered_Marker_Does_Not_Interrupt_List_Item_Paragraph() {
+            string md = """
+- outer
+  10. item
+      continuation
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var list = Assert.IsType<UnorderedListBlock>(doc.Blocks[0]);
+            Assert.Single(list.Items);
+            Assert.Empty(list.Items[0].NestedBlocks);
+
+            var html = doc.ToHtmlFragment(new HtmlOptions { Style = HtmlStyle.Plain, CssDelivery = CssDelivery.None, BodyClass = null });
+            Assert.Contains("<ul><li>outer 10. item continuation</li></ul>", html, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void List_Item_Nested_Blockquote_Stops_Before_NonOne_Ordered_Child_List() {
+            string md = """
+- outer
+  > alpha
+  10. beta
+      gamma
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var list = Assert.IsType<UnorderedListBlock>(doc.Blocks[0]);
+            Assert.Single(list.Items);
+            var quote = Assert.IsType<QuoteBlock>(list.Items[0].NestedBlocks[0]);
+            var ordered = Assert.IsType<OrderedListBlock>(list.Items[0].NestedBlocks[1]);
+            Assert.Equal(10, ordered.Start);
+            Assert.Single(ordered.Items);
+            Assert.Equal("beta gamma", ordered.Items[0].Content.RenderMarkdown());
+
+            var html = doc.ToHtmlFragment(new HtmlOptions { Style = HtmlStyle.Plain, CssDelivery = CssDelivery.None, BodyClass = null });
+            Assert.Contains("<blockquote><p>alpha</p></blockquote><ol start=\"10\"><li>beta gamma</li></ol>", html, StringComparison.Ordinal);
+            Assert.DoesNotContain("<pre><code>", html, StringComparison.Ordinal);
+            Assert.Single(quote.ChildBlocks);
+        }
+
+        [Fact]
+        public void List_Item_Does_Not_Break_Continuation_On_Pipe_Text() {
+            string md = """
+- outer
+  a | b
+  c | d
+- next
+""";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md);
+            var list = Assert.IsType<UnorderedListBlock>(doc.Blocks[0]);
+            Assert.Equal(2, list.Items.Count);
+            Assert.Empty(list.Items[0].NestedBlocks);
+
+            var html = doc.ToHtmlFragment();
+            Assert.Contains("a | b c | d", html);
+        }
+    }
+}

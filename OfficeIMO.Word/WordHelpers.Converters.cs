@@ -1,17 +1,45 @@
-﻿using DocumentFormat.OpenXml.Packaging;
+using OfficeIMO.Core.Internal;
+using DocumentFormat.OpenXml.Packaging;
 
 namespace OfficeIMO.Word {
-    public partial class WordHelpers {
+    /// <summary>
+    /// Provides helper methods for Word document manipulation.
+    /// </summary>
+    public static partial class WordHelpers {
         /// <summary>
-        /// Given a document name, remove all of the headers and footers from the document.
+        /// Converts a DOTX template to a DOCX document.
+        ///
+        /// Based on: https://github.com/onizet/html2openxml/wiki/Convert-.dotx-to-.docx
         /// </summary>
-        /// <param name="filename"></param>
-        public static void RemoveHeadersAndFooters(string filename) {
-            using (WordprocessingDocument doc = WordprocessingDocument.Open(filename, true)) {
-                WordHeader.RemoveHeaders(doc);
-                WordFooter.RemoveFooters(doc);
-                // save document
-                doc.MainDocumentPart.Document.Save();
+        /// <param name="templatePath">The path to the DOTX template file.</param>
+        /// <param name="outputPath">The path where the converted DOCX file will be saved.</param>
+        public static void ConvertDotxToDocx(string templatePath, string outputPath) {
+            string fullTemplatePath = Path.GetFullPath(templatePath);
+            byte[] templateBytes = File.ReadAllBytes(fullTemplatePath);
+            using (var documentStream = new MemoryStream()) {
+                documentStream.Write(templateBytes, 0, templateBytes.Length);
+                documentStream.Position = 0;
+
+                using (WordprocessingDocument template = WordprocessingDocument.Open(documentStream, true)) {
+                    template.ChangeDocumentType(DocumentFormat.OpenXml.WordprocessingDocumentType.Document);
+
+                    MainDocumentPart mainPart = template.MainDocumentPart ?? throw new InvalidOperationException("MainDocumentPart is missing in template.");
+                    DocumentSettingsPart? settingsPart = mainPart.DocumentSettingsPart;
+                    if (settingsPart != null) {
+                        const string attachedTemplateRelationship =
+                            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/attachedTemplate";
+                        foreach (ExternalRelationship relationship in settingsPart.ExternalRelationships
+                            .Where(relationship => relationship.RelationshipType == attachedTemplateRelationship)
+                            .ToList()) {
+                            settingsPart.DeleteExternalRelationship(relationship.Id);
+                        }
+                        settingsPart.Settings?.RemoveAllChildren<DocumentFormat.OpenXml.Wordprocessing.AttachedTemplate>();
+                        settingsPart.Settings?.Save();
+                    }
+                    mainPart.Document?.Save();
+                }
+
+                OfficeFileCommit.WriteAllBytes(outputPath, documentStream.ToArray());
             }
         }
     }

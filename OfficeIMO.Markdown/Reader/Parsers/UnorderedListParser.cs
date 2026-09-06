@@ -1,0 +1,172 @@
+namespace OfficeIMO.Markdown;
+
+public static partial class MarkdownReader {
+    internal sealed class UnorderedListParser : IMarkdownBlockParser {
+        public bool TryParse(string[] lines, ref int i, MarkdownReaderOptions options, MarkdownDoc doc, MarkdownReaderState state) {
+            if (!options.UnorderedLists) return false;
+            if (!IsUnorderedListLine(lines[i], options.TaskLists, out int level0Abs, out var isTask, out var done, out var firstContent)) return false;
+            if (!TryGetUnorderedListMarkerInfo(lines[i], out int firstMarkerIndent, out _, out char firstMarker)) return false;
+            if (options.StrictListIndentation && firstMarkerIndent - state.ListMarkerIndentOffset > 3) return false;
+            using var headingAttributeScope = SuppressHeadingGenericAttributesInListItems(state);
+            if (isTask && !options.TaskLists) {
+                isTask = false;
+                done = false;
+                firstContent = GetUnorderedListItemContent(lines[i]);
+            }
+            var ul = new UnorderedListBlock();
+            var continuationIndentsByLevel = options.StrictListIndentation ? new List<int>() : null;
+            int firstContinuationIndent = GetListContinuationIndent(lines[i], options);
+            int firstStartColumn;
+            if (!isTask && TryGetIndentedCodeListLead(lines[i], options, out int codeLeadIndent, out string codeLeadContent, out int codeLeadStartColumn)) {
+                firstContinuationIndent = codeLeadIndent;
+                firstContent = codeLeadContent;
+                firstStartColumn = codeLeadStartColumn;
+            } else {
+                firstStartColumn = GetListLeadContentStartColumn(lines[i], options, isTask);
+            }
+
+            int j = i + 1;
+            List<MarkdownSourceLineSlice>? firstSourceLines = state.IsListBoundaryProbe || !state.CaptureSyntaxTree
+                ? null
+                : new List<MarkdownSourceLineSlice>();
+            List<string> firstLines = null!;
+            ListItem first;
+            if (IsImmediateListLeadBoundary(lines, j, firstContinuationIndent, options, options.ListExtras, state)
+                && TryCreateSingleLineListItem(
+                    firstContent,
+                    isTask,
+                    done,
+                    options,
+                    state,
+                    state.SourceLineOffset + i + 1,
+                    firstStartColumn,
+                    out var singleFirst)) {
+                first = singleFirst;
+            } else {
+                firstLines = ConsumeListContinuationLines(
+                    lines,
+                    ref j,
+                    firstContinuationIndent,
+                    firstContent,
+                    options,
+                    breakOnAnyOrderedListLine: options.ListExtras,
+                    sourceLines: firstSourceLines,
+                    absoluteLineOffset: state.SourceLineOffset,
+                    initialLineIndex: i,
+                    initialStartColumn: firstStartColumn,
+                    state: state);
+                first = CreateListItemFromLeadLines(firstLines, isTask, done, options, state, i, firstSourceLines);
+            }
+            first.Level = 0;
+            if (!state.IsListBoundaryProbe) {
+                SetListItemMarkerSourceSpans(first, lines[i], i, isTask, options, state);
+            }
+            if (continuationIndentsByLevel != null) {
+                TrackListItemContinuationIndent(continuationIndentsByLevel, first.Level, firstContinuationIndent);
+            }
+            if (!state.IsListBoundaryProbe && state.CaptureSyntaxTree) {
+                AddListItemLeadSyntaxNodes(first, firstLines, i, options, state, firstSourceLines);
+            }
+            ul.Items.Add(first);
+
+            // Allow both same-type and mixed nested lists under the current item.
+            ConsumeNestedBlocksForListItem(lines, ref j, level0Abs, firstContinuationIndent, options, state, first, allowNestedOrdered: true, allowNestedUnordered: true);
+
+            while (j < lines.Length) {
+                bool separatedByBlankLine = false;
+                int itemStart = j;
+                while (itemStart < lines.Length && string.IsNullOrWhiteSpace(lines[itemStart])) {
+                    separatedByBlankLine = true;
+                    itemStart++;
+                }
+
+                if (itemStart >= lines.Length
+                    || LooksLikeHr(lines[itemStart])
+                    || !IsUnorderedListLine(lines[itemStart], options.TaskLists, out var lvlAbs, out var isTask2, out var done2, out var content2)
+                    || lvlAbs < level0Abs
+                    || !TryGetUnorderedListMarkerInfo(lines[itemStart], out int markerIndent, out _, out char marker)
+                    || (options.StrictListIndentation && markerIndent - firstMarkerIndent > 3)
+                    || marker != firstMarker) {
+                    break;
+                }
+
+                if (separatedByBlankLine) {
+                    first.ForceLoose = true;
+                }
+
+                if (isTask2 && !options.TaskLists) {
+                    isTask2 = false;
+                    done2 = false;
+                    content2 = GetUnorderedListItemContent(lines[itemStart]);
+                }
+                int continuationIndent = GetListContinuationIndent(lines[itemStart], options);
+                int startColumn;
+                if (!isTask2 && TryGetIndentedCodeListLead(lines[itemStart], options, out int itemCodeLeadIndent, out string itemCodeLeadContent, out int itemCodeLeadStartColumn)) {
+                    continuationIndent = itemCodeLeadIndent;
+                    content2 = itemCodeLeadContent;
+                    startColumn = itemCodeLeadStartColumn;
+                } else {
+                    startColumn = GetListLeadContentStartColumn(lines[itemStart], options, isTask2);
+                }
+                int next = itemStart + 1;
+                List<MarkdownSourceLineSlice>? itemSourceLines = state.IsListBoundaryProbe || !state.CaptureSyntaxTree
+                    ? null
+                    : new List<MarkdownSourceLineSlice>();
+                List<string> itemLines = null!;
+                ListItem li;
+                if (IsImmediateListLeadBoundary(lines, next, continuationIndent, options, options.ListExtras, state)
+                    && TryCreateSingleLineListItem(
+                        content2,
+                        isTask2,
+                        done2,
+                        options,
+                        state,
+                        state.SourceLineOffset + itemStart + 1,
+                        startColumn,
+                        out var singleItem)) {
+                    li = singleItem;
+                } else {
+                    itemLines = ConsumeListContinuationLines(
+                        lines,
+                        ref next,
+                        continuationIndent,
+                        content2,
+                        options,
+                        breakOnAnyOrderedListLine: options.ListExtras,
+                        sourceLines: itemSourceLines,
+                        absoluteLineOffset: state.SourceLineOffset,
+                        initialLineIndex: itemStart,
+                        initialStartColumn: startColumn,
+                        state: state);
+                    li = CreateListItemFromLeadLines(itemLines, isTask2, done2, options, state, itemStart, itemSourceLines);
+                }
+                li.Level = continuationIndentsByLevel != null
+                    ? GetRelativeListItemLevel(continuationIndentsByLevel, lines[itemStart])
+                    : lvlAbs - level0Abs;
+                if (!state.IsListBoundaryProbe) {
+                    SetListItemMarkerSourceSpans(li, lines[itemStart], itemStart, isTask2, options, state);
+                }
+                if (separatedByBlankLine) {
+                    li.ForceLoose = true;
+                }
+                if (continuationIndentsByLevel != null) {
+                    TrackListItemContinuationIndent(continuationIndentsByLevel, li.Level, continuationIndent);
+                }
+                if (!state.IsListBoundaryProbe && state.CaptureSyntaxTree) {
+                    AddListItemLeadSyntaxNodes(li, itemLines, itemStart, options, state, itemSourceLines);
+                }
+                ul.Items.Add(li);
+                j = next;
+
+                ConsumeNestedBlocksForListItem(lines, ref j, lvlAbs, continuationIndent, options, state, li, allowNestedOrdered: true, allowNestedUnordered: true);
+            }
+            if (state.IsListBoundaryProbe || !state.CaptureSyntaxTree) {
+                doc.AddWithoutObjectTreeBinding(ul);
+            } else {
+                doc.Add(ul);
+            }
+            i = j;
+            return true;
+        }
+    }
+}

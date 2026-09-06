@@ -1,0 +1,42 @@
+using System;
+using DocumentFormat.OpenXml.Wordprocessing;
+using OfficeIMO.Word;
+
+namespace OfficeIMO.Examples.Word {
+    internal static partial class Watermark {
+        /// <summary>
+        /// Removes all watermarks from a document.
+        /// </summary>
+        /// <param name="folderPath">Destination folder for the file.</param>
+        /// <param name="openWord">Whether to open the document after creation.</param>
+        public static void Watermark_Remove(string folderPath, bool openWord) {
+            Console.WriteLine("[*] Removing watermarks using RemoveWatermark");
+            string filePath = System.IO.Path.Combine(folderPath, "Watermark Remove.docx");
+
+            using (WordDocument document = WordDocument.Create(filePath)) {
+                document.AddParagraph("Test");
+                document.AddHeadersAndFooters();
+                document.DifferentFirstPage = true;
+                document.DifferentOddAndEvenPages = true;
+
+                var section0 = document.Sections[0];
+                var defaultHeader = GetRequiredHeader(section0);
+                var firstHeader = GetRequiredHeader(section0, HeaderFooterValues.First);
+                var evenHeader = GetRequiredHeader(section0, HeaderFooterValues.Even);
+
+                defaultHeader.AddWatermark(WordWatermarkStyle.Text, "Default");
+                firstHeader.AddWatermark(WordWatermarkStyle.Text, "First");
+                evenHeader.AddWatermark(WordWatermarkStyle.Text, "Even");
+
+                Console.WriteLine("Watermarks before: " + document.Watermarks.Count);
+                foreach (var watermark in document.Watermarks.ToList()) {
+                    watermark.Remove();
+                }
+                Console.WriteLine("Watermarks after: " + document.Watermarks.Count);
+
+                document.Save();
+                if (openWord) document.OpenInApplication();
+            }
+        }
+    }
+}

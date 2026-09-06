@@ -1,0 +1,132 @@
+namespace OfficeIMO.Pdf;
+
+/// <summary>
+/// Configures the generic preservation checks used after PDF rewrite and manipulation operations.
+/// </summary>
+public sealed class PdfRewritePreservationOptions {
+    private readonly List<string> _requiredTextMarkers = new List<string>();
+    private readonly HashSet<string> _allowedMetadataChanges = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _preservedActionTypes = new HashSet<string>(StringComparer.Ordinal);
+    private readonly HashSet<string> _excludedAnnotationSubtypes = new HashSet<string>(StringComparer.Ordinal);
+    private readonly HashSet<string> _excludedLinkAnnotationUris = new HashSet<string>(StringComparer.Ordinal);
+    private readonly HashSet<string> _excludedActionUris = new HashSet<string>(StringComparer.Ordinal);
+
+    /// <summary>Read options used to inspect the original document, including its password when encrypted.</summary>
+    public PdfLoadOptions? OriginalReadOptions { get; set; }
+
+    /// <summary>Read options used to inspect the rewritten document, including its new password when encrypted.</summary>
+    public PdfLoadOptions? RewrittenReadOptions { get; set; }
+
+    /// <summary>True when the rewritten PDF must keep the original page count.</summary>
+    public bool PreservePageCount { get; set; } = true;
+
+    /// <summary>True when each unchanged page must keep width, height, and rotation.</summary>
+    public bool PreservePageGeometry { get; set; } = true;
+
+    /// <summary>True when Info dictionary metadata fields must be preserved except for explicitly allowed fields.</summary>
+    public bool PreserveMetadata { get; set; } = true;
+
+    /// <summary>True when outline/bookmark count must not be lost.</summary>
+    public bool PreserveOutlines { get; set; } = true;
+
+    /// <summary>True when named destination count must not be lost.</summary>
+    public bool PreserveNamedDestinations { get; set; } = true;
+
+    /// <summary>True when page-label count and label ranges must not be lost.</summary>
+    public bool PreservePageLabels { get; set; } = true;
+
+    /// <summary>True when simple link annotation count must not be lost.</summary>
+    public bool PreserveLinkAnnotations { get; set; } = true;
+
+    /// <summary>True when generic annotation count must not be lost.</summary>
+    public bool PreserveAnnotations { get; set; } = true;
+
+    /// <summary>Annotation subtypes excluded from generic annotation-count preservation.</summary>
+    public ISet<string> ExcludedAnnotationSubtypes => _excludedAnnotationSubtypes;
+
+    /// <summary>URI targets excluded from simple link-annotation preservation.</summary>
+    public ISet<string> ExcludedLinkAnnotationUris => _excludedLinkAnnotationUris;
+
+    /// <summary>URI action targets excluded from catalog and page-action preservation.</summary>
+    public ISet<string> ExcludedActionUris => _excludedActionUris;
+
+    /// <summary>True when simple AcroForm field count and form markers must not be lost.</summary>
+    public bool PreserveForms { get; set; } = true;
+
+    /// <summary>True when embedded file/associated file count must not be lost.</summary>
+    public bool PreserveEmbeddedFiles { get; set; } = true;
+
+    /// <summary>True when XMP metadata markers must not be lost.</summary>
+    public bool PreserveXmpMetadata { get; set; } = true;
+
+    /// <summary>True when output intent count must not be lost.</summary>
+    public bool PreserveOutputIntents { get; set; } = true;
+
+    /// <summary>True when optional content/layer markers must not be lost.</summary>
+    public bool PreserveOptionalContent { get; set; } = true;
+
+    /// <summary>True when tagged PDF structure markers and readable structure metadata must not be lost.</summary>
+    public bool PreserveTaggedContent { get; set; } = true;
+
+    /// <summary>True when catalog page mode, layout, language, and viewer preferences must not be lost.</summary>
+    public bool PreserveCatalogViewSettings { get; set; } = true;
+
+    /// <summary>True when document open-action destination metadata must not be changed.</summary>
+    public bool PreserveOpenAction { get; set; } = true;
+
+    /// <summary>True when catalog-level active action metadata must not be changed.</summary>
+    public bool PreserveCatalogActions { get; set; } = true;
+
+    /// <summary>True when page-level additional action metadata must not be changed.</summary>
+    public bool PreservePageActions { get; set; } = true;
+
+    /// <summary>True when retained AcroForm widget actions must not be lost.</summary>
+    public bool PreserveFormWidgetActions { get; set; }
+
+    /// <summary>Action types compared when action preservation is enabled. An empty set compares every action type.</summary>
+    public ISet<string> PreservedActionTypes => _preservedActionTypes;
+
+    internal bool FilterActionsByPreservedTypes { get; set; }
+
+    /// <summary>True when viewer preference values must not be changed.</summary>
+    public bool PreserveViewerPreferences { get; set; } = true;
+
+    /// <summary>True when header, catalog, and effective PDF version markers must not be changed.</summary>
+    public bool PreserveDocumentVersionState { get; set; } = true;
+
+    /// <summary>True when xref-stream, object-stream, previous-revision, and incremental-update markers must not be lost.</summary>
+    public bool PreserveRevisionStructure { get; set; } = true;
+
+    /// <summary>True when security, signature, DSS/VRI, DocMDP, and usage-rights markers must not be lost or changed.</summary>
+    public bool PreserveSecurityState { get; set; } = true;
+
+    /// <summary>Text markers that must remain extractable from the rewritten PDF.</summary>
+    public IList<string> RequiredTextMarkers => _requiredTextMarkers;
+
+    /// <summary>Metadata fields that the rewrite is allowed to change. Supported names: Title, Author, Subject, Keywords.</summary>
+    public ISet<string> AllowedMetadataChanges => _allowedMetadataChanges;
+
+    /// <summary>Adds required text markers and returns this options object for fluent setup.</summary>
+    public PdfRewritePreservationOptions RequireTextMarkers(params string[] markers) {
+        Guard.NotNull(markers, nameof(markers));
+        for (int i = 0; i < markers.Length; i++) {
+            if (!string.IsNullOrEmpty(markers[i])) {
+                _requiredTextMarkers.Add(markers[i]);
+            }
+        }
+
+        return this;
+    }
+
+    /// <summary>Allows specific metadata fields to change and returns this options object for fluent setup.</summary>
+    public PdfRewritePreservationOptions AllowMetadataChanges(params string[] fieldNames) {
+        Guard.NotNull(fieldNames, nameof(fieldNames));
+        for (int i = 0; i < fieldNames.Length; i++) {
+            if (!string.IsNullOrWhiteSpace(fieldNames[i])) {
+                _allowedMetadataChanges.Add(fieldNames[i]);
+            }
+        }
+
+        return this;
+    }
+}

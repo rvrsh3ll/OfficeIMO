@@ -14,7 +14,7 @@ namespace OfficeIMO.Examples.Word {
             using (WordDocument document = WordDocument.Create(filePath)) {
                 var paragraph = document.AddParagraph("Adding paragraph with some text with special chars to check if FontFamily works correctly for those");
 
-                paragraph.Color = SixLabors.ImageSharp.Color.Red;
+                paragraph.Color = OfficeIMO.Drawing.OfficeColor.Red;
 
                 // this is only a test of setting FontFamily per paragraph. Please use document.Settings.FontFamily to set it per document.
                 paragraph = document.AddParagraph("Wszedł kot do domu, gdzie były różne buty. ");
@@ -29,7 +29,8 @@ namespace OfficeIMO.Examples.Word {
                 paragraph.FontFamilyEastAsia = "Arial"; // to change east asia font family
                 paragraph.FontFamilyHighAnsi = "Arial"; // to change high ansi font family
                 paragraph.FontFamilyComplexScript = "Arial"; // to change complex script font family
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
     }

@@ -1,0 +1,57 @@
+using System.IO;
+using System.Net;
+using System.Net.Sockets;
+using System.Threading.Tasks;
+using OfficeIMO.Drawing;
+using OfficeIMO.Word;
+using Xunit;
+
+namespace OfficeIMO.Tests {
+    public partial class Word {
+        [Fact]
+        public async Task Test_AddImageFromUrl() {
+            var filePath = Path.Combine(_directoryWithFiles, "ImageFromUrl.docx");
+            string imagePath = Path.Combine(_directoryWithImages, "Kulek.jpg");
+
+            int port = GetAvailablePort();
+
+            using var listener = new HttpListener();
+            listener.Prefixes.Add($"http://localhost:{port}/");
+            listener.Start();
+            var serverTask = Task.Run(async () => {
+                var context = await listener.GetContextAsync();
+                var bytes = File.ReadAllBytes(imagePath);
+                context.Response.ContentType = "image/jpeg";
+                context.Response.ContentLength64 = bytes.Length;
+                await context.Response.OutputStream.WriteAsync(bytes, 0, bytes.Length);
+                context.Response.OutputStream.Flush();
+                context.Response.Close();
+            });
+
+            using (var document = WordDocument.Create(filePath)) {
+                var img = await document.AddImageFromUrlAsync(
+                    $"http://localhost:{port}/",
+                    40,
+                    40,
+                    new OfficeRemoteImageLoadOptions { AllowPrivateNetworkAddresses = true });
+                Assert.NotNull(img);
+                document.Save();
+            }
+
+            await serverTask;
+            listener.Stop();
+
+            using (var document = WordDocument.Load(filePath)) {
+                Assert.Single(document.Images);
+            }
+        }
+
+        private static int GetAvailablePort() {
+            var tcpListener = new TcpListener(IPAddress.Loopback, 0);
+            tcpListener.Start();
+            int port = ((IPEndPoint)tcpListener.LocalEndpoint).Port;
+            tcpListener.Stop();
+            return port;
+        }
+    }
+}

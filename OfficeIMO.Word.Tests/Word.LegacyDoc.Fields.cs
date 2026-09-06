@@ -1,0 +1,768 @@
+using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Wordprocessing;
+using OfficeIMO.Word;
+using OfficeIMO.Word.LegacyDoc.Model;
+using M = DocumentFormat.OpenXml.Math;
+using Xunit;
+
+namespace OfficeIMO.Tests {
+    public partial class Word {
+        [Fact]
+        public void LegacyDoc_SaveDocPath_WritesNativeDocSimpleFieldBookmarksAndReloadsThroughLegacyReader() {
+            string docPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".doc");
+
+            try {
+                using (WordDocument document = WordDocument.Create()) {
+                    WordParagraph bodyParagraph = document.AddParagraph("Body ");
+                    AppendBookmarkedSimpleField(bodyParagraph._paragraph, "81", "BodySimpleFieldBookmark", " PAGE ");
+
+                    WordTable table = document.AddTable(1, 1);
+                    WordParagraph cellParagraph = table.Rows[0].Cells[0].AddParagraph("Cell ", removeExistingParagraphs: true);
+                    AppendBookmarkedSimpleField(cellParagraph._paragraph, "82", "CellSimpleFieldBookmark", " NUMPAGES ");
+
+                    document.AddHeadersAndFooters();
+                    WordSection section = document.Sections[0];
+                    WordParagraph headerParagraph = section.Header.Default!.AddParagraph("Header ");
+                    AppendBookmarkedSimpleField(headerParagraph._paragraph, "83", "HeaderSimpleFieldBookmark", " PAGE ");
+
+                    WordParagraph footerParagraph = section.Footer.Default!.AddParagraph("Footer ");
+                    AppendBookmarkedSimpleField(footerParagraph._paragraph, "84", "FooterSimpleFieldBookmark", " NUMPAGES ");
+
+                    WordParagraph noteReferences = document.AddParagraph("Notes ");
+                    WordParagraph footnoteReference = noteReferences.AddFootNote("footnote placeholder");
+                    WordParagraph footnoteBody = footnoteReference.FootNote!.Paragraphs![1];
+                    AppendBookmarkedSimpleField(footnoteBody._paragraph, "85", "FootnoteSimpleFieldBookmark", " PAGE ");
+
+                    WordParagraph endnoteReference = noteReferences.AddEndNote("endnote placeholder");
+                    WordParagraph endnoteBody = endnoteReference.EndNote!.Paragraphs![1];
+                    AppendBookmarkedSimpleField(endnoteBody._paragraph, "86", "EndnoteSimpleFieldBookmark", " NUMPAGES ");
+
+                    document.Save(docPath);
+                }
+
+                using WordDocument reloaded = WordDocument.Load(docPath);
+
+                Assert.True(reloaded.SourceFormat == WordFileFormat.Doc);
+                Assert.Empty(reloaded.LegacyDocUnsupportedFeatures);
+                AssertBookmarkRoundTrip(reloaded, "BodySimpleFieldBookmark");
+                AssertBookmarkRoundTrip(reloaded, "CellSimpleFieldBookmark");
+                AssertBookmarkRoundTrip(reloaded, "HeaderSimpleFieldBookmark");
+                AssertBookmarkRoundTrip(reloaded, "FooterSimpleFieldBookmark");
+                AssertBookmarkRoundTrip(reloaded, "FootnoteSimpleFieldBookmark");
+                AssertBookmarkRoundTrip(reloaded, "EndnoteSimpleFieldBookmark");
+            } finally {
+                DeleteIfExists(docPath);
+            }
+        }
+
+        [Fact]
+        public void LegacyDoc_SaveDocPath_WritesNativeDocSimpleFieldInteriorBookmarksAndReloadsThroughLegacyReader() {
+            string docPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".doc");
+
+            try {
+                using (WordDocument document = WordDocument.Create()) {
+                    WordParagraph bodyParagraph = document.AddParagraph("Body ");
+                    AppendInteriorBookmarkedSimpleField(bodyParagraph._paragraph, "87", "InteriorSimpleFieldBookmark", " DATE ", "Al", "pha");
+
+                    WordParagraph noteReferences = document.AddParagraph("Notes ");
+                    WordParagraph footnoteReference = noteReferences.AddFootNote("footnote placeholder");
+                    WordParagraph footnoteBody = footnoteReference.FootNote!.Paragraphs![1];
+                    AppendInteriorBookmarkedSimpleField(footnoteBody._paragraph, "88", "InteriorFootnoteSimpleFieldBookmark", " DATE ", "Be", "ta");
+
+                    document.Save(docPath);
+                }
+
+                using WordDocument reloaded = WordDocument.Load(docPath);
+
+                Assert.True(reloaded.SourceFormat == WordFileFormat.Doc);
+                Assert.Empty(reloaded.LegacyDocUnsupportedFeatures);
+                AssertBookmarkRoundTrip(reloaded, "InteriorSimpleFieldBookmark");
+                AssertBookmarkRoundTrip(reloaded, "InteriorFootnoteSimpleFieldBookmark");
+                SimpleField[] dateFields = GetReloadedDateTimeFields(reloaded._wordprocessingDocument!.MainDocumentPart!).ToArray();
+                Assert.Contains(dateFields, field => IsFieldWithText(field, "DATE", "Alpha"));
+                Assert.Contains(dateFields, field => IsFieldWithText(field, "DATE", "Beta"));
+            } finally {
+                DeleteIfExists(docPath);
+            }
+        }
+
+        [Fact]
+        public void LegacyDoc_SaveDocPath_WritesNativeDocComplexFieldBookmarksAndReloadsThroughLegacyReader() {
+            string docPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".doc");
+
+            try {
+                using (WordDocument document = WordDocument.Create()) {
+                    WordParagraph bodyParagraph = document.AddParagraph("Body ");
+                    AppendBookmarkedComplexField(bodyParagraph._paragraph, "91", "BodyComplexFieldBookmark", " PAGE ");
+
+                    WordTable table = document.AddTable(1, 1);
+                    WordParagraph cellParagraph = table.Rows[0].Cells[0].AddParagraph("Cell ", removeExistingParagraphs: true);
+                    AppendBookmarkedComplexField(cellParagraph._paragraph, "92", "CellComplexFieldBookmark", " NUMPAGES ");
+
+                    document.AddHeadersAndFooters();
+                    WordSection section = document.Sections[0];
+                    WordParagraph headerParagraph = section.Header.Default!.AddParagraph("Header ");
+                    AppendBookmarkedComplexField(headerParagraph._paragraph, "93", "HeaderComplexFieldBookmark", " PAGE ");
+
+                    WordParagraph footerParagraph = section.Footer.Default!.AddParagraph("Footer ");
+                    AppendBookmarkedComplexField(footerParagraph._paragraph, "94", "FooterComplexFieldBookmark", " NUMPAGES ");
+
+                    WordParagraph noteReferences = document.AddParagraph("Notes ");
+                    WordParagraph footnoteReference = noteReferences.AddFootNote("footnote placeholder");
+                    WordParagraph footnoteBody = footnoteReference.FootNote!.Paragraphs![1];
+                    AppendBookmarkedComplexField(footnoteBody._paragraph, "95", "FootnoteComplexFieldBookmark", " PAGE ");
+
+                    WordParagraph endnoteReference = noteReferences.AddEndNote("endnote placeholder");
+                    WordParagraph endnoteBody = endnoteReference.EndNote!.Paragraphs![1];
+                    AppendBookmarkedComplexField(endnoteBody._paragraph, "96", "EndnoteComplexFieldBookmark", " NUMPAGES ");
+
+                    document.Save(docPath);
+                }
+
+                using WordDocument reloaded = WordDocument.Load(docPath);
+
+                Assert.True(reloaded.SourceFormat == WordFileFormat.Doc);
+                Assert.Empty(reloaded.LegacyDocUnsupportedFeatures);
+                AssertBookmarkRoundTrip(reloaded, "BodyComplexFieldBookmark");
+                AssertBookmarkRoundTrip(reloaded, "CellComplexFieldBookmark");
+                AssertBookmarkRoundTrip(reloaded, "HeaderComplexFieldBookmark");
+                AssertBookmarkRoundTrip(reloaded, "FooterComplexFieldBookmark");
+                AssertBookmarkRoundTrip(reloaded, "FootnoteComplexFieldBookmark");
+                AssertBookmarkRoundTrip(reloaded, "EndnoteComplexFieldBookmark");
+            } finally {
+                DeleteIfExists(docPath);
+            }
+        }
+
+        [Fact]
+        public void LegacyDoc_SaveDocPath_WritesNativeDocDateFieldsAndReloadsThroughLegacyReader() {
+            string docPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".doc");
+            const string dateInstruction = " DATE \\@ \"yyyy-MM-dd\" ";
+
+            try {
+                using (WordDocument document = WordDocument.Create()) {
+                    WordParagraph bodyParagraph = document.AddParagraph("Body date ");
+                    AppendSimpleField(bodyParagraph._paragraph, dateInstruction, "2026-07-01");
+
+                    WordTable table = document.AddTable(1, 1);
+                    WordParagraph cellParagraph = table.Rows[0].Cells[0].AddParagraph("Cell date ", removeExistingParagraphs: true);
+                    AppendComplexField(cellParagraph._paragraph, dateInstruction, "2026-07-02");
+
+                    document.AddHeadersAndFooters();
+                    WordSection section = document.Sections[0];
+                    WordParagraph headerParagraph = section.Header.Default!.AddParagraph("Header date ");
+                    AppendSimpleField(headerParagraph._paragraph, dateInstruction, "2026-07-03");
+
+                    WordParagraph footerParagraph = section.Footer.Default!.AddParagraph("Footer date ");
+                    AppendComplexField(footerParagraph._paragraph, dateInstruction, "2026-07-04");
+
+                    WordParagraph noteReferences = document.AddParagraph("Notes ");
+                    WordParagraph footnoteReference = noteReferences.AddFootNote("footnote placeholder");
+                    WordParagraph footnoteBody = footnoteReference.FootNote!.Paragraphs![1];
+                    AppendSimpleField(footnoteBody._paragraph, dateInstruction, "2026-07-05");
+
+                    WordParagraph endnoteReference = noteReferences.AddEndNote("endnote placeholder");
+                    WordParagraph endnoteBody = endnoteReference.EndNote!.Paragraphs![1];
+                    AppendComplexField(endnoteBody._paragraph, dateInstruction, "2026-07-06");
+
+                    document.Save(docPath);
+                }
+
+                using WordDocument reloaded = WordDocument.Load(docPath);
+
+                Assert.True(reloaded.SourceFormat == WordFileFormat.Doc);
+                Assert.Empty(reloaded.LegacyDocUnsupportedFeatures);
+                MainDocumentPart mainPart = reloaded._wordprocessingDocument!.MainDocumentPart!;
+                SimpleField[] dateFields = GetReloadedDateTimeFields(mainPart).ToArray();
+                Assert.Equal(6, dateFields.Length);
+                Assert.Contains(dateFields, field => IsFieldWithText(field, "DATE", "2026-07-01"));
+                Assert.Contains(dateFields, field => IsFieldWithText(field, "DATE", "2026-07-02"));
+                Assert.Contains(dateFields, field => IsFieldWithText(field, "DATE", "2026-07-03"));
+                Assert.Contains(dateFields, field => IsFieldWithText(field, "DATE", "2026-07-04"));
+                Assert.Contains(dateFields, field => IsFieldWithText(field, "DATE", "2026-07-05"));
+                Assert.Contains(dateFields, field => IsFieldWithText(field, "DATE", "2026-07-06"));
+            } finally {
+                DeleteIfExists(docPath);
+            }
+        }
+
+        [Fact]
+        public void LegacyDoc_SaveDocPath_WritesNativeDocStaticDateTimeFieldsAndReloadsThroughLegacyReader() {
+            string docPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".doc");
+
+            try {
+                using (WordDocument document = WordDocument.Create()) {
+                    AppendSimpleField(document.AddParagraph("Time ")._paragraph, " TIME \\@ \"HH:mm\" ", "09:30");
+                    AppendComplexField(document.AddParagraph("Created ")._paragraph, " CREATEDATE \\@ \"yyyy-MM-dd\" ", "2026-06-01");
+                    AppendSimpleField(document.AddParagraph("Saved ")._paragraph, " SAVEDATE \\@ \"yyyy-MM-dd\" ", "2026-06-02");
+                    AppendComplexField(document.AddParagraph("Printed ")._paragraph, " PRINTDATE \\@ \"yyyy-MM-dd\" ", "2026-06-03");
+
+                    document.Save(docPath);
+                }
+
+                using WordDocument reloaded = WordDocument.Load(docPath);
+
+                Assert.True(reloaded.SourceFormat == WordFileFormat.Doc);
+                Assert.Empty(reloaded.LegacyDocUnsupportedFeatures);
+                SimpleField[] dateTimeFields = reloaded._wordprocessingDocument!.MainDocumentPart!.Document.Body!
+                    .Descendants<SimpleField>()
+                    .Where(IsStaticDateTimeField)
+                    .ToArray();
+                Assert.Equal(4, dateTimeFields.Length);
+                Assert.Contains(dateTimeFields, field => IsFieldWithText(field, "TIME", "09:30"));
+                Assert.Contains(dateTimeFields, field => IsFieldWithText(field, "CREATEDATE", "2026-06-01"));
+                Assert.Contains(dateTimeFields, field => IsFieldWithText(field, "SAVEDATE", "2026-06-02"));
+                Assert.Contains(dateTimeFields, field => IsFieldWithText(field, "PRINTDATE", "2026-06-03"));
+            } finally {
+                DeleteIfExists(docPath);
+            }
+        }
+
+        [Fact]
+        public void LegacyDoc_SaveDocPath_WritesNativeDocFieldResultInlineCharactersAndReloadsThroughLegacyReader() {
+            string docPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".doc");
+
+            try {
+                using (WordDocument document = WordDocument.Create()) {
+                    AppendSimpleFieldWithResultRun(
+                        document.AddParagraph("Body inline field ")._paragraph,
+                        " DATE \\@ \"yyyy-MM-dd\" ",
+                        "Body",
+                        BreakValues.TextWrapping);
+
+                    WordTable table = document.AddTable(1, 1);
+                    WordParagraph cellParagraph = table.Rows[0].Cells[0].AddParagraph("Cell inline field ", removeExistingParagraphs: true);
+                    AppendComplexFieldWithResultRun(
+                        cellParagraph._paragraph,
+                        " TIME \\@ \"HH:mm\" ",
+                        "Cell",
+                        BreakValues.Page);
+
+                    document.AddHeadersAndFooters();
+                    WordSection section = document.Sections[0];
+                    AppendSimpleFieldWithResultRun(
+                        section.Header.Default!.AddParagraph("Header inline field ")._paragraph,
+                        " CREATEDATE \\@ \"yyyy-MM-dd\" ",
+                        "Header",
+                        BreakValues.Column);
+
+                    WordParagraph noteReferences = document.AddParagraph("Notes ");
+                    WordParagraph footnoteReference = noteReferences.AddFootNote("footnote placeholder");
+                    WordParagraph footnoteBody = footnoteReference.FootNote!.Paragraphs![1];
+                    AppendSimpleFieldWithResultRun(
+                        footnoteBody._paragraph,
+                        " SAVEDATE \\@ \"yyyy-MM-dd\" ",
+                        "Footnote",
+                        BreakValues.TextWrapping);
+
+                    WordParagraph endnoteReference = noteReferences.AddEndNote("endnote placeholder");
+                    WordParagraph endnoteBody = endnoteReference.EndNote!.Paragraphs![1];
+                    AppendComplexFieldWithResultRun(
+                        endnoteBody._paragraph,
+                        " PRINTDATE \\@ \"yyyy-MM-dd\" ",
+                        "Endnote",
+                        BreakValues.Page);
+
+                    document.Save(docPath);
+                }
+
+                using WordDocument reloaded = WordDocument.Load(docPath);
+
+                Assert.True(reloaded.SourceFormat == WordFileFormat.Doc);
+                Assert.Empty(reloaded.LegacyDocUnsupportedFeatures);
+                SimpleField[] fields = GetReloadedDateTimeFields(reloaded._wordprocessingDocument!.MainDocumentPart!).ToArray();
+                AssertFieldResultInlineContent(fields, "DATE", "BodyTextSoftHyphenHardHyphenWrap", BreakValues.TextWrapping);
+                AssertFieldResultInlineContent(fields, "TIME", "CellTextSoftHyphenHardHyphenWrap", BreakValues.Page);
+                AssertFieldResultInlineContent(fields, "CREATEDATE", "HeaderTextSoftHyphenHardHyphenWrap", BreakValues.Column);
+                AssertFieldResultInlineContent(fields, "SAVEDATE", "FootnoteTextSoftHyphenHardHyphenWrap", BreakValues.TextWrapping);
+                AssertFieldResultInlineContent(fields, "PRINTDATE", "EndnoteTextSoftHyphenHardHyphenWrap", BreakValues.Page);
+            } finally {
+                DeleteIfExists(docPath);
+            }
+        }
+
+        [Fact]
+        public void LegacyDoc_SaveDocPath_WritesNativeDocDocumentPropertyFieldsAndReloadsThroughLegacyReader() {
+            string docPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".doc");
+
+            try {
+                using (WordDocument document = WordDocument.Create()) {
+                    AppendSimpleField(document.AddParagraph("Author ")._paragraph, " AUTHOR ", "Ada Writer");
+
+                    WordTable table = document.AddTable(1, 1);
+                    WordParagraph cellParagraph = table.Rows[0].Cells[0].AddParagraph("Title ", removeExistingParagraphs: true);
+                    AppendComplexField(cellParagraph._paragraph, " TITLE ", "Quarterly Plan");
+
+                    document.AddHeadersAndFooters();
+                    WordSection section = document.Sections[0];
+                    AppendSimpleField(section.Header.Default!.AddParagraph("Client ")._paragraph, " DOCPROPERTY \"ClientName\" ", "Evotec");
+                    AppendComplexField(section.Footer.Default!.AddParagraph("Subject ")._paragraph, " SUBJECT ", "Legacy DOC subject");
+
+                    WordParagraph noteReferences = document.AddParagraph("Notes ");
+                    WordParagraph footnoteReference = noteReferences.AddFootNote("footnote placeholder");
+                    WordParagraph footnoteBody = footnoteReference.FootNote!.Paragraphs![1];
+                    AppendSimpleField(footnoteBody._paragraph, " KEYWORDS ", "doc fields");
+
+                    WordParagraph endnoteReference = noteReferences.AddEndNote("endnote placeholder");
+                    WordParagraph endnoteBody = endnoteReference.EndNote!.Paragraphs![1];
+                    AppendComplexField(endnoteBody._paragraph, " LASTSAVEDBY ", "OfficeIMO");
+
+                    document.Save(docPath);
+                }
+
+                using WordDocument reloaded = WordDocument.Load(docPath);
+
+                Assert.True(reloaded.SourceFormat == WordFileFormat.Doc);
+                Assert.Empty(reloaded.LegacyDocUnsupportedFeatures);
+                MainDocumentPart mainPart = reloaded._wordprocessingDocument!.MainDocumentPart!;
+                SimpleField[] documentPropertyFields = GetReloadedDocumentPropertyFields(mainPart).ToArray();
+                Assert.Equal(6, documentPropertyFields.Length);
+                Assert.Contains(documentPropertyFields, field => IsFieldWithText(field, "AUTHOR", "Ada Writer"));
+                Assert.Contains(documentPropertyFields, field => IsFieldWithText(field, "TITLE", "Quarterly Plan"));
+                Assert.Contains(documentPropertyFields, field => IsFieldWithText(field, "DOCPROPERTY", "Evotec"));
+                Assert.Contains(documentPropertyFields, field => IsFieldWithText(field, "SUBJECT", "Legacy DOC subject"));
+                Assert.Contains(documentPropertyFields, field => IsFieldWithText(field, "KEYWORDS", "doc fields"));
+                Assert.Contains(documentPropertyFields, field => IsFieldWithText(field, "LASTSAVEDBY", "OfficeIMO"));
+            } finally {
+                DeleteIfExists(docPath);
+            }
+        }
+
+        [Fact]
+        public void LegacyDoc_SaveDocPath_PreservesEmptyNonPageFieldResultsInNativeDoc() {
+            string docPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".doc");
+
+            try {
+                using (WordDocument document = WordDocument.Create()) {
+                    AppendSimpleField(document.AddParagraph("Empty date ")._paragraph, " DATE \\@ \"yyyy-MM-dd\" ", string.Empty);
+                    AppendComplexField(document.AddParagraph("Empty property ")._paragraph, " DOCPROPERTY \"ClientName\" ", string.Empty);
+
+                    document.Save(docPath);
+                }
+
+                string wordDocumentAscii = Encoding.ASCII.GetString(ReadCompoundStream(File.ReadAllBytes(docPath), "WordDocument"));
+                Assert.Contains("DATE", wordDocumentAscii);
+                Assert.Contains("DOCPROPERTY", wordDocumentAscii);
+                Assert.Contains("\u0014\u0015", wordDocumentAscii);
+                Assert.DoesNotContain("\u00141\u0015", wordDocumentAscii);
+            } finally {
+                DeleteIfExists(docPath);
+            }
+        }
+
+        [Fact]
+        public void LegacyDoc_SaveDocPath_WritesNativeDocInlineContentControlStaticDateTimeFieldsAndReloadsThroughLegacyReader() {
+            string docPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".doc");
+
+            try {
+                using (WordDocument document = WordDocument.Create()) {
+                    WordParagraph bodyParagraph = document.AddParagraph("Body controlled ");
+                    bodyParagraph._paragraph.Append(CreateInlineContentControl(
+                        "Legacy DOC body inline field",
+                        CreateSimpleField(" DATE \\@ \"yyyy-MM-dd\" ", "2026-07-01")));
+
+                    WordTable table = document.AddTable(1, 1);
+                    WordParagraph cellParagraph = table.Rows[0].Cells[0].AddParagraph("Cell controlled ", removeExistingParagraphs: true);
+                    cellParagraph._paragraph.Append(CreateInlineContentControl(
+                        "Legacy DOC table inline field",
+                        CreateSimpleField(" TIME \\@ \"HH:mm\" ", "09:30")));
+
+                    document.AddHeadersAndFooters();
+                    WordSection section = document.Sections[0];
+                    WordParagraph headerParagraph = section.Header.Default!.AddParagraph("Header controlled ");
+                    headerParagraph._paragraph.Append(CreateInlineContentControl(
+                        "Legacy DOC header inline field",
+                        CreateSimpleField(" CREATEDATE \\@ \"yyyy-MM-dd\" ", "2026-06-01")));
+
+                    WordParagraph footerParagraph = section.Footer.Default!.AddParagraph("Footer controlled ");
+                    footerParagraph._paragraph.Append(CreateInlineContentControl(
+                        "Legacy DOC footer inline field",
+                        CreateSimpleField(" SAVEDATE \\@ \"yyyy-MM-dd\" ", "2026-06-02")));
+
+                    WordParagraph noteReferences = document.AddParagraph("Notes ");
+                    WordParagraph footnoteReference = noteReferences.AddFootNote("footnote placeholder");
+                    WordParagraph footnoteBody = footnoteReference.FootNote!.Paragraphs![1];
+                    footnoteBody._paragraph.Append(CreateInlineContentControl(
+                        "Legacy DOC footnote inline field",
+                        CreateSimpleField(" PRINTDATE \\@ \"yyyy-MM-dd\" ", "2026-06-03")));
+
+                    WordParagraph endnoteReference = noteReferences.AddEndNote("endnote placeholder");
+                    WordParagraph endnoteBody = endnoteReference.EndNote!.Paragraphs![1];
+                    endnoteBody._paragraph.Append(CreateInlineContentControl(
+                        "Legacy DOC endnote inline field",
+                        CreateSimpleField(" DATE \\@ \"yyyy-MM-dd\" ", "2026-07-02")));
+
+                    document.Save(docPath);
+                }
+
+                using WordDocument reloaded = WordDocument.Load(docPath);
+
+                Assert.True(reloaded.SourceFormat == WordFileFormat.Doc);
+                Assert.Empty(reloaded.LegacyDocUnsupportedFeatures);
+                MainDocumentPart mainPart = reloaded._wordprocessingDocument!.MainDocumentPart!;
+                SimpleField[] dateTimeFields = GetReloadedDateTimeFields(mainPart).ToArray();
+                Assert.Equal(6, dateTimeFields.Length);
+                Assert.Contains(dateTimeFields, field => IsFieldWithText(field, "DATE", "2026-07-01"));
+                Assert.Contains(dateTimeFields, field => IsFieldWithText(field, "TIME", "09:30"));
+                Assert.Contains(dateTimeFields, field => IsFieldWithText(field, "CREATEDATE", "2026-06-01"));
+                Assert.Contains(dateTimeFields, field => IsFieldWithText(field, "SAVEDATE", "2026-06-02"));
+                Assert.Contains(dateTimeFields, field => IsFieldWithText(field, "PRINTDATE", "2026-06-03"));
+                Assert.Contains(dateTimeFields, field => IsFieldWithText(field, "DATE", "2026-07-02"));
+                Assert.Empty(mainPart.Document.Descendants<SdtRun>());
+                Assert.Empty(mainPart.HeaderParts.SelectMany(part => part.Header.Descendants<SdtRun>()));
+                Assert.Empty(mainPart.FooterParts.SelectMany(part => part.Footer.Descendants<SdtRun>()));
+                Assert.Empty(mainPart.FootnotesPart!.Footnotes!.Descendants<SdtRun>());
+                Assert.Empty(mainPart.EndnotesPart!.Endnotes!.Descendants<SdtRun>());
+            } finally {
+                DeleteIfExists(docPath);
+            }
+        }
+
+        [Fact]
+        public void LegacyDoc_SaveDocPath_ConvertsOmmlToNativeEqFieldsAndReloadsAsEquations() {
+            string docPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".doc");
+            const string fractionOmml = "<m:oMathPara xmlns:m=\"http://schemas.openxmlformats.org/officeDocument/2006/math\"><m:oMath><m:f><m:num><m:r><m:t>a</m:t></m:r></m:num><m:den><m:r><m:t>b</m:t></m:r></m:den></m:f></m:oMath></m:oMathPara>";
+            const string noBarFractionOmml = "<m:oMathPara xmlns:m=\"http://schemas.openxmlformats.org/officeDocument/2006/math\"><m:oMath><m:f><m:fPr><m:type m:val=\"noBar\"/></m:fPr><m:num><m:r><m:t>e</m:t></m:r></m:num><m:den><m:r><m:t>f</m:t></m:r></m:den></m:f></m:oMath></m:oMathPara>";
+            const string oneSidedOmml = "<m:oMathPara xmlns:m=\"http://schemas.openxmlformats.org/officeDocument/2006/math\"><m:oMath><m:d><m:dPr><m:begChr m:val=\"{\"/><m:endChr m:val=\"\"/></m:dPr><m:e><m:r><m:t>x</m:t></m:r></m:e></m:d></m:oMath></m:oMathPara>";
+
+            try {
+                using (WordDocument document = WordDocument.Create()) {
+                    document.AddEquation(fractionOmml);
+                    document.AddEquation(noBarFractionOmml);
+                    WordTable table = document.AddTable(1, 1);
+                    table.Rows[0].Cells[0].AddParagraph(string.Empty, removeExistingParagraphs: true).AddEquation(oneSidedOmml.Replace("<m:t>x</m:t>", "<m:t>t</m:t>"));
+                    document.AddHeadersAndFooters();
+                    document.Sections[0].Header.Default!.AddParagraph("Header ").AddEquation(fractionOmml);
+                    document.Sections[0].Footer.Default!.AddParagraph("Footer ").AddEquation(oneSidedOmml.Replace("<m:t>x</m:t>", "<m:t>f</m:t>"));
+                    WordParagraph noteReferences = document.AddParagraph("Notes ");
+                    WordParagraph footnoteReference = noteReferences.AddFootNote("footnote placeholder");
+                    footnoteReference.FootNote!.Paragraphs![1].AddEquation(oneSidedOmml.Replace("<m:t>x</m:t>", "<m:t>n</m:t>"));
+                    WordParagraph endnoteReference = noteReferences.AddEndNote("endnote placeholder");
+                    endnoteReference.EndNote!.Paragraphs![1].AddEquation(oneSidedOmml.Replace("<m:t>x</m:t>", "<m:t>e</m:t>"));
+                    document.Save(docPath);
+                }
+
+                string wordDocumentAscii = Encoding.ASCII.GetString(ReadCompoundStream(File.ReadAllBytes(docPath), "WordDocument"));
+                Assert.Contains(" EQ ", wordDocumentAscii, StringComparison.Ordinal);
+                Assert.Contains("\\f(a,b)", wordDocumentAscii, StringComparison.Ordinal);
+                Assert.Contains("\\a\\co1(e,f)", wordDocumentAscii, StringComparison.Ordinal);
+                Assert.Contains("EQ {t", wordDocumentAscii, StringComparison.Ordinal);
+
+                using WordDocument reloaded = WordDocument.Load(docPath);
+                Assert.Equal(WordFileFormat.Doc, reloaded.SourceFormat);
+                Assert.Empty(reloaded.LegacyDocUnsupportedFeatures);
+                Assert.Contains(reloaded.Equations, equation =>
+                    equation.Representation == WordEquationRepresentation.EquationField &&
+                    equation.Text == "(a)/(b)" &&
+                    equation.FieldInstruction!.Contains("\\f(a,b)", StringComparison.Ordinal));
+                Assert.Contains(reloaded.Equations, equation =>
+                    equation.Representation == WordEquationRepresentation.EquationField &&
+                    equation.Text == "stack(e,f)" &&
+                    equation.FieldInstruction!.Contains("\\a\\co1(e,f)", StringComparison.Ordinal));
+
+                MainDocumentPart mainPart = reloaded._wordprocessingDocument!.MainDocumentPart!;
+                SimpleField[] equationFields = mainPart.Document.Descendants<SimpleField>()
+                    .Concat(mainPart.HeaderParts.SelectMany(part => part.Header.Descendants<SimpleField>()))
+                    .Concat(mainPart.FooterParts.SelectMany(part => part.Footer.Descendants<SimpleField>()))
+                    .Concat(mainPart.FootnotesPart!.Footnotes!.Descendants<SimpleField>())
+                    .Concat(mainPart.EndnotesPart!.Endnotes!.Descendants<SimpleField>())
+                    .Where(field => field.Instruction?.Value.TrimStart().StartsWith("EQ", StringComparison.OrdinalIgnoreCase) == true)
+                    .ToArray();
+                Assert.Equal(7, equationFields.Length);
+                Assert.Contains(equationFields, field => field.InnerText == "{t");
+                Assert.Contains(equationFields, field => field.InnerText == "{f");
+                Assert.Contains(equationFields, field => field.InnerText == "{n");
+                Assert.Contains(equationFields, field => field.InnerText == "{e");
+            } finally {
+                DeleteIfExists(docPath);
+            }
+        }
+
+        [Fact]
+        public void LegacyDoc_SaveDocPath_WritesHyperlinkedOmmlAsNestedEqFieldsAndResaves() {
+            string docPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".doc");
+            string resavedDocPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".doc");
+
+            try {
+                using (WordDocument document = WordDocument.Create()) {
+                    WordParagraph paragraph = document.AddParagraph();
+                    paragraph._paragraph.Append(new Hyperlink(
+                        new Run(new Text("link-prefix ")),
+                        new M.OfficeMath(new M.Run(new M.Text("linked"))),
+                        new SdtRun(
+                            new SdtProperties(new SdtId { Val = 2076 }),
+                            new SdtContentRun(
+                                new Run(new Text(" nested-prefix ")),
+                                new M.OfficeMath(new M.Run(new M.Text("nested"))),
+                                new Run(new Text(" nested-suffix ")))),
+                        new Run(new Text("link-suffix"))) {
+                        Anchor = "equation-target"
+                    });
+
+                    document.AddHeadersAndFooters();
+                    WordParagraph header = document.Sections[0].Header.Default!.AddParagraph();
+                    header._paragraph.Append(new Hyperlink(
+                        new M.OfficeMath(new M.Run(new M.Text("header-linked")))) {
+                        Anchor = "header-equation-target"
+                    });
+
+                    WordParagraph noteReference = document.AddParagraph("note ").AddFootNote("placeholder");
+                    WordParagraph noteBody = noteReference.FootNote!.Paragraphs![1];
+                    noteBody.Text = string.Empty;
+                    noteBody._paragraph.Append(new Hyperlink(
+                        new M.OfficeMath(new M.Run(new M.Text("note-linked")))) {
+                        Anchor = "note-equation-target"
+                    });
+
+                    document.Save(docPath);
+                }
+
+                string wordDocumentAscii = Encoding.ASCII.GetString(ReadCompoundStream(File.ReadAllBytes(docPath), "WordDocument"));
+                Assert.Contains("HYPERLINK", wordDocumentAscii, StringComparison.Ordinal);
+                Assert.Contains(" EQ linked", wordDocumentAscii, StringComparison.Ordinal);
+                Assert.Contains(" EQ nested", wordDocumentAscii, StringComparison.Ordinal);
+
+                using WordDocument reloaded = WordDocument.Load(docPath);
+                Assert.Equal(WordFileFormat.Doc, reloaded.SourceFormat);
+                Assert.Empty(reloaded.LegacyDocUnsupportedFeatures);
+                MainDocumentPart mainPart = reloaded._wordprocessingDocument!.MainDocumentPart!;
+                Hyperlink hyperlink = Assert.Single(mainPart.Document.Descendants<Hyperlink>());
+                Assert.Equal("equation-target", hyperlink.Anchor?.Value);
+                SimpleField[] linkedEquations = hyperlink.Elements<SimpleField>()
+                    .Where(field => field.Instruction?.Value.TrimStart().StartsWith("EQ", StringComparison.OrdinalIgnoreCase) == true)
+                    .ToArray();
+                Assert.Equal(new[] { "linked", "nested" }, linkedEquations.Select(field => field.InnerText));
+                Hyperlink headerHyperlink = Assert.Single(mainPart.HeaderParts.SelectMany(part => part.Header.Descendants<Hyperlink>()));
+                Assert.Equal("header-equation-target", headerHyperlink.Anchor?.Value);
+                Assert.Equal("header-linked", Assert.Single(headerHyperlink.Elements<SimpleField>()).InnerText);
+                Hyperlink noteHyperlink = Assert.Single(mainPart.FootnotesPart!.Footnotes!.Descendants<Hyperlink>());
+                Assert.Equal("note-equation-target", noteHyperlink.Anchor?.Value);
+                Assert.Equal("note-linked", Assert.Single(noteHyperlink.Elements<SimpleField>()).InnerText);
+                Assert.Equal(new[] { "linked", "nested" }, reloaded.Equations.Select(equation => equation.Text));
+                Assert.Empty(reloaded.ValidateDocument());
+
+                reloaded.Save(resavedDocPath);
+                string resavedAscii = Encoding.ASCII.GetString(ReadCompoundStream(File.ReadAllBytes(resavedDocPath), "WordDocument"));
+                Assert.Contains("HYPERLINK", resavedAscii, StringComparison.Ordinal);
+                Assert.Contains(" EQ linked", resavedAscii, StringComparison.Ordinal);
+                Assert.Contains(" EQ nested", resavedAscii, StringComparison.Ordinal);
+
+                using WordDocument resaved = WordDocument.Load(resavedDocPath);
+                Assert.Equal(WordFileFormat.Doc, resaved.SourceFormat);
+                Assert.Empty(resaved.LegacyDocUnsupportedFeatures);
+                MainDocumentPart resavedMainPart = resaved._wordprocessingDocument!.MainDocumentPart!;
+                Hyperlink resavedBodyHyperlink = Assert.Single(resavedMainPart.Document.Descendants<Hyperlink>());
+                Assert.Equal(
+                    new[] { "linked", "nested" },
+                    resavedBodyHyperlink.Elements<SimpleField>()
+                        .Where(field => field.Instruction?.Value.TrimStart().StartsWith("EQ", StringComparison.OrdinalIgnoreCase) == true)
+                        .Select(field => field.InnerText));
+                Assert.Equal(
+                    "header-linked",
+                    Assert.Single(resavedMainPart.HeaderParts.SelectMany(part => part.Header.Descendants<Hyperlink>()))
+                        .Elements<SimpleField>().Single().InnerText);
+                Assert.Equal(
+                    "note-linked",
+                    Assert.Single(resavedMainPart.FootnotesPart!.Footnotes!.Descendants<Hyperlink>())
+                        .Elements<SimpleField>().Single().InnerText);
+                Assert.Empty(resaved.ValidateDocument());
+            } finally {
+                DeleteIfExists(docPath);
+                DeleteIfExists(resavedDocPath);
+            }
+        }
+
+        [Fact]
+        public void LegacyDoc_HyperlinkFieldProjection_UsesNestedFieldResultsOnly() {
+            string fieldText = string.Concat(
+                LegacyDocField.Begin,
+                " HYPERLINK \\l \"target\" ",
+                LegacyDocField.Separator,
+                "prefix ",
+                LegacyDocField.Begin,
+                " PAGE ",
+                LegacyDocField.Separator,
+                "42",
+                LegacyDocField.End,
+                " suffix",
+                LegacyDocField.End);
+            LegacyDocTextCharacter[] characters = fieldText
+                .Select((character, index) => new LegacyDocTextCharacter(character, index, index))
+                .ToArray();
+
+            Assert.True(LegacyDocField.TryReadHyperlink(
+                characters,
+                0,
+                out LegacyDocHyperlinkTarget target,
+                out int resultStartIndex,
+                out int resultEndIndex,
+                out int fieldEndIndex));
+            string visibleResult = new string(LegacyDocField
+                .EnumerateVisibleResultIndexes(characters, resultStartIndex, resultEndIndex)
+                .Select(index => characters[index].Character)
+                .ToArray());
+
+            Assert.Equal("target", target.Anchor);
+            Assert.Equal("prefix 42 suffix", visibleResult);
+            Assert.DoesNotContain("PAGE", visibleResult, StringComparison.Ordinal);
+            Assert.Equal(characters.Length - 1, fieldEndIndex);
+        }
+
+        private static void AppendBookmarkedSimpleField(Paragraph paragraph, string id, string name, string instruction) {
+            var simpleField = new SimpleField { Instruction = instruction };
+            simpleField.Append(
+                new BookmarkStart { Id = id, Name = name },
+                new Run(new Text("1") { Space = SpaceProcessingModeValues.Preserve }),
+                new BookmarkEnd { Id = id });
+            paragraph.Append(simpleField);
+        }
+
+        private static void AppendInteriorBookmarkedSimpleField(Paragraph paragraph, string id, string name, string instruction, string prefix, string suffix) {
+            var simpleField = new SimpleField { Instruction = instruction };
+            simpleField.Append(
+                new Run(new Text(prefix) { Space = SpaceProcessingModeValues.Preserve }),
+                new BookmarkStart { Id = id, Name = name },
+                new Run(new Text(suffix) { Space = SpaceProcessingModeValues.Preserve }),
+                new BookmarkEnd { Id = id });
+            paragraph.Append(simpleField);
+        }
+
+        private static void AppendBookmarkedComplexField(Paragraph paragraph, string id, string name, string instruction) {
+            paragraph.Append(
+                new Run(new FieldChar { FieldCharType = FieldCharValues.Begin }),
+                new Run(new FieldCode(instruction) { Space = SpaceProcessingModeValues.Preserve }),
+                new Run(new FieldChar { FieldCharType = FieldCharValues.Separate }),
+                new BookmarkStart { Id = id, Name = name },
+                new Run(new Text("1") { Space = SpaceProcessingModeValues.Preserve }),
+                new BookmarkEnd { Id = id },
+                new Run(new FieldChar { FieldCharType = FieldCharValues.End }));
+        }
+
+        private static void AppendSimpleField(Paragraph paragraph, string instruction, string resultText) {
+            var simpleField = new SimpleField { Instruction = instruction };
+            simpleField.Append(new Run(new Text(resultText) { Space = SpaceProcessingModeValues.Preserve }));
+            paragraph.Append(simpleField);
+        }
+
+        private static void AppendComplexField(Paragraph paragraph, string instruction, string resultText) {
+            paragraph.Append(
+                new Run(new FieldChar { FieldCharType = FieldCharValues.Begin }),
+                new Run(new FieldCode(instruction) { Space = SpaceProcessingModeValues.Preserve }),
+                new Run(new FieldChar { FieldCharType = FieldCharValues.Separate }),
+                new Run(new Text(resultText) { Space = SpaceProcessingModeValues.Preserve }),
+                new Run(new FieldChar { FieldCharType = FieldCharValues.End }));
+        }
+
+        private static void AppendSimpleFieldWithResultRun(Paragraph paragraph, string instruction, string prefix, BreakValues breakType) {
+            var simpleField = new SimpleField { Instruction = instruction };
+            simpleField.Append(CreateInlineFieldResultRun(prefix, breakType));
+            paragraph.Append(simpleField);
+        }
+
+        private static void AppendComplexFieldWithResultRun(Paragraph paragraph, string instruction, string prefix, BreakValues breakType) {
+            paragraph.Append(
+                new Run(new FieldChar { FieldCharType = FieldCharValues.Begin }),
+                new Run(new FieldCode(instruction) { Space = SpaceProcessingModeValues.Preserve }),
+                new Run(new FieldChar { FieldCharType = FieldCharValues.Separate }),
+                CreateInlineFieldResultRun(prefix, breakType),
+                new Run(new FieldChar { FieldCharType = FieldCharValues.End }));
+        }
+
+        private static Run CreateInlineFieldResultRun(string prefix, BreakValues breakType) {
+            return new Run(
+                new Text(prefix + "Text") { Space = SpaceProcessingModeValues.Preserve },
+                new TabChar(),
+                new SoftHyphen(),
+                new Text("SoftHyphen") { Space = SpaceProcessingModeValues.Preserve },
+                new NoBreakHyphen(),
+                new Text("HardHyphen") { Space = SpaceProcessingModeValues.Preserve },
+                breakType == BreakValues.TextWrapping ? new Break() : new Break { Type = breakType },
+                new Text("Wrap") { Space = SpaceProcessingModeValues.Preserve });
+        }
+
+        private static SimpleField CreateSimpleField(string instruction, string resultText) {
+            var simpleField = new SimpleField { Instruction = instruction };
+            simpleField.Append(CreateTextRun(resultText));
+            return simpleField;
+        }
+
+        private static IEnumerable<SimpleField> GetReloadedDateTimeFields(MainDocumentPart mainPart) {
+            return GetReloadedFields(mainPart, IsStaticDateTimeField);
+        }
+
+        private static IEnumerable<SimpleField> GetReloadedDocumentPropertyFields(MainDocumentPart mainPart) {
+            return GetReloadedFields(mainPart, IsDocumentPropertyField);
+        }
+
+        private static IEnumerable<SimpleField> GetReloadedFields(MainDocumentPart mainPart, Func<SimpleField, bool> predicate) {
+            foreach (SimpleField field in mainPart.Document.Body!.Descendants<SimpleField>().Where(predicate)) {
+                yield return field;
+            }
+
+            foreach (SimpleField field in mainPart.HeaderParts.SelectMany(part => part.Header.Descendants<SimpleField>()).Where(predicate)) {
+                yield return field;
+            }
+
+            foreach (SimpleField field in mainPart.FooterParts.SelectMany(part => part.Footer.Descendants<SimpleField>()).Where(predicate)) {
+                yield return field;
+            }
+
+            if (mainPart.FootnotesPart?.Footnotes != null) {
+                foreach (SimpleField field in mainPart.FootnotesPart.Footnotes.Descendants<SimpleField>().Where(predicate)) {
+                    yield return field;
+                }
+            }
+
+            if (mainPart.EndnotesPart?.Endnotes != null) {
+                foreach (SimpleField field in mainPart.EndnotesPart.Endnotes.Descendants<SimpleField>().Where(predicate)) {
+                    yield return field;
+                }
+            }
+        }
+
+        private static bool IsFieldWithText(SimpleField field, string fieldName, string expectedText) {
+            return IsFieldInstruction(field, fieldName)
+                && string.Concat(field.Descendants<Text>().Select(text => text.Text)) == expectedText;
+        }
+
+        private static void AssertFieldResultInlineContent(IEnumerable<SimpleField> fields, string fieldName, string expectedText, BreakValues expectedBreakType) {
+            SimpleField field = Assert.Single(fields, field => IsFieldWithText(field, fieldName, expectedText));
+            Assert.Single(field.Descendants<TabChar>());
+            Assert.NotEmpty(field.Descendants<SoftHyphen>());
+            Assert.NotEmpty(field.Descendants<NoBreakHyphen>());
+            Break resultBreak = Assert.Single(field.Descendants<Break>());
+            if (expectedBreakType == BreakValues.TextWrapping) {
+                Assert.True(resultBreak.Type == null || resultBreak.Type.Value == BreakValues.TextWrapping);
+            } else {
+                Assert.Equal(expectedBreakType, resultBreak.Type?.Value);
+            }
+        }
+
+        private static bool IsStaticDateTimeField(SimpleField field) {
+            return IsFieldInstruction(field, "DATE")
+                || IsFieldInstruction(field, "TIME")
+                || IsFieldInstruction(field, "CREATEDATE")
+                || IsFieldInstruction(field, "SAVEDATE")
+                || IsFieldInstruction(field, "PRINTDATE");
+        }
+
+        private static bool IsDocumentPropertyField(SimpleField field) {
+            return IsFieldInstruction(field, "DOCPROPERTY")
+                || IsFieldInstruction(field, "AUTHOR")
+                || IsFieldInstruction(field, "TITLE")
+                || IsFieldInstruction(field, "SUBJECT")
+                || IsFieldInstruction(field, "KEYWORDS")
+                || IsFieldInstruction(field, "COMMENTS")
+                || IsFieldInstruction(field, "LASTSAVEDBY")
+                || IsFieldInstruction(field, "REVNUM");
+        }
+
+        private static bool IsFieldInstruction(SimpleField field, string fieldName) {
+            string instruction = field.Instruction?.Value ?? string.Empty;
+            string trimmed = instruction.TrimStart();
+            return trimmed.StartsWith(fieldName, StringComparison.OrdinalIgnoreCase)
+                && (trimmed.Length == fieldName.Length || char.IsWhiteSpace(trimmed[fieldName.Length]));
+        }
+    }
+}

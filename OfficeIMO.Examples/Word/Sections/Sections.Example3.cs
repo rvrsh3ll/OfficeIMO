@@ -1,11 +1,11 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using DocumentFormat.OpenXml.Wordprocessing;
 using OfficeIMO.Word;
-using Color = SixLabors.ImageSharp.Color;
+using Color = OfficeIMO.Drawing.OfficeColor;
 
 namespace OfficeIMO.Examples.Word {
     internal partial class Sections {
@@ -35,18 +35,18 @@ namespace OfficeIMO.Examples.Word {
                 document.AddPageBreak();
 
                 var paragraph = document.AddParagraph("Basic paragraph - Page 3");
-                paragraph.ParagraphAlignment = JustificationValues.Center;
-                paragraph.Color = SixLabors.ImageSharp.Color.Blue;
+                paragraph.ParagraphAlignment = WordParagraphAlignment.Center;
+                paragraph.Color = OfficeIMO.Drawing.OfficeColor.Blue;
 
                 paragraph.SetBold().SetFontFamily("Tahoma");
-                paragraph.AddText(" This is continuation").SetUnderline(UnderlineValues.Double).SetHighlight(HighlightColorValues.DarkGreen).SetFontSize(15).SetColor(Color.Aqua);
+                paragraph.AddText(" This is continuation").SetUnderline(WordUnderlineStyle.Double).SetHighlight(WordHighlightColor.DarkGreen).SetFontSize(15).SetColor(Color.Aqua);
 
                 paragraph = document.AddParagraph("Basic paragraph - Page 4");
-                paragraph.ParagraphAlignment = JustificationValues.Center;
-                paragraph.Color = SixLabors.ImageSharp.Color.Blue;
+                paragraph.ParagraphAlignment = WordParagraphAlignment.Center;
+                paragraph.Color = OfficeIMO.Drawing.OfficeColor.Blue;
 
                 paragraph.SetBold().SetFontFamily("Tahoma");
-                paragraph.AddText(" This is continuation").SetUnderline(UnderlineValues.Double).SetHighlight(HighlightColorValues.DarkGreen).SetFontSize(15).SetColor(Color.Yellow);
+                paragraph.AddText(" This is continuation").SetUnderline(WordUnderlineStyle.Double).SetHighlight(WordHighlightColor.DarkGreen).SetFontSize(15).SetColor(Color.Yellow);
 
 
                 Console.WriteLine("+ Paragraphs: " + document.Paragraphs.Count);
@@ -73,7 +73,8 @@ namespace OfficeIMO.Examples.Word {
                 Console.WriteLine("+ Paragraphs section 2: " + document.Sections[2].Paragraphs.Count);
                 Console.WriteLine("+ Paragraphs section 3: " + document.Sections[3].Paragraphs.Count);
 
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
 

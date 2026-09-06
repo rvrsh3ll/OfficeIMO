@@ -1,0 +1,113 @@
+using System;
+using System.Collections.Generic;
+using OfficeIMO.Word;
+using Xunit;
+
+namespace OfficeIMO.Tests
+{
+    /// <summary>
+    /// Contains tests for the field parser.
+    /// </summary>
+    public partial class Word
+    {
+        /// <summary>
+        /// Unit tests related to <see cref="WordFieldParser"/> parsing logic.
+        /// </summary>
+        public class FieldParser_Should
+        {
+
+            [Theory]
+            [InlineData("ASK bookmark question", 0)]
+            [InlineData(@"BIBLIOGRAPHY \* roman", 1)]
+            [InlineData(@"BIBLIOGRAPHY \*arabic", 1)]
+            [InlineData(@"BIBLIOGRAPHY \* ALPHABETICAL", 1)]
+            [InlineData(@"Page \* FIRSTCAP \* MERGEFORMAT", 2)]
+            /// <summary>
+            /// Ensures format switches are correctly identified within field codes.
+            /// </summary>
+            /// <param name="FieldCodeString">Field code string under test.</param>
+            /// <param name="expected_amount_of_format_switches">Expected count of switches.</param>
+            public void Test_IdentifyFormatSwitches(String FieldCodeString, int expected_amount_of_format_switches)
+            {
+                var parser = new WordFieldParser(FieldCodeString);
+
+                Assert.Equal(expected_amount_of_format_switches, parser.FormatSwitches.Count);
+            }
+
+            [Theory]
+            [InlineData(@"BIBLIOGRAPHY \* roman", WordFieldFormat.roman)]
+            [InlineData(@"BIBLIOGRAPHY \*arabic", WordFieldFormat.Arabic)]
+            [InlineData(@"Page \* FIRSTCAP \* MERGEFORMAT", WordFieldFormat.FirstCap)]
+            [InlineData(@"BIBLIOGRAPHY \* ALPHABETICAL", WordFieldFormat.ALPHABETICAL)]
+            public void Test_CastFormatSwitches(String FieldCodeString, WordFieldFormat expected_field_format)
+            {
+                var parser = new WordFieldParser(FieldCodeString);
+
+                Assert.Contains(expected_field_format, parser.FormatSwitches);
+            }
+
+            [Theory]
+            [InlineData(@"REF TargetBookmark \* FutureCase", WordFieldType.Ref, "FutureCase")]
+            [InlineData(@"PAGE \# ""000""", WordFieldType.Page, "numeric picture")]
+            public void Test_PreserveKnownFieldTypeForUnsupportedFormatDiagnostics(String FieldCodeString, WordFieldType expectedFieldType, string expectedDiagnostic)
+            {
+                var parser = new WordFieldParser(FieldCodeString);
+
+                Assert.Equal(expectedFieldType, parser.WordFieldType);
+                Assert.Contains(parser.Diagnostics, diagnostic => diagnostic.Contains(expectedDiagnostic, StringComparison.Ordinal));
+            }
+
+            [Theory]
+            [InlineData("BIBLIOGRAPHY \\@ \"roman\"", 1)]
+            [InlineData("BIBLIOGRAPHY \\h \"some senctence\"", 1)]
+            [InlineData(@"BIBLIOGRAPHY \t test \*arabic", 1)]
+            [InlineData(@"BIBLIOGRAPHY \t value-with.dot \*arabic", 1)]
+            [InlineData(@"Page \h \d something \* MERGEFORMAT", 2)]
+            public void Test_IdentifySwitches(String FieldCodeString, int expected_amount_of_switches)
+            {
+                var parser = new WordFieldParser(FieldCodeString);
+
+                Assert.Equal(expected_amount_of_switches, parser.Switches.Count);
+            }
+
+            [Theory]
+            [InlineData("BIBLIOGRAPHY \\@ \"roman\"", new [] { "\\@ \"roman\""})]
+            [InlineData("BIBLIOGRAPHY \\h \"some senctence\"", new[] {"\\h \"some senctence\"" })]
+            [InlineData(@"BIBLIOGRAPHY \t test \*arabic", new[] {"\\t test" })]
+            [InlineData(@"BIBLIOGRAPHY \t value-with.dot \*arabic", new[] {"\\t value-with.dot" })]
+            [InlineData(@"Page \h \d something \* MERGEFORMAT", new[] {"\\h","\\d something"})]
+            [InlineData(@"ASK ANSWER ""Prompt"" \d ""42"" \o ""Tooltip"" \* MERGEFORMAT", new[] { "\\d \"42\"", "\\o \"Tooltip\"" })]
+            public void Test_ParseSwitches(String FieldCodeString, String[] expected_switches)
+            {
+                var parser = new WordFieldParser(FieldCodeString);
+
+                Assert.Equal(expected_switches, parser.Switches);
+            }
+
+            [Theory]
+            [InlineData("BIBLIOGRAPHY \\@ \"roman\"", 0)]
+            [InlineData("BIBLIOGRAPHY \\h \"some senctence\"", 0)]
+            [InlineData(@"BIBLIOGRAPHY \t test \*arabic", 0)]
+            [InlineData(@"Page \h \d something \* MERGEFORMAT", 0)]
+            [InlineData(@"Page this are several instructions \d something \* MERGEFORMAT", 4)]
+            [InlineData("Page \"this is a single instruction \" \\h \\d something \\* MERGEFORMAT", 1)]
+            [InlineData("PAGE \"this is a single instruction \" another_one \\h \\d something \\* MERGEFORMAT", 2)]
+            public void Test_IdentifyInstructions(String FieldCodeString, int expected_amount_of_instructions)
+            {
+                var parser = new WordFieldParser(FieldCodeString);
+
+                Assert.Equal(expected_amount_of_instructions, parser.Instructions.Count);
+            }
+
+            [Fact]
+            public void Test_PreserveUnknownFieldCodesAsDiagnostics()
+            {
+                var parser = new WordFieldParser("SillyField not known");
+
+                Assert.Null(parser.WordFieldType);
+                Assert.Contains(parser.Diagnostics, diagnostic => diagnostic.Contains("SillyField", StringComparison.Ordinal));
+            }
+
+        }
+    }
+}

@@ -1,0 +1,122 @@
+# OfficeIMO.Word.Html - Word and HTML conversion
+
+[![nuget version](https://img.shields.io/nuget/v/OfficeIMO.Word.Html)](https://www.nuget.org/packages/OfficeIMO.Word.Html)
+[![nuget downloads](https://img.shields.io/nuget/dt/OfficeIMO.Word.Html?label=nuget%20downloads)](https://www.nuget.org/packages/OfficeIMO.Word.Html)
+
+`OfficeIMO.Word.Html` converts between HTML and `OfficeIMO.Word` documents. It is for document-shaped HTML that should become editable Word content, and for Word documents that should be exported as HTML.
+
+## Install
+
+```powershell
+dotnet add package OfficeIMO.Word.Html
+```
+
+## Quick start
+
+```csharp
+using OfficeIMO.Word;
+using OfficeIMO.Drawing;
+using OfficeIMO.Html;
+using OfficeIMO.Word.Html;
+
+HtmlConversionDocument source = HtmlConversionDocument.Parse("<h1>Hello</h1><p>Body</p>");
+using WordDocument document = source.ToWordDocument(new HtmlToWordOptions());
+
+string html = document.ToHtml(
+    WordToHtmlOptions.CreateDocumentRoundTripProfile(OfficeVisualThemeKind.Report));
+
+HtmlTextConversionResult export = document.ToHtmlResult();
+Console.WriteLine(export.RequireValue());
+```
+
+HTML can also be appended to an existing body, header, footer, or table cell with
+`AddHtmlToBody`, `AddHtmlToHeader`, `AddHtmlToFooter`, and `WordTableCell.AddHtml`.
+
+Use the result API when conversion evidence matters:
+
+```csharp
+HtmlConversionDocument source = HtmlConversionDocument.Parse(html);
+HtmlToWordResult result = source.ToWordDocumentResult(options);
+using WordDocument document = result.RequireValue();
+
+foreach (HtmlDiagnostic diagnostic in result.Report.Diagnostics) {
+    Console.WriteLine($"{diagnostic.Code}: {diagnostic.LossKind}");
+}
+```
+
+`HtmlConversionDocument` is the required source model. It keeps parsing, base-URI handling, resource policy, and source diagnostics in one owner. `HtmlToWordOptions.Limits` uses the shared `HtmlConversionLimits` contract; `MaxHtmlNodes`, `MaxHtmlDepth`, `MaxCssBytes`, and `MaxTotalCssBytes` remain forwarding properties for compatibility. `HtmlToWordOptions.StyleMissingHandler` scopes custom class mapping to one conversion.
+
+The document result path projects bounded, single-surface `position:absolute`, `position:fixed`, and left/right floating regions into editable page-relative DrawingML text-box anchors. Exact offsets, size, native wrapping, solid fill, and z-order are retained. Repeated or fragmented paged regions stay in semantic flow, and CSS background layers or shadows without a Word-native editable equivalent produce stable layout diagnostics. Set `ImportEditableLayoutRegions = false` to keep every region in semantic flow.
+
+## Export profiles and themes
+
+Word export has named profiles for the intended fidelity contract:
+
+- `CreateSemanticDocumentProfile()` produces readable, accessible document HTML.
+- `CreateDocumentRoundTripProfile()` enables editable structure, comments, section metadata, headers, footers, and trusted round-trip details.
+- `CreatePrintReviewProfile()` produces a static browser and print review without claiming browser/Word pagination parity.
+
+Each named profile uses the shared responsive OfficeIMO document shell and accepts an `OfficeVisualThemeKind`. The shell styles headings, tables, forms, figures, code, document regions, compact screens, and print output. It does not enable JavaScript, remote execution, or live browser behavior. `new WordToHtmlOptions()` and the existing `IncludeDefaultCss` switch retain their compact compatibility output unless `UseSharedDocumentShell` is selected explicitly.
+
+`WordHtmlExportProfile` is the Word-only profile enum; `WordToHtmlOptions.SharedProfile` exposes its mapping to the generic engine profile. Use `DocumentOutput` to select a full document or fragment and configure title, language, theme, default styles, and newlines as one settings object. `TrackedChangePolicy` selects final, original, or static markup projection without mutating the source document. `FieldPolicy` keeps stored field results by default and can add inert instruction metadata for review; HTML never evaluates Word fields. Named profiles also expose floating-picture wrap, anchor, offset, crop, transform, and supported effect values as inert review metadata with an explicit approximation diagnostic rather than claiming Word/browser layout parity.
+
+## What it maps
+
+- HTML headings, paragraphs, inline formatting, links, images, SVG, lists, tables, captions, form controls, notes, headers, footers, and sections into Word content where supported.
+- Word document metadata, paragraph/run styles, lists, tables, images, SVG, footnotes, endnotes, disabled form controls, comments, headers, footers, and optional CSS back to HTML.
+- Stylesheets, inline CSS, local/remote resources, image policies, resource limits, and diagnostics through explicit options.
+- Document language metadata between HTML `lang` and Word settings.
+
+## Import profiles
+
+```csharp
+var safeOptions = HtmlToWordOptions.CreateUntrustedHtmlProfile();
+safeOptions.MaxHtmlNodes = 5000;
+safeOptions.DiagnosticHandler = diagnostic =>
+    Console.WriteLine($"{diagnostic.Code}: {diagnostic.Source}");
+
+HtmlConversionDocument source = HtmlConversionDocument.Parse(html);
+using WordDocument safeDocument = source.ToWordDocument(safeOptions);
+```
+
+Remote images and stylesheets require the async API:
+
+```csharp
+HtmlToWordResult remote = await source.ToWordDocumentResultAsync(options, cancellationToken);
+using WordDocument remoteDocument = remote.RequireValue();
+```
+
+Remote image prefetch uses at most `HtmlToWordOptions.MaxConcurrentResourceLoads` requests at
+once. Imports with `MaxTotalImageBytes` stay sequential so responses that exceed the remaining
+budget can be rejected before their bodies are read.
+
+- `CreateOfficeIMOProfile()` keeps the compatibility-oriented defaults.
+- `CreateUntrustedHtmlProfile()` keeps external document resources offline by default and enables bounded conversion.
+- `CreateTrustedDocumentProfile()` enables document-provided stylesheet links for known-good HTML while keeping resource validation.
+- `new HtmlToWordOptions()` embeds data URI images only; use a trusted/compatibility profile or set `ImageProcessing = ImageProcessingMode.Embed` for trusted remote image fetching.
+- Local file images are not loaded by default; use a trusted/compatibility profile or add `Uri.UriSchemeFile` to `AllowedImageUriSchemes` for trusted local files.
+
+## Related packages
+
+- Use `OfficeIMO.Word` for Word document creation and editing.
+- Use `OfficeIMO.Markdown.Html` for HTML-to-Markdown ingestion.
+- Use `OfficeIMO.Html.Pdf` for HTML-to-PDF conversion.
+
+## Deeper docs
+
+- [Word/HTML support matrix](../Docs/officeimo.word-html-support-matrix.md)
+- [Repository roadmap](../Docs/ROADMAP.md)
+- [OfficeIMO.Word](../OfficeIMO.Word/README.md)
+
+## Targets and license
+
+- Targets: `netstandard2.0`, `net8.0`, `net10.0`; `net472` is included when building on Windows.
+- License: MIT.
+- Repository: [EvotecIT/OfficeIMO](https://github.com/EvotecIT/OfficeIMO)
+
+## Dependency footprint
+
+- **External:** Open XML SDK already used by the Word package; HTML DOM/CSS parsing comes through `OfficeIMO.Html`.
+- **OfficeIMO:** `OfficeIMO.Word`, `OfficeIMO.Html`, and `OfficeIMO.Core`. The bidirectional mapping, resource policy, and diagnostics are first-party.
+
+See the [complete OfficeIMO package map](../README.md) for related formats and conversion paths.

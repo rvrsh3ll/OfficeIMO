@@ -1,0 +1,198 @@
+using System;
+using System.IO;
+using System.IO.Packaging;
+using System.Linq;
+using System.Xml.Linq;
+using OfficeIMO.Visio;
+using OfficeIMO.Visio.Fluent;
+using Xunit;
+
+namespace OfficeIMO.Tests {
+    public class VisioBacklogP1 {
+        [Fact]
+        public void DefaultConnectorKindIsDynamicAcrossApis() {
+            VisioPage page = new("Page-1");
+            VisioShape left = new("1", 1, 1, 1, 1, "Left");
+            VisioShape right = new("2", 3, 1, 1, 1, "Right");
+            page.Shapes.Add(left);
+            page.Shapes.Add(right);
+
+            VisioConnector constructorConnector = new(left, right);
+            VisioConnector pageConnector = page.AddConnector(left, right);
+
+            VisioDocument document = VisioDocument.Create(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx"));
+            document.AsFluent()
+                .Page("Page1", p => p
+                    .Rect("left", 1, 1, 1, 1, "Left")
+                    .Rect("right", 3, 1, 1, 1, "Right")
+                    .Connect("left", "right"))
+                .End();
+
+            VisioConnector fluentConnector = Assert.Single(document.Pages[0].Connectors);
+
+            Assert.Equal(ConnectorKind.Dynamic, constructorConnector.Kind);
+            Assert.Equal(ConnectorKind.Dynamic, pageConnector.Kind);
+            Assert.Equal(ConnectorKind.Dynamic, fluentConnector.Kind);
+        }
+
+        [Fact]
+        public void SaveDoesNotMutateAutoMasteredShapeState() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx");
+            VisioDocument document = VisioDocument.Create(filePath);
+            document.UseMastersByDefault = true;
+
+            VisioPage page = document.AddPage("Page-1");
+            VisioShape shape = new("shape") {
+                NameU = "Rectangle",
+                PinX = 2,
+                PinY = 3
+            };
+            page.Shapes.Add(shape);
+
+            document.Save();
+
+            Assert.Null(shape.Master);
+            Assert.Equal(0, shape.Width);
+            Assert.Equal(0, shape.Height);
+            Assert.Equal(0, shape.LocPinX);
+            Assert.Equal(0, shape.LocPinY);
+        }
+
+        [Fact]
+        public void FluentDuplicateShapeIdsThrowHelpfulError() {
+            VisioDocument document = VisioDocument.Create(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx"));
+
+            ArgumentException exception = Assert.Throws<ArgumentException>(() =>
+                document.AsFluent()
+                    .Page("Page1", p => p
+                        .Rect("dup", 1, 1, 1, 1, "Left")
+                        .Circle("dup", 3, 1, 1, "Right"))
+                    .End());
+
+            Assert.Contains("dup", exception.Message);
+        }
+
+        [Fact]
+        public void SaveRejectsDuplicateIdsAcrossPageObjects() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx");
+            VisioDocument document = VisioDocument.Create(filePath);
+            VisioPage page = document.AddPage("Page-1");
+
+            page.Shapes.Add(new VisioShape("dup", 1, 1, 1, 1, "First"));
+            AddRawShape(page, new VisioShape("dup", 3, 1, 1, 1, "Second"));
+
+            InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() => document.Save());
+            Assert.Contains("dup", exception.Message);
+        }
+
+        [Fact]
+        public void PageRejectsDuplicateIdsBeforeSaveAcrossShapesAndConnectors() {
+            VisioPage page = new("Page-1");
+            VisioShape left = new("1", 1, 1, 1, 1, "Left");
+            VisioShape right = new("2", 3, 1, 1, 1, "Right");
+            page.Shapes.Add(left);
+            page.Shapes.Add(right);
+
+            InvalidOperationException connectorCollision = Assert.Throws<InvalidOperationException>(() =>
+                page.AddConnector("1", left, right, ConnectorKind.Dynamic));
+
+            Assert.Contains("already used", connectorCollision.Message);
+
+            page.AddConnector("3", left, right, ConnectorKind.Dynamic);
+
+            InvalidOperationException shapeCollision = Assert.Throws<InvalidOperationException>(() =>
+                page.Shapes.Add(new VisioShape("3", 5, 1, 1, 1, "Duplicate")));
+
+            Assert.Contains("already used", shapeCollision.Message);
+        }
+
+        [Fact]
+        public void PageRejectsShapeAlreadyOwnedByAnotherPage() {
+            VisioPage firstPage = new("First");
+            VisioPage secondPage = new("Second");
+            firstPage.Shapes.Add(new VisioShape("existing", 1, 1, 1, 1, "Existing"));
+            VisioShape shared = new("shared", 3, 1, 1, 1, "Shared");
+            firstPage.Shapes.Add(shared);
+
+            InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
+                secondPage.Shapes.Add(shared));
+
+            Assert.Contains("another page", exception.Message);
+            Assert.Contains(shared, firstPage.Shapes);
+            Assert.Empty(secondPage.Shapes);
+            Assert.Throws<InvalidOperationException>(() =>
+                shared.Children.Add(new VisioShape("existing", 0, 0, 1, 1, "Collision")));
+
+            VisioShape nestedCandidate = new("nested", 5, 1, 1, 1, "Nested");
+            firstPage.Shapes.Add(nestedCandidate);
+            VisioShape destinationParent = new("destination", 1, 1, 1, 1, "Destination");
+            secondPage.Shapes.Add(destinationParent);
+
+            InvalidOperationException nestedException = Assert.Throws<InvalidOperationException>(() =>
+                destinationParent.Children.Add(nestedCandidate));
+
+            Assert.Contains("another page", nestedException.Message);
+            Assert.Contains(nestedCandidate, firstPage.Shapes);
+            Assert.Empty(destinationParent.Children);
+        }
+
+        [Fact]
+        public void GeneratedConnectorIdsSkipExistingShapeAndConnectorIds() {
+            VisioPage page = new("Page-1");
+            VisioShape left = new("1", 1, 1, 1, 1, "Left");
+            VisioShape right = new("2", 3, 1, 1, 1, "Right");
+            page.Shapes.Add(left);
+            page.Shapes.Add(right);
+            page.AddConnector("3", left, right, ConnectorKind.Dynamic);
+
+            VisioConnector generated = page.AddConnector(left, right);
+
+            Assert.Equal("4", generated.Id);
+        }
+
+        private static void AddRawShape(VisioPage page, VisioShape shape) {
+            var shapes = Assert.IsType<System.Collections.Generic.List<VisioShape>>(typeof(VisioPage)
+                .GetField("_shapes", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .GetValue(page));
+            shapes.Add(shape);
+        }
+
+        [Fact]
+        public void MastersWithCollidingIdsAreRemappedAndRoundTrip() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx");
+            VisioDocument document = VisioDocument.Create(filePath);
+            VisioPage page = document.AddPage("Page-1");
+
+            VisioMaster rectangleMaster = new("2", "Rectangle", new VisioShape("1", 0, 0, 2, 1, string.Empty) { NameU = "Rectangle" });
+            VisioMaster ellipseMaster = new("2", "Ellipse", new VisioShape("1", 0, 0, 2, 1, string.Empty) { NameU = "Ellipse" });
+
+            VisioShape rectangle = new("1", 1, 1, 2, 1, "Rectangle") { NameU = "Rectangle", Master = rectangleMaster };
+            VisioShape ellipse = new("2", 4, 1, 2, 1, "Ellipse") { NameU = "Ellipse", Master = ellipseMaster };
+            page.Shapes.Add(rectangle);
+            page.Shapes.Add(ellipse);
+
+            document.Save();
+
+            using (Package package = Package.Open(filePath, FileMode.Open, FileAccess.Read)) {
+                XNamespace ns = "http://schemas.microsoft.com/office/visio/2012/main";
+                XDocument pageDoc = XDocument.Load(package.GetPart(new Uri("/visio/pages/page1.xml", UriKind.Relative)).GetStream());
+                XElement[] shapes = pageDoc.Root?.Element(ns + "Shapes")?.Elements(ns + "Shape").ToArray() ?? Array.Empty<XElement>();
+                string? firstMasterId = shapes[0].Attribute("Master")?.Value;
+                string? secondMasterId = shapes[1].Attribute("Master")?.Value;
+
+                Assert.False(string.IsNullOrWhiteSpace(firstMasterId));
+                Assert.False(string.IsNullOrWhiteSpace(secondMasterId));
+                Assert.NotEqual(firstMasterId, secondMasterId);
+
+                XDocument mastersDoc = XDocument.Load(package.GetPart(new Uri("/visio/masters/masters.xml", UriKind.Relative)).GetStream());
+                string[] masterIds = mastersDoc.Root?.Elements(ns + "Master").Select(m => m.Attribute("ID")?.Value ?? string.Empty).ToArray() ?? Array.Empty<string>();
+                Assert.Equal(2, masterIds.Length);
+                Assert.Equal(2, masterIds.Distinct(StringComparer.Ordinal).Count());
+            }
+
+            VisioDocument loaded = VisioDocument.Load(filePath);
+            Assert.Equal("Rectangle", loaded.Pages[0].Shapes[0].Master?.NameU);
+            Assert.Equal("Ellipse", loaded.Pages[0].Shapes[1].Master?.NameU);
+        }
+    }
+}

@@ -1,0 +1,82 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>First-party PDF builder, reader, editor, renderer, and signature workflow for .NET.</Description>
+    <AssemblyName>OfficeIMO.Pdf</AssemblyName>
+    <AssemblyTitle>OfficeIMO.Pdf</AssemblyTitle>
+    <VersionPrefix>3.4.0</VersionPrefix>
+    <TargetFrameworks>netstandard2.0;net8.0;net10.0</TargetFrameworks>
+    <TargetFrameworks Condition=" '$([MSBuild]::IsOsPlatform(`Windows`))' ">$(TargetFrameworks);net472</TargetFrameworks>
+    <GeneratePackageOnBuild>False</GeneratePackageOnBuild>
+    <Company>Evotec</Company>
+    <Authors>Przemyslaw Klys</Authors>
+    <PackageId>OfficeIMO.Pdf</PackageId>
+    <PackageTags>pdf;builder;fluent;reporting;printing</PackageTags>
+    <PackageProjectUrl>https://github.com/EvotecIT/OfficeIMO</PackageProjectUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/EvotecIT/OfficeIMO</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageIcon>OfficeIMO.png</PackageIcon>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <DebugType>portable</DebugType>
+    <ProduceReferenceAssembly>False</ProduceReferenceAssembly>
+    <IsPublishable>True</IsPublishable>
+    <SignAssembly>False</SignAssembly>
+    <GenerateDocumentationFile>True</GenerateDocumentationFile>
+    <LangVersion>Latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <WarningsAsErrors>nullable</WarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\sRGB_IEC61966-2-1_no_black_scaling.icc" />
+    <None Include="..\Assets\OfficeIMO.png">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+    <None Include="README.md">
+      <Pack>True</Pack>
+      <PackagePath>README.md</PackagePath>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OfficeIMO.Core\OfficeIMO.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="System" />
+    <Using Include="System.Text" />
+    <Using Include="System.Collections.Generic" />
+    <Using Include="System.Linq" />
+    <Using Include="System.IO" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net472'">
+    <Reference Include="System.Net.Http" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="OfficeIMO.Excel.Tests" />
+    <InternalsVisibleTo Include="OfficeIMO.Word.Tests" />
+    <InternalsVisibleTo Include="OfficeIMO.PowerPoint.Tests" />
+    <InternalsVisibleTo Include="OfficeIMO.Rtf.Tests" />
+    <InternalsVisibleTo Include="OfficeIMO.Reader.Tests" />
+    <InternalsVisibleTo Include="OfficeIMO.Pdf.Tests" />
+    <InternalsVisibleTo Include="OfficeIMO.Markdown.Tests" />
+    <InternalsVisibleTo Include="OfficeIMO.Reader.Pdf" />
+    <InternalsVisibleTo Include="OfficeIMO.Pdf.Ocr" />
+    <InternalsVisibleTo Include="OfficeIMO.Html.Pdf" />
+    <InternalsVisibleTo Include="OfficeIMO.Html.Tests" />
+    <InternalsVisibleTo Include="OfficeIMO.Workflows" />
+    <InternalsVisibleTo Include="OfficeIMO.Workflows.Tests" />
+    <InternalsVisibleTo Include="OfficeIMO.Markdown.Pdf" />
+    <InternalsVisibleTo Include="OfficeIMO.Word.Pdf" />
+    <InternalsVisibleTo Include="OfficeIMO.Excel.Pdf" />
+    <InternalsVisibleTo Include="OfficeIMO.PowerPoint.Pdf" />
+    <InternalsVisibleTo Include="OfficeIMO.Rtf.Pdf" />
+    <InternalsVisibleTo Include="OfficeIMO.OneNote.Pdf" />
+  </ItemGroup>
+
+</Project>

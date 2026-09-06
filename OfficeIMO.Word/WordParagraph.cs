@@ -1,20 +1,65 @@
-using DocumentFormat.OpenXml.Wordprocessing;
 using DocumentFormat.OpenXml.Drawing;
+using DocumentFormat.OpenXml.Wordprocessing;
+using WordDrawing = DocumentFormat.OpenXml.Wordprocessing.Drawing;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
 using Break = DocumentFormat.OpenXml.Wordprocessing.Break;
 using Hyperlink = DocumentFormat.OpenXml.Wordprocessing.Hyperlink;
 using OfficeMath = DocumentFormat.OpenXml.Math.OfficeMath;
+using Ovml = DocumentFormat.OpenXml.Vml.Office;
 using Paragraph = DocumentFormat.OpenXml.Wordprocessing.Paragraph;
 using ParagraphProperties = DocumentFormat.OpenXml.Wordprocessing.ParagraphProperties;
-using Picture = DocumentFormat.OpenXml.Wordprocessing.Picture;
 using Run = DocumentFormat.OpenXml.Wordprocessing.Run;
 using RunProperties = DocumentFormat.OpenXml.Wordprocessing.RunProperties;
+using SdtContentPicture = DocumentFormat.OpenXml.Wordprocessing.SdtContentPicture;
 using TabStop = DocumentFormat.OpenXml.Wordprocessing.TabStop;
 using Text = DocumentFormat.OpenXml.Wordprocessing.Text;
+using V = DocumentFormat.OpenXml.Vml;
+using W15 = DocumentFormat.OpenXml.Office2013.Word;
+using Wps = DocumentFormat.OpenXml.Office2010.Word.DrawingShape;
 
 namespace OfficeIMO.Word {
+    /// <summary>
+    /// Represents a paragraph within a Word document.
+    /// </summary>
     public partial class WordParagraph : WordElement {
-        internal WordDocument _document;
-        internal Paragraph _paragraph;
+        internal WordDocument _document = null!;
+        internal Paragraph _paragraph = null!;
+        private object? _parentElement;
+        private bool _parentEvaluated;
+
+        /// <summary>
+        /// Gets the parent object that owns this paragraph (for example a table cell, header, footer or section).
+        /// </summary>
+        public object? Parent {
+            get {
+                if (!_parentEvaluated) {
+                    RefreshParent();
+                }
+
+                return _parentElement;
+            }
+            internal set {
+                _parentElement = value;
+                _parentEvaluated = true;
+            }
+        }
+
+        internal void RefreshParent() {
+            if (_document != null && _paragraph != null) {
+                _parentElement = ResolveParent(_document, _paragraph);
+            } else {
+                _parentElement = null;
+            }
+
+            _parentEvaluated = true;
+        }
+
+        internal void InvalidateParent() {
+            _parentElement = null;
+            _parentEvaluated = false;
+        }
 
         /// <summary>
         /// This allows to know where the paragraph is located. Useful for hyperlinks or other stuff.
@@ -22,6 +67,9 @@ namespace OfficeIMO.Word {
         internal string TopParent {
             get {
                 var test = _paragraph.Parent;
+                if (test == null) {
+                    throw new InvalidOperationException($"Paragraph with text '{Text}' has no parent.");
+                }
                 if (test is Body) {
                     return "body";
                 }
@@ -32,9 +80,12 @@ namespace OfficeIMO.Word {
                     return "footer";
                 }
                 var parent = test;
-                do {
+                while (!(parent is Header) && !(parent is Footer) && !(parent is Body)) {
                     parent = parent.Parent;
-                } while (!(parent is Header) && !(parent is Footer) && !(parent is Body));
+                    if (parent == null) {
+                        throw new InvalidOperationException($"Unsupported parent chain for paragraph with text '{Text}'.");
+                    }
+                }
                 if (parent is Body) {
                     return "body";
                 }
@@ -44,33 +95,45 @@ namespace OfficeIMO.Word {
                 if (parent is Header) {
                     return "header";
                 }
-                throw new InvalidOperationException("Please open an issue and describe your situation with Parent");
+                throw new InvalidOperationException($"Unsupported parent chain for paragraph with text '{Text}'.");
             }
         }
 
+        /// <summary>
+        /// Gets a value indicating whether this run is the last run within its parent container.
+        /// </summary>
         public bool IsLastRun {
             get {
-                if (_run != null) {
-                    var runs = _run.Parent.ChildElements.OfType<Run>();
-                    return runs.Last() == _run;
+                if (_run is not null) {
+                    var parent = _run.Parent;
+                    if (parent != null) {
+                        var runs = parent.ChildElements.OfType<Run>();
+                        return runs.LastOrDefault() == _run;
+                    }
                 }
                 return false;
             }
         }
 
+        /// <summary>
+        /// Gets a value indicating whether this run is the first run within its parent container.
+        /// </summary>
         public bool IsFirstRun {
             get {
-                if (_run != null) {
-                    var runs = _run.Parent.ChildElements.OfType<Run>();
-                    return runs.First() == _run;
+                if (_run is not null) {
+                    var parent = _run.Parent;
+                    if (parent != null) {
+                        var runs = parent.ChildElements.OfType<Run>();
+                        return runs.FirstOrDefault() == _run;
+                    }
                 }
                 return false;
             }
         }
 
-        internal RunProperties _runProperties {
+        internal RunProperties? _runProperties {
             get {
-                if (_run != null) {
+                if (_run is not null) {
                     return _run.RunProperties;
                 }
 
@@ -83,7 +146,7 @@ namespace OfficeIMO.Word {
             }
         }
 
-        internal Text _text {
+        internal Text? _text {
             get {
                 if (_run != null) {
                     return _run.ChildElements.OfType<Text>().FirstOrDefault();
@@ -92,9 +155,9 @@ namespace OfficeIMO.Word {
                 return null;
             }
         }
-        internal Run _run;
+        internal Run? _run;
 
-        internal ParagraphProperties _paragraphProperties {
+        internal ParagraphProperties? _paragraphProperties {
             get {
                 if (_paragraph != null && _paragraph.ParagraphProperties != null) {
                     return _paragraph.ParagraphProperties;
@@ -104,32 +167,9 @@ namespace OfficeIMO.Word {
             }
         }
 
-        public WordImage Image {
-            get {
-                if (_run != null) {
-                    var drawing = _run.ChildElements.OfType<Drawing>().FirstOrDefault();
-                    if (drawing != null) {
-                        if (drawing.Inline != null) {
-                            if (drawing.Inline.Graphic != null) {
-                                if (drawing.Inline.Graphic.GraphicData != null) {
-                                    var picture = drawing.Inline.Graphic.GraphicData.ChildElements.OfType<DocumentFormat.OpenXml.Drawing.Pictures.Picture>().FirstOrDefault();
-                                    if (picture != null) {
-                                        return new WordImage(_document, drawing);
-                                    }
-                                }
-                            }
-                        } else if (drawing.Anchor != null) {
-                            var anchorGraphic = drawing.Anchor.OfType<Graphic>().FirstOrDefault();
-                            if (anchorGraphic != null) {
-                                return new WordImage(_document, drawing);
-                            }
-                        }
-                    }
-                }
-                return null;
-            }
-        }
-
+        /// <summary>
+        /// Gets a value indicating whether this paragraph is part of a numbered or bulleted list.
+        /// </summary>
         public bool IsListItem {
             get {
                 if (_paragraphProperties != null && _paragraphProperties.NumberingProperties != null) {
@@ -140,19 +180,18 @@ namespace OfficeIMO.Word {
             }
         }
 
+        /// <summary>
+        /// Gets or sets the indentation level for the paragraph when it belongs to a list.
+        /// </summary>
         public int? ListItemLevel {
             get {
-                if (_paragraphProperties != null && _paragraphProperties.NumberingProperties != null) {
-                    return _paragraphProperties.NumberingProperties.NumberingLevelReference.Val;
-                } else {
-                    return null;
-                }
+                var val = _paragraphProperties?.NumberingProperties?.NumberingLevelReference?.Val;
+                return val?.Value;
             }
             set {
-                if (_paragraphProperties != null && _paragraphProperties.NumberingProperties != null) {
-                    if (_paragraphProperties.NumberingProperties.NumberingLevelReference != null) {
-                        _paragraphProperties.NumberingProperties.NumberingLevelReference.Val = value;
-                    }
+                var levelRef = _paragraphProperties?.NumberingProperties?.NumberingLevelReference;
+                if (levelRef != null) {
+                    levelRef.Val = value;
                 } else {
                     // should throw?
                 }
@@ -161,110 +200,84 @@ namespace OfficeIMO.Word {
 
         internal int? _listNumberId {
             get {
-                if (_paragraphProperties != null && _paragraphProperties.NumberingProperties != null) {
-                    return _paragraphProperties.NumberingProperties.NumberingId.Val;
-                } else {
-                    return null;
-                }
+                var val = _paragraphProperties?.NumberingProperties?.NumberingId?.Val;
+                return val?.Value;
+            }
+        }
+
+        /// <summary>
+        /// Gets the list style when this paragraph is part of a list.
+        /// </summary>
+        public WordListStyle? GetListStyle() {
+            if (!IsListItem) return null;
+
+            int? numberId = _listNumberId;
+            if (numberId == null || _document == null) return null;
+
+            var list = _document.Lists.FirstOrDefault(l => l._numberId == numberId);
+            return list?.Style;
+        }
+
+        /// <summary>
+        /// Gets the list style when this paragraph is part of a list.
+        /// </summary>
+        public WordListStyle? ListStyle {
+            get {
+                return GetListStyle();
             }
         }
 
 
+        /// <summary>
+        /// Gets or sets the paragraph style. Updating this to a heading style will flag the document to update the table of contents on open.
+        /// </summary>
         public WordParagraphStyles? Style {
             get {
-                if (_paragraphProperties != null && _paragraphProperties.ParagraphStyleId != null) {
-                    return WordParagraphStyle.GetStyle(_paragraphProperties.ParagraphStyleId.Val);
-                }
-
-                return null;
+                var styleId = _paragraphProperties?.ParagraphStyleId?.Val;
+                return styleId != null ? WordParagraphStyle.GetStyle(styleId.Value!) : null;
             }
             set {
                 if (value != null) {
+                    _document?.EnsureStyleDefinitionsInitialized();
                     if (_paragraphProperties == null) {
                         _paragraph.ParagraphProperties = new ParagraphProperties();
                     }
-                    if (_paragraphProperties.ParagraphStyleId == null) {
-                        _paragraphProperties.ParagraphStyleId = new ParagraphStyleId();
+                    var paragraphProperties = _paragraphProperties;
+                    if (paragraphProperties != null) {
+                        if (paragraphProperties.ParagraphStyleId == null) {
+                            paragraphProperties.ParagraphStyleId = new ParagraphStyleId();
+                        }
+                        paragraphProperties.ParagraphStyleId.Val = value.Value.ToStringStyle();
+                        if (value.Value >= WordParagraphStyles.Heading1 && value.Value <= WordParagraphStyles.Heading9) {
+                            _document?.HeadingModified();
+                        }
                     }
-                    _paragraphProperties.ParagraphStyleId.Val = value.Value.ToStringStyle();
                 }
             }
         }
 
 
-        internal WordList _list;
-        internal List<Run> _runs;
-        internal Hyperlink _hyperlink;
-        internal SimpleField _simpleField;
-        internal BookmarkStart _bookmarkStart;
-        internal readonly OfficeMath _officeMath;
-        internal readonly SdtRun _stdRun;
-        internal readonly DocumentFormat.OpenXml.Math.Paragraph _mathParagraph;
+        internal WordList? _list;
+        internal List<Run>? _runs;
+        internal Hyperlink? _hyperlink;
+        internal SimpleField? _simpleField;
+        internal BookmarkStart? _bookmarkStart;
+        internal readonly OfficeMath? _officeMath;
+        internal readonly SdtRun? _stdRun;
+        internal readonly DocumentFormat.OpenXml.Math.Paragraph? _mathParagraph;
+
+
+
+
 
         /// <summary>
-        /// Get or set a text within Paragraph
+        /// Initializes a new paragraph.
         /// </summary>
-        public string Text {
-            get {
-                if (_text == null) {
-                    return "";
-                }
-
-                return _text.Text;
-            }
-            set {
-                VerifyText();
-                _text.Text = value;
-            }
-        }
-
-        /// <summary>
-        /// Get PageBreaks within Paragraph
-        /// </summary>
-        public WordBreak PageBreak {
-            get {
-                if (_run != null) {
-                    var brake = _run.ChildElements.OfType<Break>().FirstOrDefault();
-                    if (brake != null && brake.Type != null && brake.Type.Value == BreakValues.Page) {
-                        return new WordBreak(_document, _paragraph, _run);
-                    }
-                }
-
-                return null;
-            }
-        }
-
-        /// <summary>
-        /// Get Breaks within Paragraph
-        /// </summary>
-        public WordBreak Break {
-            get {
-                if (_run != null) {
-                    var brake = _run.ChildElements.OfType<Break>().FirstOrDefault();
-                    if (brake != null) {
-                        return new WordBreak(_document, _paragraph, _run);
-                    }
-                }
-
-                return null;
-            }
-        }
-
-        public WordTabChar Tab {
-            get {
-                if (_run != null) {
-                    var tabChar = _run.ChildElements.OfType<TabChar>().FirstOrDefault();
-                    if (tabChar != null) {
-                        return new WordTabChar(_document, _paragraph, _run);
-                    }
-                }
-
-                return null;
-            }
-        }
-
-        public WordParagraph(WordDocument document = null, bool newParagraph = true, bool newRun = true) {
-            this._document = document;
+        /// <param name="document">Parent document.</param>
+        /// <param name="newParagraph">Create a new paragraph element.</param>
+        /// <param name="newRun">Create a new run inside the paragraph.</param>
+        public WordParagraph(WordDocument? document = null, bool newParagraph = true, bool newRun = true) {
+            this._document = document!;
 
             if (newParagraph) {
                 this._paragraph = new Paragraph();
@@ -275,6 +288,8 @@ namespace OfficeIMO.Word {
                     this._paragraph.AppendChild(_run);
                 }
             }
+
+            InvalidateParent();
         }
 
         internal WordParagraph(WordDocument document, Paragraph paragraph, bool newRun = true) {
@@ -285,17 +300,39 @@ namespace OfficeIMO.Word {
                 this._run = new Run();
                 this._paragraph.AppendChild(_run);
             }
+
+            InvalidateParent();
         }
 
-        public WordParagraph(WordDocument document, Paragraph paragraph) {
+        /// <summary>
+        /// Wraps an existing paragraph from the document.
+        /// </summary>
+        /// <param name="document">Parent document.</param>
+        /// <param name="paragraph">Paragraph to wrap.</param>
+        internal WordParagraph(WordDocument document, Paragraph paragraph) {
             this._document = document;
             this._paragraph = paragraph;
+            InvalidateParent();
         }
 
-        public WordParagraph(WordDocument document, Paragraph paragraph, Run run) {
+        /// <summary>
+        /// Wraps an existing paragraph and run from the document.
+        /// </summary>
+        /// <param name="document">Parent document.</param>
+        /// <param name="paragraph">Paragraph to wrap.</param>
+        /// <param name="run">Run within the paragraph.</param>
+        internal WordParagraph(WordDocument document, Paragraph paragraph, Run run) {
             _document = document;
             _paragraph = paragraph;
             _run = run;
+            InvalidateParent();
+        }
+
+        internal WordParagraph(WordDocument document, Paragraph paragraph, Run run, object? parent) {
+            _document = document;
+            _paragraph = paragraph;
+            _run = run;
+            Parent = parent;
         }
 
         internal WordParagraph(WordDocument document, Paragraph paragraph, Hyperlink hyperlink) {
@@ -304,6 +341,7 @@ namespace OfficeIMO.Word {
             _hyperlink = hyperlink;
 
             //this.Hyperlink = new WordHyperLink(document, paragraph, hyperlink);
+            InvalidateParent();
         }
 
         internal WordParagraph(WordDocument document, Paragraph paragraph, List<Run> runs) {
@@ -311,6 +349,7 @@ namespace OfficeIMO.Word {
             _paragraph = paragraph;
             _runs = runs;
             //this.Field = new WordField(document, paragraph, runs);
+            InvalidateParent();
         }
 
         internal WordParagraph(WordDocument document, Paragraph paragraph, SimpleField simpleField) {
@@ -320,6 +359,7 @@ namespace OfficeIMO.Word {
             _simpleField = simpleField;
 
             //  this.Field = new WordField(document, paragraph, simpleField);
+            InvalidateParent();
         }
 
         internal WordParagraph(WordDocument document, Paragraph paragraph, BookmarkStart bookmarkStart) {
@@ -329,6 +369,7 @@ namespace OfficeIMO.Word {
             _bookmarkStart = bookmarkStart;
 
             // this.Bookmark = new WordBookmark(document, paragraph, bookmarkStart);
+            InvalidateParent();
         }
 
         internal WordParagraph(WordDocument document, Paragraph paragraph, DocumentFormat.OpenXml.Math.OfficeMath officeMath) {
@@ -338,6 +379,7 @@ namespace OfficeIMO.Word {
             _officeMath = officeMath;
 
             //this.Equation = new WordEquation(document, paragraph, officeMath);
+            InvalidateParent();
         }
 
         internal WordParagraph(WordDocument document, Paragraph paragraph, SdtRun stdRun) {
@@ -345,6 +387,7 @@ namespace OfficeIMO.Word {
             _paragraph = paragraph;
             _stdRun = stdRun;
             //this.StructuredDocumentTag = new WordStructuredDocumentTag(document, paragraph, stdRun);
+            InvalidateParent();
         }
 
         internal WordParagraph(WordDocument document, Paragraph paragraph, DocumentFormat.OpenXml.Math.Paragraph mathParagraph) {
@@ -352,234 +395,8 @@ namespace OfficeIMO.Word {
             _paragraph = paragraph;
             _mathParagraph = mathParagraph;
             //  this.Equation = new WordEquation(document, paragraph, mathParagraph);
+            InvalidateParent();
         }
 
-        internal WordStructuredDocumentTag StructuredDocumentTag {
-            get {
-                if (_stdRun != null) {
-                    return new WordStructuredDocumentTag(_document, _paragraph, _stdRun);
-                }
-
-                return null;
-            }
-        }
-
-        public WordBookmark Bookmark {
-            get {
-                if (_bookmarkStart != null) {
-                    return new WordBookmark(_document, _paragraph, _bookmarkStart);
-                }
-
-                return null;
-            }
-        }
-
-        public WordEquation Equation {
-            get {
-                if (_officeMath != null || _mathParagraph != null) {
-                    return new WordEquation(_document, _paragraph, _officeMath, _mathParagraph);
-                }
-
-                return null;
-            }
-        }
-
-        public WordField Field {
-            get {
-                if (_simpleField != null || _runs != null) {
-                    return new WordField(_document, _paragraph, _simpleField, _runs);
-                }
-
-                return null;
-            }
-        }
-
-        public WordChart Chart {
-            get {
-                if (_run != null) {
-                    var drawing = _run.ChildElements.OfType<Drawing>().FirstOrDefault();
-                    if (drawing != null) {
-                        if (drawing.Inline != null) {
-                            if (drawing.Inline.Graphic != null) {
-                                if (drawing.Inline.Graphic.GraphicData != null) {
-                                    var chart = drawing.Inline.Graphic.GraphicData.ChildElements.OfType<DocumentFormat.OpenXml.Drawing.Charts.ChartReference>().FirstOrDefault();
-                                    if (chart != null) {
-                                        return new WordChart(_document, this, drawing);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                return null;
-            }
-        }
-
-        public WordHyperLink Hyperlink {
-            get {
-                if (_hyperlink != null) {
-                    return new WordHyperLink(_document, _paragraph, _hyperlink);
-                }
-
-                return null;
-            }
-        }
-
-        public WordFootNote FootNote {
-            get {
-                if (_run != null && _runProperties != null) {
-                    var footReference = _run.ChildElements.OfType<FootnoteReference>().FirstOrDefault();
-                    if (footReference != null) {
-                        return new WordFootNote(_document, _paragraph, _run);
-                    }
-                }
-                return null;
-            }
-        }
-
-        public WordEndNote EndNote {
-            get {
-                if (_run != null && _runProperties != null) {
-                    var endNoteReference = _run.ChildElements.OfType<EndnoteReference>().FirstOrDefault();
-                    if (endNoteReference != null) {
-                        return new WordEndNote(_document, _paragraph, _run);
-                    }
-                }
-                return null;
-            }
-        }
-
-        public bool IsHyperLink {
-            get {
-                if (this.Hyperlink != null) {
-                    return true;
-                }
-
-                return false;
-            }
-        }
-
-        public bool IsField {
-            get {
-                if (this.Field != null && this.Field.Field != null) {
-                    return true;
-                }
-
-                return false;
-            }
-        }
-
-        public bool IsBookmark {
-            get {
-                if (this.Bookmark != null && this.Bookmark.Name != null) {
-                    return true;
-                }
-
-                return false;
-            }
-        }
-
-        public bool IsEquation {
-            get {
-                if (this.Equation != null) {
-                    return true;
-                }
-
-                return false;
-            }
-        }
-
-        public bool IsStructuredDocumentTag {
-            get {
-                if (this.StructuredDocumentTag != null) {
-                    return true;
-                }
-
-                return false;
-            }
-        }
-
-        public bool IsImage {
-            get {
-                if (this.Image != null) {
-                    return true;
-                }
-
-                return false;
-            }
-        }
-
-        public bool IsTab {
-            get {
-                if (this.Tab != null) {
-                    return true;
-                }
-
-                return false;
-            }
-        }
-
-        public bool IsChart {
-            get {
-                if (this.Chart != null) {
-                    return true;
-                }
-                return false;
-            }
-        }
-
-        public bool IsEndNote {
-            get {
-                if (this.EndNote != null) {
-                    return true;
-                }
-                return false;
-            }
-        }
-
-        public bool IsFootNote {
-            get {
-                if (this.FootNote != null) {
-                    return true;
-                }
-                return false;
-            }
-        }
-
-        public List<WordTabStop> TabStops {
-            get {
-                List<WordTabStop> list = new List<WordTabStop>();
-                if (_paragraph != null && _paragraphProperties != null) {
-                    if (_paragraphProperties.Tabs != null) {
-                        foreach (TabStop tab in _paragraphProperties.Tabs) {
-                            list.Add(new WordTabStop(this, tab));
-                        }
-                    }
-                }
-                return list;
-            }
-        }
-
-        public WordTextBox TextBox {
-            get {
-                if (_run != null && _runProperties != null) {
-                    var wordTextboxes = _run.ChildElements.OfType<AlternateContent>().FirstOrDefault();
-                    if (wordTextboxes != null) {
-                        return new WordTextBox(_document, _paragraph, _run);
-                    }
-                }
-                return null;
-            }
-        }
-
-        public bool IsTextBox {
-            get {
-                if (this.TextBox != null) {
-                    return true;
-                }
-
-                return false;
-            }
-        }
     }
 }

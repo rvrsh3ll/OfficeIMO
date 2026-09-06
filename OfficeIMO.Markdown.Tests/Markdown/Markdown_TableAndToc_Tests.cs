@@ -1,0 +1,340 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Dynamic;
+using System.Text.RegularExpressions;
+using OfficeIMO.Markdown;
+using Xunit;
+
+namespace OfficeIMO.Tests.MarkdownSuite {
+    public class Markdown_TableAndToc_Tests {
+        [Fact]
+        public void HeaderTransform_Pretty_Uppercases_Acronyms() {
+            System.Func<string,string> transform = HeaderTransforms.Pretty;
+            Assert.Equal("DMARC Policy", transform("DmarcPolicy"));
+            Assert.Equal("TLS Grade", transform("TlsGrade"));
+            Assert.Equal("SPF Aligned", transform("SpfAligned"));
+        }
+
+        [Fact]
+        public void HeaderTransform_CustomAcronyms() {
+            var transform = HeaderTransforms.PrettyWithAcronyms(new [] { "ABC" });
+            Assert.Equal("ABC Count", transform("AbcCount"));
+        }
+
+        [Fact]
+        public void Table_FromAny_WithAlignmentRow() {
+            var rows = new [] {
+                new { Name = "Alice", Score = 10 },
+                new { Name = "Bob", Score = 15 }
+            };
+            var md = MarkdownDoc.Create()
+                .Table(t => t.FromAny(rows).Align(ColumnAlignment.Left, ColumnAlignment.Right));
+            var text = md.ToMarkdown();
+            // Alignment row should contain :--- and ---:
+            Assert.Contains("| :--- | ---: |", text.Replace("\r", ""));
+        }
+
+        [Fact]
+        public void Table_FromSequence_WithSelectors() {
+            var rows = new [] {
+                new { Host = "example.com", SPF = true, Score = 91.2 },
+                new { Host = "evotec.xyz", SPF = false, Score = 88.0 }
+            };
+            var md = MarkdownDoc.Create()
+                .Table(t => t.FromSequence(rows,
+                        ("Host", x => x.Host),
+                        ("SPF", x => x.SPF ? "yes" : "no"),
+                        ("Score", x => x.Score))
+                    .AlignNumericRight());
+            var text = md.ToMarkdown();
+            Assert.Contains("| Host | SPF | Score |", text);
+            Assert.Matches(new Regex(@"\|\s*:\-\-\-\s*\|\s*:\-\-\-\s*\|\s*\-\-\-:\s*\|"), text);
+        }
+
+        [Fact]
+        public void Table_FromSequence_Truncates_And_Counts_Skipped_Rows() {
+            var rows = Enumerable.Range(1, 10050).Select(i => new { Index = i, Label = $"Row {i}" });
+
+            var doc = MarkdownDoc.Create()
+                .TableFrom(rows,
+                    ("Index", x => x.Index),
+                    ("Label", x => x.Label));
+
+            var table = Assert.IsType<TableBlock>(doc.Blocks.Single());
+            Assert.Equal(10000, table.Rows.Count);
+            Assert.Equal(50, table.SkippedRowCount);
+            Assert.All(table.Rows, row => Assert.Equal(2, row.Count));
+            Assert.Equal(0, table.SkippedColumnCount);
+        }
+
+        [Fact]
+        public void Table_FromSequence_ICollection_Counts_Skipped_Rows_Without_Full_Enumeration() {
+            var rows = Enumerable.Range(1, 10050).Select(i => new { Index = i, Label = $"Row {i}" });
+            var limited = new LimitedCollection<(int Index, string Label)>(rows.Select(r => (r.Index, r.Label)), 10005);
+
+            var doc = MarkdownDoc.Create()
+                .TableFrom(limited,
+                    ("Index", x => x.Index),
+                    ("Label", x => x.Label));
+
+            var table = Assert.IsType<TableBlock>(doc.Blocks.Single());
+            Assert.Equal(10000, table.Rows.Count);
+            Assert.Equal(50, table.SkippedRowCount);
+            Assert.InRange(limited.EnumerationCount, 0, 10005);
+        }
+
+        [Fact]
+        public void Table_FromSequence_Clips_Columns_To_Max() {
+            var wideRow = new WideRow { Values = Enumerable.Range(0, 150).ToArray() };
+            var columns = Enumerable.Range(0, 150)
+                .Select(i => ($"H{i}", (Func<WideRow, object?>)(x => x.Values[i])))
+                .ToArray();
+
+            var doc = MarkdownDoc.Create().TableFrom(new[] { wideRow }, columns);
+
+            var table = Assert.IsType<TableBlock>(doc.Blocks.Single());
+            Assert.Equal(100, table.Headers.Count);
+            Assert.Single(table.Rows);
+            Assert.Equal(100, table.Rows[0].Count);
+            Assert.Equal(50, table.SkippedColumnCount);
+        }
+
+        [Fact]
+        public void Table_AlignDatesCenter_And_CurrencyRight() {
+            var prev = System.Globalization.CultureInfo.CurrentCulture;
+            try {
+                System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("en-US");
+                var rows = new [] {
+                    new { Date = "01/02/2025", Amount = "$12.50" },
+                    new { Date = "02/03/2025", Amount = "$100.00" },
+                };
+                var md = MarkdownDoc.Create()
+                    .Table(t => t.FromAny(rows).AlignDatesCenter().AlignNumericRight());
+                var text = md.ToMarkdown().Replace("\r", "");
+                // Center for Date, Right for Amount
+                Assert.Contains("| :---: | ---: |", text);
+            } finally {
+                System.Globalization.CultureInfo.CurrentCulture = prev;
+            }
+        }
+
+        [Fact]
+        public void Toc_Generates_On_Render() {
+            var md = MarkdownDoc.Create()
+                .H1("Doc")
+                .H2("Install").P("...")
+                .H2("Usage").P("...")
+                .TocAtTop("Contents", min: 2, max: 2);
+            var text = md.ToMarkdown();
+            Assert.Contains("- [Install](#install)", text);
+            Assert.Contains("- [Usage](#usage)", text);
+        }
+
+        [Fact]
+        public void TableFromAny_With_Options_Order_Rename_Formatters() {
+            var obj = new { DmarcPolicy = "p=none", Score = 91.2345, Notes = "ok" };
+            var md = MarkdownDoc.Create()
+                .Table(t => t.FromAny(obj, o => {
+                    o.Include.UnionWith(new[] { "Score", "DmarcPolicy" });
+                    o.Order.AddRange(new[] { "DmarcPolicy", "Score" });
+                    o.HeaderRenames["DmarcPolicy"] = "DMARC Policy";
+                    o.Formatters["Score"] = v => string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:0.00}", v);
+                }));
+            var text = md.ToMarkdown();
+            var lines = text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+            Assert.Contains("| DMARC Policy | Score |", text);
+            Assert.Contains("| p=none | 91.23 |", text);
+        }
+
+        [Fact]
+        public void ToHtml_Adds_Heading_Ids() {
+            var md = MarkdownDoc.Create().H2("Install");
+            var html = md.ToHtmlFragment();
+            Assert.Contains("<h2 id=\"install\">Install</h2>", html);
+        }
+
+        [Fact]
+        public void ToHtml_Can_Render_Heading_Anchors_And_BackToTop_From_Block_Context() {
+            var md = MarkdownDoc.Create().H2("Install");
+
+            var html = md.ToHtmlFragment(new HtmlOptions {
+                Style = HtmlStyle.Clean,
+                IncludeAnchorLinks = true,
+                BackToTopLinks = true,
+                BackToTopMinLevel = 2
+            });
+
+            Assert.Contains("class=\"heading-anchor\"", html);
+            Assert.Contains("href=\"#install\"", html);
+            Assert.Contains("class=\"back-to-top\"", html);
+        }
+
+        [Fact]
+        public void TocHere_And_TocForSection_Work() {
+            var md = MarkdownDoc.Create()
+                .H1("Doc")
+                .H2("Intro").P("...")
+                .TocHere(o => { o.MinLevel = 2; o.MaxLevel = 2; })
+                .H2("Appendix").H3("Extra")
+                .TocForPreviousHeading("Appendix Contents", min: 3, max: 3);
+            var text = md.ToMarkdown();
+            Assert.Contains("- [Intro](#intro)", text);
+            Assert.Contains("- [Extra](#extra)", text);
+        }
+
+        [Fact]
+        public void TocForPreviousHeading_Markdown_Uses_Same_Scope_Rules_As_Html_Rendering() {
+            var md = MarkdownDoc.Create()
+                .H1("Doc")
+                .H2("Intro")
+                .H3("Intro Child")
+                .H2("Appendix")
+                .H3("Extra")
+                .TocForPreviousHeading("Appendix Contents", min: 3, max: 3);
+
+            var text = md.ToMarkdown().Replace("\r", "");
+
+            Assert.Contains("- [Extra](#extra)", text);
+            Assert.DoesNotContain("- [Intro Child](#intro-child)", text);
+        }
+
+        [Fact]
+        public void TableFromAuto_Applies_Heuristics() {
+            var rows = new [] {
+                new { Date = "2025-01-02", Amount = "12.50" },
+                new { Date = "2025-01-03", Amount = "100.00" },
+            };
+            var md = MarkdownDoc.Create().TableFromAuto(rows);
+            var text = md.ToMarkdown().Replace("\r", "");
+            Assert.Contains("| :---: | ---: |", text);
+        }
+
+        [Fact]
+        public void TableFromAny_ReadOnlyDictionary_Produces_KeyValue_Table() {
+            IReadOnlyDictionary<string, object?> data = new FakeReadOnlyDictionary(new Dictionary<string, object?> {
+                ["Alpha"] = 1,
+                ["Beta"] = "two",
+            });
+
+            var md = MarkdownDoc.Create().Table(t => t.FromAny(data));
+            var lines = md.ToMarkdown().Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+
+            Assert.Contains("| Key | Value |", lines);
+            Assert.Contains("| Alpha | 1 |", lines);
+            Assert.Contains("| Beta | two |", lines);
+        }
+
+        [Fact]
+        public void TableFromAny_KeyValuePairSequence_Projects_To_KeyValue_Table() {
+            IEnumerable<KeyValuePair<string, object?>> rows = new List<KeyValuePair<string, object?>> {
+                new KeyValuePair<string, object?>("One", 1),
+                new KeyValuePair<string, object?>("Two", new [] { "x", "y" }),
+            };
+
+            var md = MarkdownDoc.Create().Table(t => t.FromAny(rows));
+            var lines = md.ToMarkdown().Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+
+            Assert.Contains("| Key | Value |", lines);
+            Assert.Contains("| One | 1 |", lines);
+            Assert.Contains("| Two | x, y |", lines);
+        }
+
+        [Fact]
+        public void TableFromAny_DictionarySequence_Unionizes_Keys() {
+            var rows = new List<Dictionary<string, object?>> {
+                new Dictionary<string, object?> { ["Name"] = "Alice", ["Score"] = 10 },
+                new Dictionary<string, object?> { ["Name"] = "Bob", ["Age"] = 42 }
+            };
+
+            var md = MarkdownDoc.Create().Table(t => t.FromAny(rows));
+            var lines = md.ToMarkdown().Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+
+            Assert.Contains("| Name | Score | Age |", lines);
+            Assert.Contains("| Alice | 10 |  |", lines);
+            Assert.Contains("| Bob |  | 42 |", lines);
+        }
+
+        [Fact]
+        public void TableFromAny_ExpandoSequence_Uses_All_Member_Names() {
+            dynamic first = new ExpandoObject();
+            first.Name = "Alice";
+            first.City = "Paris";
+            dynamic second = new ExpandoObject();
+            second.Name = "Bob";
+            second.Country = "France";
+
+            var rows = new List<ExpandoObject> { first, second };
+
+            var md = MarkdownDoc.Create().Table(t => t.FromAny(rows));
+            var lines = md.ToMarkdown().Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+
+            Assert.Contains("| Name | City | Country |", lines);
+            Assert.Contains("| Alice | Paris |  |", lines);
+            Assert.Contains("| Bob |  | France |", lines);
+        }
+
+        private sealed class FakeReadOnlyDictionary : IReadOnlyDictionary<string, object?> {
+            private readonly Dictionary<string, object?> _inner;
+
+            public FakeReadOnlyDictionary(Dictionary<string, object?> inner) { _inner = inner; }
+
+            public object? this[string key] => _inner[key];
+
+            public IEnumerable<string> Keys => _inner.Keys;
+
+            public IEnumerable<object?> Values => _inner.Values;
+
+            public int Count => _inner.Count;
+
+            public bool ContainsKey(string key) => _inner.ContainsKey(key);
+
+            public IEnumerator<KeyValuePair<string, object?>> GetEnumerator() => _inner.GetEnumerator();
+
+            public bool TryGetValue(string key, out object? value) => _inner.TryGetValue(key, out value);
+
+            System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => _inner.GetEnumerator();
+        }
+
+        private sealed class LimitedCollection<T> : ICollection<T> {
+            private readonly List<T> _items;
+            private readonly int _maxEnumeration;
+            private int _enumerationCount;
+
+            public LimitedCollection(IEnumerable<T> items, int maxEnumeration) {
+                _items = items.ToList();
+                _maxEnumeration = maxEnumeration;
+            }
+
+            public int EnumerationCount => _enumerationCount;
+
+            public int Count => _items.Count;
+
+            public bool IsReadOnly => true;
+
+            public IEnumerator<T> GetEnumerator() {
+                foreach (var item in _items) {
+                    _enumerationCount++;
+                    if (_enumerationCount > _maxEnumeration) throw new InvalidOperationException("Enumeration exceeded limit");
+                    yield return item;
+                }
+            }
+
+            System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+
+            public bool Contains(T item) => _items.Contains(item);
+
+            public void CopyTo(T[] array, int arrayIndex) => _items.CopyTo(array, arrayIndex);
+
+            void ICollection<T>.Add(T item) => throw new NotSupportedException();
+
+            void ICollection<T>.Clear() => throw new NotSupportedException();
+
+            bool ICollection<T>.Remove(T item) => throw new NotSupportedException();
+        }
+
+        private sealed class WideRow {
+            public int[] Values { get; set; } = Array.Empty<int>();
+        }
+    }
+}

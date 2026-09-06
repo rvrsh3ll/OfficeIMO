@@ -1,0 +1,645 @@
+using System;
+
+using System.IO;
+
+using System.Linq;
+
+using System.Text;
+
+using System.Xml;
+
+using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Validation;
+using A = DocumentFormat.OpenXml.Drawing;
+using OfficeIMO.PowerPoint;
+
+using Xunit;
+
+
+
+namespace OfficeIMO.Tests {
+
+    public class PowerPointTables {
+
+        [Fact]
+
+        public void ObjectTableRejectsColumnsBeyondConfiguredLimit() {
+
+            using var stream = new MemoryStream();
+            using PowerPointPresentation presentation = PowerPointPresentation.Create(stream);
+            PowerPointSlide slide = presentation.AddSlide();
+            var rows = new[] {
+                new System.Collections.Generic.Dictionary<string, object?> {
+                    ["A"] = 1,
+                    ["B"] = 2,
+                    ["C"] = 3
+                }
+            };
+
+            Assert.Throws<InvalidDataException>(() =>
+                slide.AddTable(rows, options => options.MaxColumns = 2));
+        }
+
+        [Fact]
+        public void ObjectTableExplainsHardColumnBoundary() {
+            using var stream = new MemoryStream();
+            using PowerPointPresentation presentation = PowerPointPresentation.Create(stream);
+            PowerPointSlide slide = presentation.AddSlide();
+            var row = Enumerable.Range(0, 1_025)
+                .ToDictionary(index => "Column" + index, index => (object?)index);
+
+            InvalidDataException exception = Assert.Throws<InvalidDataException>(() =>
+                slide.AddTable(new[] { row }, options => options.MaxColumns = int.MaxValue));
+
+            Assert.Contains("requires at least 1025 columns", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("Select fewer columns or split the data across multiple tables", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("cannot be overridden", exception.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("MaxColumns to at least 1025", exception.Message, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void ObjectTableExplainsHardCellBoundary() {
+            using var stream = new MemoryStream();
+            using PowerPointPresentation presentation = PowerPointPresentation.Create(stream);
+            PowerPointSlide slide = presentation.AddSlide();
+            var rows = Enumerable.Range(0, 100)
+                .Select(_ => new System.Collections.Generic.Dictionary<string, object?>())
+                .ToArray();
+            string[] columns = Enumerable.Range(0, 1_000)
+                .Select(index => "Column" + index)
+                .ToArray();
+
+            InvalidDataException exception = Assert.Throws<InvalidDataException>(() =>
+                slide.AddTable(rows, options => {
+                    options.Columns = columns;
+                    options.MaxCells = 50_000;
+                }));
+
+            Assert.Contains("requires at least 101000 cells", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("Select fewer rows or columns, or split the data across multiple tables", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("cannot be overridden", exception.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("MaxCells to at least 101000", exception.Message, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void ObjectTableRejectsNonPositiveRowLimitBeforeInspectingSource() {
+            using var stream = new MemoryStream();
+            using PowerPointPresentation presentation = PowerPointPresentation.Create(stream);
+            PowerPointSlide slide = presentation.AddSlide();
+
+            ArgumentOutOfRangeException exception = Assert.Throws<ArgumentOutOfRangeException>(() =>
+                slide.AddTable(Array.Empty<int>(), options => options.MaxRows = 0));
+
+            Assert.Equal("MaxRows", exception.ParamName);
+        }
+
+        [Fact]
+
+        public void ObjectTableRejectsFinalCellsDuringNestedExpansion() {
+
+            using var stream = new MemoryStream();
+            using PowerPointPresentation presentation = PowerPointPresentation.Create(stream);
+            PowerPointSlide slide = presentation.AddSlide();
+            var rows = new[] {
+                new System.Collections.Generic.Dictionary<string, object?> {
+                    ["Name"] = "A",
+                    ["Values"] = new[] { 1, 2, 3 }
+                }
+            };
+
+            InvalidDataException exception = Assert.Throws<InvalidDataException>(() => slide.AddTable(rows, options => {
+                options.MaxCells = 5;
+                options.CollectionMode = OfficeIMO.Data.CollectionMode.ExpandRows;
+            }));
+            Assert.Contains("requires at least 6 cells", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("options.MaxCells = 6", exception.Message, StringComparison.Ordinal);
+        }
+
+        [Fact]
+
+        public void ObjectTableWithoutHeadersCountsOnlyRenderedCells() {
+
+            using var stream = new MemoryStream();
+            using PowerPointPresentation presentation = PowerPointPresentation.Create(stream);
+            PowerPointSlide slide = presentation.AddSlide();
+            var rows = new[] {
+                new System.Collections.Generic.Dictionary<string, object?> {
+                    ["A"] = 1,
+                    ["B"] = 2
+                }
+            };
+
+            PowerPointTable table = slide.AddTable(
+                rows,
+                options => options.MaxCells = 2,
+                includeHeaders: false);
+
+            Assert.Equal(1, table.Rows);
+            Assert.Equal(2, table.Columns);
+            Assert.False(table.HeaderRow);
+        }
+
+        [Fact]
+
+        public void ObjectTableExplicitColumnsPreservesDistinctRequestedSchema() {
+
+            using var stream = new MemoryStream();
+            using PowerPointPresentation presentation = PowerPointPresentation.Create(stream);
+            PowerPointSlide slide = presentation.AddSlide();
+            var rows = new[] {
+                new System.Collections.Generic.Dictionary<string, object?> {
+                    ["Name"] = "Alice"
+                }
+            };
+
+            PowerPointTable table = slide.AddTable(rows, options => {
+                options.Columns = new[] { "Name", "Name", "Missing" };
+                options.MaxColumns = 2;
+            });
+
+            Assert.Equal(2, table.Columns);
+            Assert.Equal("Name", table.GetCell(0, 0).Text);
+            Assert.Equal("Missing", table.GetCell(0, 1).Text);
+            Assert.Equal("Alice", table.GetCell(1, 0).Text);
+            Assert.Equal(string.Empty, table.GetCell(1, 1).Text);
+        }
+
+        [Fact]
+        public void ObjectTableAppliesSelectionBeforeExplicitColumnLimit() {
+            using var stream = new MemoryStream();
+            using PowerPointPresentation presentation = PowerPointPresentation.Create(stream);
+            PowerPointSlide slide = presentation.AddSlide();
+            var rows = new[] {
+                new System.Collections.Generic.Dictionary<string, object?> {
+                    ["Name"] = "Alice",
+                    ["Status"] = "Active"
+                }
+            };
+
+            PowerPointTable table = slide.AddTable(rows, options => {
+                options.Columns = new[] { "Name", "Status" };
+                options.ExcludeProperties = new[] { "Status" };
+                options.MaxColumns = 1;
+            });
+
+            Assert.Equal(1, table.Columns);
+            Assert.Equal("Name", table.GetCell(0, 0).Text);
+            Assert.Equal("Alice", table.GetCell(1, 0).Text);
+        }
+
+        [Fact]
+        public void ObjectTableStopsStreamingRowsAtCellLimit() {
+            using var stream = new MemoryStream();
+            using PowerPointPresentation presentation = PowerPointPresentation.Create(stream);
+            PowerPointSlide slide = presentation.AddSlide();
+            int enumeratedRows = 0;
+
+            System.Collections.Generic.IEnumerable<System.Collections.Generic.Dictionary<string, object?>> Rows() {
+                while (true) {
+                    enumeratedRows++;
+                    var row = new System.Collections.Generic.Dictionary<string, object?>();
+                    for (int column = 0; column < 100; column++) row["Column" + column] = column;
+                    yield return row;
+                }
+            }
+
+            Assert.Throws<InvalidDataException>(() => slide.AddTable(Rows(), options => {
+                options.MaxRows = 5;
+                options.MaxCells = 250;
+            }));
+            Assert.Equal(2, enumeratedRows);
+        }
+
+        [Fact]
+        public void ExplicitBindingTableStopsColumnEnumerationAtHardLimit() {
+            using var stream = new MemoryStream();
+            using PowerPointPresentation presentation = PowerPointPresentation.Create(stream);
+            PowerPointSlide slide = presentation.AddSlide();
+
+            Assert.Throws<InvalidDataException>(() => slide.AddTable(
+                new[] { 1 },
+                InfiniteColumns()));
+        }
+
+        [Fact]
+        public void ExplicitBindingTableStopsRowEnumerationAtCellLimit() {
+            using var stream = new MemoryStream();
+            using PowerPointPresentation presentation = PowerPointPresentation.Create(stream);
+            PowerPointSlide slide = presentation.AddSlide();
+            PowerPointTableColumn<int>[] columns = Enumerable.Range(0, 1_024)
+                .Select(index => PowerPointTableColumn<int>.Create("Column" + index, value => value))
+                .ToArray();
+
+            Assert.Throws<InvalidDataException>(() => slide.AddTable(InfiniteRows(), columns));
+        }
+
+        [Fact]
+
+        public void CanManipulateTableCellsAndPreserveStyle() {
+
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".pptx");
+
+
+
+            using (PowerPointPresentation presentation = PowerPointPresentation.Create(filePath)) {
+
+                PowerPointSlide slide = presentation.AddSlide();
+
+                PowerPointTable table = slide.AddTable(2, 2);
+
+                PowerPointTableCell cell = table.GetCell(0, 0);
+
+                cell.Text = "Test";
+
+                cell.FillColor = "FF0000";
+
+                cell.Merge = (1, 2);
+
+                table.AddRow();
+
+                table.AddColumn();
+
+                table.RemoveRow(2);
+
+                table.RemoveColumn(2);
+
+                presentation.Save();
+
+            }
+
+
+
+            using (PowerPointPresentation presentation = PowerPointPresentation.Load(filePath)) {
+
+                PowerPointTable table = presentation.Slides[0].Tables.First();
+
+                Assert.Equal(2, table.Rows);
+
+                Assert.Equal(2, table.Columns);
+
+                PowerPointTableCell cell = table.GetCell(0, 0);
+
+                Assert.Equal("Test", cell.Text);
+
+                Assert.Equal((1, 2), cell.Merge);
+
+            }
+
+
+
+            using (PresentationDocument doc = PresentationDocument.Open(filePath, false)) {
+                A.Table table = doc.PresentationPart!.SlideParts.First().Slide.Descendants<A.Table>().First();
+                string? styleId = table.TableProperties?.GetFirstChild<A.TableStyleId>()?.Text;
+                Assert.Equal("{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}", styleId);
+            }
+
+
+            File.Delete(filePath);
+
+        }
+
+
+        [Fact]
+        public void CanToggleHeaderAndBandedRows() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".pptx");
+
+            using (PowerPointPresentation presentation = PowerPointPresentation.Create(filePath)) {
+                PowerPointSlide slide = presentation.AddSlide();
+                PowerPointTable table = slide.AddTable(2, 2);
+                table.HeaderRow = false;
+                table.BandedRows = false;
+                presentation.Save();
+            }
+
+            using (PowerPointPresentation presentation = PowerPointPresentation.Load(filePath)) {
+                PowerPointTable table = presentation.Slides.Single().Tables.First();
+                Assert.False(table.HeaderRow);
+                Assert.False(table.BandedRows);
+            }
+
+            using (PresentationDocument doc = PresentationDocument.Open(filePath, false)) {
+                A.Table table = doc.PresentationPart!.SlideParts.First().Slide.Descendants<A.Table>().First();
+                A.TableProperties? properties = table.TableProperties;
+                Assert.NotNull(properties);
+                Assert.False(properties!.FirstRow?.Value ?? false);
+                Assert.False(properties.BandRow?.Value ?? false);
+            }
+
+            File.Delete(filePath);
+        }
+
+        [Fact]
+        public void CanAddTableWithStyleName() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".pptx");
+            string? styleName = null;
+            string? styleId = null;
+
+            using (PowerPointPresentation presentation = PowerPointPresentation.Create(filePath)) {
+                PowerPointTableStyleInfo style = presentation.TableStyles
+                    .FirstOrDefault(s => !string.IsNullOrWhiteSpace(s.StyleId));
+                Assert.False(string.IsNullOrWhiteSpace(style.StyleId));
+
+                styleId = style.StyleId;
+                styleName = string.IsNullOrWhiteSpace(style.Name) ? style.StyleId : style.Name;
+
+                PowerPointSlide slide = presentation.AddSlide();
+                slide.AddTable(rows: 2, columns: 2, styleName: styleName,
+                    left: 0L, top: 0L, width: 6000000L, height: 2000000L,
+                    firstRow: true, bandedRows: true);
+                presentation.Save();
+            }
+
+            using (PresentationDocument doc = PresentationDocument.Open(filePath, false)) {
+                A.Table table = doc.PresentationPart!.SlideParts.First().Slide.Descendants<A.Table>().First();
+                string? appliedStyle = table.TableProperties?.GetFirstChild<A.TableStyleId>()?.Text;
+                Assert.Equal(styleId, appliedStyle);
+            }
+
+            File.Delete(filePath);
+        }
+
+        [Fact]
+        public void TableStyles_DoesNotDuplicateEntries() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".pptx");
+
+            using (PowerPointPresentation presentation = PowerPointPresentation.Create(filePath)) {
+                PowerPointTableStyleInfo[] styles = presentation.TableStyles.ToArray();
+
+                Assert.NotEmpty(styles);
+                Assert.Equal(styles.Length, styles.Select(style => style.StyleId).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+            }
+
+            File.Delete(filePath);
+        }
+
+        [Fact]
+        public void PowerPointPackageXmlReader_RejectsDtdPackageXml() {
+            byte[] xml = Encoding.UTF8.GetBytes("""
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE a:tblStyleLst [
+  <!ENTITY expand "blocked">
+]>
+<a:tblStyleLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" def="{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}">
+  <a:tblStyle styleId="{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}" styleName="&expand;" />
+</a:tblStyleLst>
+""");
+            using var stream = new MemoryStream(xml);
+
+            Assert.Throws<XmlException>(() => PowerPointXmlReader.LoadPackagePartXml(stream));
+        }
+
+        [Fact]
+        public void CanSetTableCellAutoFit() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".pptx");
+
+            using (PowerPointPresentation presentation = PowerPointPresentation.Create(filePath)) {
+                PowerPointSlide slide = presentation.AddSlide();
+                PowerPointTable table = slide.AddTable(1, 1);
+                PowerPointTableCell cell = table.GetCell(0, 0);
+                cell.SetTextAutoFit(PowerPointTextAutoFit.Normal,
+                    new PowerPointTextAutoFitOptions(fontScalePercent: 80, lineSpaceReductionPercent: 10));
+                presentation.Save();
+            }
+
+            using (PresentationDocument doc = PresentationDocument.Open(filePath, false)) {
+                A.TableCell cell = doc.PresentationPart!.SlideParts.First().Slide
+                    .Descendants<A.TableCell>().First();
+                A.BodyProperties? body = cell.TextBody?.GetFirstChild<A.BodyProperties>();
+                A.NormalAutoFit? normal = body?.GetFirstChild<A.NormalAutoFit>();
+                Assert.NotNull(normal);
+                Assert.Equal(80000, normal!.FontScale!.Value);
+                Assert.Equal(10000, normal.LineSpaceReduction!.Value);
+            }
+
+            File.Delete(filePath);
+        }
+
+        [Fact]
+        public void CanBindTableWithColumnDefinitions() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".pptx");
+
+            var data = new[] {
+                new SalesRow("Alpha", 12, 15),
+                new SalesRow("Beta", 9, 11)
+            };
+
+            var columns = new[] {
+                PowerPointTableColumn<SalesRow>.Create("Product", row => row.Product).WithWidthCm(4.0),
+                PowerPointTableColumn<SalesRow>.Create("Q1", row => row.Q1),
+                PowerPointTableColumn<SalesRow>.Create("Q2", row => row.Q2)
+            };
+
+            using (PowerPointPresentation presentation = PowerPointPresentation.Create(filePath)) {
+                PowerPointSlide slide = presentation.AddSlide();
+                slide.AddTable(data, columns, includeHeaders: true,
+                    left: 0L, top: 0L, width: 6000000L, height: 2000000L);
+                presentation.Save();
+            }
+
+            using (PowerPointPresentation presentation = PowerPointPresentation.Load(filePath)) {
+                PowerPointTable table = presentation.Slides[0].Tables.First();
+                Assert.Equal("Product", table.GetCell(0, 0).Text);
+                Assert.Equal("Alpha", table.GetCell(1, 0).Text);
+                Assert.Equal("15", table.GetCell(1, 2).Text);
+                Assert.True(table.GetColumnWidth(0) > 0);
+            }
+
+            File.Delete(filePath);
+        }
+
+        [Fact]
+        public void AutoBoundTableUsesAvailableWidth() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".pptx");
+
+            var data = new[] {
+                new SalesRow("Alpha", 12, 15),
+                new SalesRow("Beta", 9, 11)
+            };
+
+            const long tableWidth = 6000000L;
+
+            using (PowerPointPresentation presentation = PowerPointPresentation.Create(filePath)) {
+                PowerPointSlide slide = presentation.AddSlide();
+                slide.AddTable(data, includeHeaders: true,
+                    left: 0L, top: 0L, width: tableWidth, height: 2000000L);
+                presentation.Save();
+            }
+
+            using (PowerPointPresentation presentation = PowerPointPresentation.Load(filePath)) {
+                PowerPointTable table = presentation.Slides[0].Tables.First();
+                long sum = 0;
+                for (int i = 0; i < table.Columns; i++) {
+                    long width = table.GetColumnWidth(i);
+                    Assert.True(width > 0);
+                    sum += width;
+                }
+                Assert.Equal(tableWidth, sum);
+            }
+
+            File.Delete(filePath);
+        }
+
+        [Fact]
+        public void ExplicitColumnWidthsCannotExceedTableWidth() {
+            var data = new[] {
+                new SalesRow("Alpha", 12, 15)
+            };
+
+            var columns = new[] {
+                PowerPointTableColumn<SalesRow>.Create("Product", row => row.Product).WithWidth(1500000L),
+                PowerPointTableColumn<SalesRow>.Create("Q1", row => row.Q1).WithWidth(1500000L)
+            };
+
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".pptx");
+
+            using (PowerPointPresentation presentation = PowerPointPresentation.Create(filePath)) {
+                PowerPointSlide slide = presentation.AddSlide();
+                Assert.Throws<ArgumentException>(() =>
+                    slide.AddTable(data, columns, includeHeaders: true, left: 0L, top: 0L, width: 2000000L, height: 1000000L));
+            }
+
+            File.Delete(filePath);
+        }
+
+        [Fact]
+        public void CanApplyColumnWidthRatios() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".pptx");
+
+            using (PowerPointPresentation presentation = PowerPointPresentation.Create(filePath)) {
+                PowerPointSlide slide = presentation.AddSlide();
+                PowerPointTable table = slide.AddTable(1, 2, left: 0L, top: 0L, width: 6000000L, height: 1500000L);
+                table.SetColumnWidthsByRatio(2, 1);
+                presentation.Save();
+            }
+
+            using (PowerPointPresentation presentation = PowerPointPresentation.Load(filePath)) {
+                PowerPointTable table = presentation.Slides[0].Tables.First();
+                Assert.Equal(4000000L, table.GetColumnWidth(0));
+                Assert.Equal(2000000L, table.GetColumnWidth(1));
+            }
+
+            File.Delete(filePath);
+        }
+
+        [Fact]
+        public void CanAddColumnUsingExplicitAppendIndex() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".pptx");
+
+            using (PowerPointPresentation presentation = PowerPointPresentation.Create(filePath)) {
+                PowerPointSlide slide = presentation.AddSlide();
+                PowerPointTable table = slide.AddTable(1, 2);
+
+                table.AddColumn(table.Columns);
+                table.GetCell(0, 2).Text = "Appended";
+                presentation.Save();
+            }
+
+            using (PowerPointPresentation presentation = PowerPointPresentation.Load(filePath)) {
+                PowerPointTable table = presentation.Slides.Single().Tables.First();
+                Assert.Equal(3, table.Columns);
+                Assert.Equal("Appended", table.GetCell(0, 2).Text);
+            }
+
+            File.Delete(filePath);
+        }
+
+        [Fact]
+        public void CombinedTableMutationsValidatePackage() {
+            string filePath = CreateTempFilePath(".pptx");
+
+            try {
+                var data = new[] {
+                    new SalesRow("Alpha", 12, 15),
+                    new SalesRow("Beta", 9, 11)
+                };
+
+                var columns = new[] {
+                    PowerPointTableColumn<SalesRow>.Create("Product", row => row.Product),
+                    PowerPointTableColumn<SalesRow>.Create("Q1", row => row.Q1)
+                };
+
+                using (PowerPointPresentation presentation = PowerPointPresentation.Create(filePath)) {
+                    PowerPointSlide slide = presentation.AddSlide();
+                    PowerPointTable table = slide.AddTable(3, 3, left: 0L, top: 0L, width: 6000000L, height: 3000000L);
+
+                    table.ApplyStyle(new PowerPointTableStylePreset(firstRow: true, bandedRows: true, bandedColumns: true));
+                    table.LastRow = true;
+                    table.FirstColumn = true;
+                    table.SetColumnWidthsByRatio(2, 1, 1);
+                    table.SetRowHeightsByRatio(1, 1, 1);
+                    table.SetCellPaddingCm(0.15, 0.1, 0.15, 0.1);
+                    table.SetCellAlignment(PowerPointTextAlignment.Center, PowerPointTextVerticalAlignment.Center);
+                    table.SetCellBorders(PowerPointTableCellBorders.All, "4472C4", widthPoints: 0.75, dash: PowerPointLineDashStyle.Dash);
+
+                    PowerPointTableCell header = table.GetCell(0, 0);
+                    header.Text = "Header";
+                    header.FillColor = "1F4E79";
+                    header.Color = "FFFFFF";
+                    header.Bold = true;
+                    header.FontSize = 12;
+                    header.FontName = "Aptos";
+                    header.SetTextAutoFit(PowerPointTextAutoFit.Normal,
+                        new PowerPointTextAutoFitOptions(fontScalePercent: 90, lineSpaceReductionPercent: 5));
+
+                    table.AddRowFromTemplate(0, index: 1);
+                    table.AddColumnFromTemplate(0, index: 1);
+                    table.RemoveRow(table.Rows - 1);
+                    table.RemoveColumn(table.Columns - 1);
+                    table.Bind(data, columns, includeHeaders: true, startRow: 1, startColumn: 1);
+                    table.MergeCells(0, 0, 1, 1);
+
+                    presentation.Save();
+                    Assert.Empty(presentation.ValidateDocument());
+                }
+
+                using (PresentationDocument document = PresentationDocument.Open(filePath, false)) {
+                    OpenXmlValidator validator = new OpenXmlValidator(FileFormatVersions.Microsoft365);
+                    Assert.Empty(validator.Validate(document));
+
+                    A.Table table = document.PresentationPart!.SlideParts.First()
+                        .Slide.Descendants<A.Table>().First();
+                    Assert.Equal(4, table.Elements<A.TableRow>().Count());
+                    Assert.Equal(3, table.TableGrid!.Elements<A.GridColumn>().Count());
+                }
+            } finally {
+                if (File.Exists(filePath)) {
+                    File.Delete(filePath);
+                }
+            }
+        }
+
+        private static IEnumerable<PowerPointTableColumn<int>> InfiniteColumns() {
+            int index = 0;
+            while (true) {
+                int columnIndex = index++;
+                yield return PowerPointTableColumn<int>.Create("Column" + columnIndex, value => value);
+            }
+        }
+
+        private static IEnumerable<int> InfiniteRows() {
+            int value = 0;
+            while (true) yield return value++;
+        }
+
+        private sealed class SalesRow {
+            public SalesRow(string product, int q1, int q2) {
+                Product = product;
+                Q1 = q1;
+                Q2 = q2;
+            }
+
+            public string Product { get; }
+            public int Q1 { get; }
+            public int Q2 { get; }
+        }
+
+        private static string CreateTempFilePath(string extension) {
+            string path = Path.GetTempFileName();
+            File.Delete(path);
+            return Path.ChangeExtension(path, extension);
+        }
+    }
+
+}
+

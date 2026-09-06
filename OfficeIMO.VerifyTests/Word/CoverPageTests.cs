@@ -1,11 +1,14 @@
-﻿using System.Threading.Tasks;
-using DocumentFormat.OpenXml.Packaging;
+﻿using DocumentFormat.OpenXml.Packaging;
 using OfficeIMO.Word;
+using System.Threading.Tasks;
 using VerifyXunit;
 using Xunit;
 
 namespace OfficeIMO.VerifyTests.Word;
 
+/// <summary>
+/// Validates cover page functionality within generated documents.
+/// </summary>
 public class CoverPageTests : VerifyTestBase {
 
     private static async Task DoTest(WordprocessingDocument document) {
@@ -23,11 +26,11 @@ public class CoverPageTests : VerifyTestBase {
         document.ApplicationProperties.Company = "Evotec Services";
         document.Settings.UpdateFieldsOnOpen = true;
 
-        document.AddCoverPage(CoverPageTemplate.IonDark);
+        document.AddCoverPage(WordCoverPageTemplate.IonDark);
         document.AddTableOfContent();
         document.AddPageBreak();
 
-        var wordListToc = document.AddTableOfContentList(WordListStyle.Headings111);
+        var wordListToc = document.AddTableOfContentList(WordListStyle.Numbered);
 
         wordListToc.AddItem("Prepare document");
         document.AddParagraph("This is my test 1");
@@ -36,9 +39,9 @@ public class CoverPageTests : VerifyTestBase {
         document.AddPageBreak();
         wordListToc.AddItem("More on the next page");
 
-        document.Save();
+        _ = document.ToBytes();
 
-        await DoTest(document._wordprocessingDocument);
+        await DoTest(document._wordprocessingDocument!);
     }
 
     [Fact]
@@ -49,13 +52,13 @@ public class CoverPageTests : VerifyTestBase {
 
         document.Settings.UpdateFieldsOnOpen = true;
 
-        document.AddCoverPage(CoverPageTemplate.Austin);
+        document.AddCoverPage(WordCoverPageTemplate.Austin);
 
         document.AddTableOfContent();
 
         document.AddPageBreak();
 
-        var wordListToc = document.AddTableOfContentList(WordListStyle.Headings111);
+        var wordListToc = document.AddTableOfContentList(WordListStyle.Numbered);
 
         wordListToc.AddItem("Prepare document");
 
@@ -69,10 +72,10 @@ public class CoverPageTests : VerifyTestBase {
 
         wordListToc.AddItem("More on the next page");
 
-        document.TableOfContent.Update();
+        document.TableOfContent!.Update();
 
-        document.Save();
+        _ = document.ToBytes();
 
-        await DoTest(document._wordprocessingDocument);
+        await DoTest(document._wordprocessingDocument!);
     }
 }

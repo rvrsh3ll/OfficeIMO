@@ -1,0 +1,35 @@
+using System;
+using DocumentFormat.OpenXml.Wordprocessing;
+using OfficeIMO.Examples.Utils;
+using OfficeIMO.Word;
+
+namespace OfficeIMO.Examples.Word {
+    internal static partial class PageNumbers {
+        internal static void Example_PageNumbers5(string folderPath, bool openWord) {
+            Console.WriteLine("[*] Creating document with section page numbers");
+            string filePath = System.IO.Path.Combine(folderPath, "Document with PageNumbers5.docx");
+            using (WordDocument document = WordDocument.Create(filePath)) {
+                var defaultFooter = document.FooterDefaultOrCreate;
+
+                var firstFooter = defaultFooter.AddParagraph();
+                firstFooter.ParagraphAlignment = WordParagraphAlignment.Right;
+                firstFooter.AddText("Page ");
+                firstFooter.AddPageNumber(includeTotalPages: true, separator: " of ");
+
+                document.AddParagraph("Section 1");
+
+                var section = document.AddSection();
+                section.AddPageNumbering(1);
+                section.AddParagraph("Section 2");
+
+                var secondFooter = defaultFooter.AddParagraph();
+                secondFooter.ParagraphAlignment = WordParagraphAlignment.Right;
+                secondFooter.AddText("Page ");
+                secondFooter.AddPageNumber(includeTotalPages: true, separator: " of ");
+
+                document.Save();
+                if (openWord) document.OpenInApplication();
+            }
+        }
+    }
+}

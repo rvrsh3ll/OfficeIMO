@@ -1,0 +1,54 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using DocumentFormat.OpenXml.Validation;
+using Xunit;
+
+namespace OfficeIMO.Tests {
+    /// <summary>
+    /// Provides test setup for Excel documents.
+    /// </summary>
+    public partial class Excel {
+        private readonly string _directoryDocuments;
+        private readonly string _directoryWithFiles;
+        private readonly string _directoryWithImages;
+
+        public Excel() {
+            _directoryDocuments = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Documents");
+            _directoryWithImages = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Images");
+            // Create a unique per-test directory to avoid parallel write collisions between Excel tests.
+            string unique = Guid.NewGuid().ToString("N");
+            _directoryWithFiles = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TempDocuments1", unique);
+            Directory.CreateDirectory(_directoryWithFiles);
+        }
+
+        internal static string FormatValidationErrors(IEnumerable<ValidationErrorInfo> errors) {
+            return string.Join(Environment.NewLine + Environment.NewLine,
+                errors.Select(error =>
+                    $"Description: {error.Description}\n" +
+                    $"Id: {error.Id}\n" +
+                    $"ErrorType: {error.ErrorType}\n" +
+                    $"Part: {error.Part?.Uri}\n" +
+                    $"Path: {error.Path?.XPath}"));
+        }
+
+        internal static string FormatValidationErrors(IEnumerable<OfficeOpenXmlValidationError> errors) {
+            return string.Join(Environment.NewLine + Environment.NewLine,
+                errors.Select(error =>
+                    $"Description: {error.Description}\n" +
+                    $"Id: {error.Id}\n" +
+                    $"ErrorType: {error.ErrorType}\n" +
+                    $"Part: {error.PartUri}\n" +
+                    $"Path: {error.Path}"));
+        }
+
+        internal static void AssertRoundTripNumericText(double expected, string? actual) {
+            Assert.NotNull(actual);
+            Assert.Equal(expected, double.Parse(actual!, NumberStyles.Float, CultureInfo.InvariantCulture));
+        }
+    }
+}

@@ -1,0 +1,107 @@
+using OfficeIMO.Word.Markdown;
+using System;
+using System.IO;
+using System.Linq;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Wordprocessing;
+using OfficeIMO.Word;
+using Xunit;
+
+namespace OfficeIMO.Tests {
+    public partial class Markdown {
+        [Fact]
+        public void Test_Markdown_RoundTrip() {
+            string md = "# Heading 1\n\nHello **world** and *universe*.";
+
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md).ToWordDocument( new MarkdownToWordOptions { FontFamily = "Calibri" });
+            string roundTrip = doc.ToMarkdown(new WordToMarkdownOptions());
+
+            Assert.Contains("# Heading 1", roundTrip, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("**world**", roundTrip, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("*universe*", roundTrip, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void Test_Markdown_Lists_RoundTrip() {
+            string md = "- Item 1\n- Item 2\n\n1. First\n1. Second";
+
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md).ToWordDocument( new MarkdownToWordOptions { FontFamily = "Calibri" });
+            string roundTrip = doc.ToMarkdown(new WordToMarkdownOptions());
+
+            Assert.Contains("- Item 1", roundTrip, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("1. First", roundTrip, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void Test_Markdown_FontResolver() {
+            string md = "Hello";
+            using MemoryStream ms = new MemoryStream();
+
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md).ToWordDocument( new MarkdownToWordOptions { FontFamily = "monospace" });
+            doc.Save(ms);
+
+            ms.Position = 0;
+            using WordprocessingDocument docx = WordprocessingDocument.Open(ms, false);
+            RunFonts fonts = docx.MainDocumentPart!.Document.Body!.Descendants<RunFonts>().First();
+            Assert.Equal(WordFontResolver.Resolve("monospace"), fonts.Ascii);
+        }
+
+        [Fact]
+        public void Test_Markdown_Urls_CreateHyperlinks() {
+            string md = "Visit http://example.com";
+            using MemoryStream ms = new MemoryStream();
+
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md).ToWordDocument( new MarkdownToWordOptions());
+            doc.Save(ms);
+
+            ms.Position = 0;
+            using WordprocessingDocument docx = WordprocessingDocument.Open(ms, false);
+            var hyperlink = docx.MainDocumentPart!.Document.Body!.Descendants<Hyperlink>().FirstOrDefault();
+            Assert.NotNull(hyperlink);
+            var rel = docx.MainDocumentPart.HyperlinkRelationships.First();
+            Assert.StartsWith("http://example.com", rel.Uri.ToString());
+        }
+
+        [Fact]
+        public void Test_Markdown_HtmlBlock_RoundTrip() {
+            string md = "<p><strong>Bold</strong> HTML</p>";
+            var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md).ToWordDocument(new MarkdownToWordOptions());
+            string roundTrip = doc.ToMarkdown(new WordToMarkdownOptions());
+            Assert.Contains("**Bold** HTML", roundTrip, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void Test_WordToMarkdown_PreservesEmbeddedHtml() {
+            using var doc = WordDocument.Create();
+            doc.AddEmbeddedFragment("<div>HTML Block</div>", WordAlternativeFormatImportPartType.Html);
+            string? html = doc.EmbeddedDocuments[0].GetHtml();
+            Assert.NotNull(html);
+            Assert.Contains("<div>HTML Block</div>", html, StringComparison.OrdinalIgnoreCase);
+            string md = doc.ToMarkdown(new WordToMarkdownOptions());
+            Assert.Contains("<div>HTML Block</div>", md, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void Test_Markdown_InlineIns_DegradesToUnderlineThroughWordRoundTrip() {
+            const string md = "Before <ins>inserted</ins> after";
+
+            using var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md).ToWordDocument(new MarkdownToWordOptions { FontFamily = "Calibri" });
+            string roundTrip = doc.ToMarkdown(new WordToMarkdownOptions { EnableUnderline = true });
+
+            Assert.Contains("Before", roundTrip, StringComparison.Ordinal);
+            Assert.Contains("<u>inserted</u>", roundTrip, StringComparison.Ordinal);
+            Assert.DoesNotContain("<ins>", roundTrip, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Test_Markdown_InlineQuote_DegradesToLiteralQuotesThroughWordRoundTrip() {
+            const string md = "Before <q>quoted</q> after";
+
+            using var doc = OfficeIMO.Markdown.MarkdownReader.Parse(md).ToWordDocument(new MarkdownToWordOptions { FontFamily = "Calibri" });
+            string roundTrip = doc.ToMarkdown(new WordToMarkdownOptions { EnableUnderline = true });
+
+            Assert.Contains("Before \"quoted\" after", roundTrip, StringComparison.Ordinal);
+            Assert.DoesNotContain("<q>", roundTrip, StringComparison.Ordinal);
+        }
+    }
+}

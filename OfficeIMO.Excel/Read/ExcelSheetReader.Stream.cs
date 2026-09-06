@@ -1,0 +1,475 @@
+using DocumentFormat.OpenXml.Spreadsheet;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Xml;
+
+namespace OfficeIMO.Excel {
+    /// <summary>
+    /// Streaming APIs for large ranges.
+    /// </summary>
+    internal sealed partial class ExcelSheetReader {
+        private const int BufferedRangeStreamRowLimit = 4_096;
+        private const int OrderedBufferedRangeStreamCellLimit = 1_000_000;
+
+        /// <summary>
+        /// Lazily reads a rectangular A1 range as ordered row chunks. DOM traversal is single-threaded;
+        /// per-chunk value conversion is offloaded in parallel based on Execution policy.
+        /// </summary>
+        public IEnumerable<RangeChunk> ReadRangeStream(string a1Range, int chunkRows = 1024, OfficeIMO.Excel.ExcelExecutionMode? mode = null, CancellationToken ct = default) {
+            if (chunkRows <= 0) throw new ArgumentOutOfRangeException(nameof(chunkRows), "Chunk row count must be greater than zero.");
+
+            (int r1, int c1, int r2, int c2) = A1.ParseRange(a1Range);
+            if (r1 > r2 || c1 > c2) yield break;
+
+            bool canCancel = ct.CanBeCanceled;
+            if (canCancel) {
+                ct.ThrowIfCancellationRequested();
+            }
+
+            int estRows = Math.Max(0, r2 - r1 + 1);
+            var policy = _opt.Execution;
+            var decided = mode ?? policy.Mode;
+            bool automaticDecision = decided == OfficeIMO.Excel.ExcelExecutionMode.Automatic;
+            bool decisionReported = false;
+            void ReportActual(OfficeIMO.Excel.ExcelExecutionMode actual) {
+                if (decisionReported) return;
+                policy.ReportDecision("ReadRangeStream", estRows, actual);
+                decisionReported = true;
+            }
+
+            if (ShouldAttemptUtf8Range(r1, r2)
+                && RangeReachesDeclaredWorksheetEnd(r2)
+                && TryCreateRangeStreamUtf8(r1, c1, r2, c2, ct, out var utf8Source)) {
+                ReportActual(OfficeIMO.Excel.ExcelExecutionMode.Sequential);
+
+                using (utf8Source) {
+                    foreach (var chunk in ReadRangeStreamUtf8(utf8Source!, r1, c1, r2, c2, chunkRows, ct)) {
+                        yield return chunk;
+                    }
+                }
+
+                yield break;
+            }
+
+            if (CanAttemptRangeStreamXmlReader()) {
+                if (chunkRows >= estRows) {
+                    if (TryReadSingleRangeChunkXmlFast(r1, c1, r2, c2, ct, out var chunk)) {
+                        ReportActual(OfficeIMO.Excel.ExcelExecutionMode.Sequential);
+
+                        if (chunk != null) {
+                            yield return chunk;
+                        }
+
+                        yield break;
+                    }
+                }
+
+                if (decided != OfficeIMO.Excel.ExcelExecutionMode.Parallel
+                    && estRows <= BufferedRangeStreamRowLimit
+                    && TryReadBufferedRangeStreamXmlFast(r1, c1, r2, c2, chunkRows, estRows, ct, out var bufferedChunks)) {
+                    ReportActual(OfficeIMO.Excel.ExcelExecutionMode.Sequential);
+
+                    foreach (var chunk in bufferedChunks) {
+                        yield return chunk;
+                    }
+
+                    yield break;
+                }
+
+                if (ShouldUseOrderedBufferedXmlStream(estRows, c1, c2)
+                    && TryReadOrderedBufferedRangeStreamXmlFast(r1, c1, r2, c2, chunkRows, estRows, ct, out var automaticChunks)) {
+                    ReportActual(OfficeIMO.Excel.ExcelExecutionMode.Sequential);
+
+                    foreach (var chunk in automaticChunks) {
+                        yield return chunk;
+                    }
+
+                    yield break;
+                }
+
+                if (RowsAreSortedWithinRangeXmlFast(r1, r2, ct)) {
+                    ReportActual(OfficeIMO.Excel.ExcelExecutionMode.Sequential);
+
+                    foreach (var chunk in ReadRangeStreamXmlFast(r1, c1, r2, c2, chunkRows, ct)) {
+                        yield return chunk;
+                    }
+
+                    yield break;
+                }
+            }
+
+            if (estRows <= BufferedRangeStreamRowLimit
+                && CanUseRangeStreamXmlReader()) {
+                if (chunkRows >= estRows) {
+                    if (TryReadSingleRangeChunkXmlFast(r1, c1, r2, c2, ct, out var chunk)) {
+                        ReportActual(OfficeIMO.Excel.ExcelExecutionMode.Sequential);
+
+                        if (chunk != null) {
+                            yield return chunk;
+                        }
+
+                        yield break;
+                    }
+                }
+
+                if (decided == OfficeIMO.Excel.ExcelExecutionMode.Parallel
+                    && ShouldUseOrderedBufferedXmlStream(estRows, c1, c2)
+                    && TryReadOrderedBufferedRangeStreamXmlFast(r1, c1, r2, c2, chunkRows, estRows, ct, out var sparseChunks)) {
+                    ReportActual(OfficeIMO.Excel.ExcelExecutionMode.Sequential);
+                    foreach (var chunk in sparseChunks) {
+                        yield return chunk;
+                    }
+
+                    yield break;
+                }
+
+                if (decided != OfficeIMO.Excel.ExcelExecutionMode.Parallel
+                    && TryReadBufferedRangeStreamXmlFast(r1, c1, r2, c2, chunkRows, estRows, ct, out var chunks)) {
+                    ReportActual(OfficeIMO.Excel.ExcelExecutionMode.Sequential);
+
+                    foreach (var chunk in chunks) {
+                        yield return chunk;
+                    }
+
+                    yield break;
+                }
+
+                ReportActual(OfficeIMO.Excel.ExcelExecutionMode.Sequential);
+
+                foreach (var chunk in ReadBufferedRangeStreamFromFastRange(a1Range, r1, c1, chunkRows, ct)) {
+                    yield return chunk;
+                }
+
+                yield break;
+            }
+
+            if (CanUseRangeStreamXmlReader()
+                && RowsAreSortedWithinRangeXmlFast(r1, r2, ct)) {
+                ReportActual(OfficeIMO.Excel.ExcelExecutionMode.Sequential);
+
+                foreach (var chunk in ReadRangeStreamXmlFast(r1, c1, r2, c2, chunkRows, ct)) {
+                    yield return chunk;
+                }
+
+                yield break;
+            }
+
+            if (automaticDecision) {
+                decided = policy.Decide("ReadRangeStream", estRows);
+                decisionReported = true;
+            } else {
+                ReportActual(decided);
+            }
+
+            int dop = (decided == OfficeIMO.Excel.ExcelExecutionMode.Parallel)
+                ? (policy.MaxDegreeOfParallelism ?? System.Environment.ProcessorCount)
+                : 1;
+            if (dop < 1) dop = 1;
+
+            int nextToYield = 0;
+            int chunkIndex = 0;
+
+            if (estRows <= BufferedRangeStreamRowLimit) {
+                foreach (var chunk in ReadBufferedRows(EnumerateWorksheetRows(ct), r1, c1, r2, c2, decided, ct)) {
+                    yield return chunk;
+                }
+
+                yield break;
+            }
+
+            var sheetData = WorksheetRoot.GetFirstChild<SheetData>();
+            if (sheetData is null) yield break;
+
+            if (estRows > chunkRows && !RowsAreSortedWithinRange(sheetData, r1, r2, ct)) {
+                foreach (var chunk in ReadUnsortedRows(sheetData, r1, c1, r2, c2, decided, ct)) {
+                    yield return chunk;
+                }
+
+                yield break;
+            }
+
+            if (decided != OfficeIMO.Excel.ExcelExecutionMode.Parallel) {
+                int currentWindow = -1;
+                var sequentialRows = new List<Row>();
+
+                foreach (var row in sheetData.Elements<Row>()) {
+                    if (canCancel) {
+                        ct.ThrowIfCancellationRequested();
+                    }
+
+                    int rIdx = checked((int)row.RowIndex!.Value);
+                    if (rIdx < r1) continue;
+                    if (rIdx > r2) break;
+
+                    int window = GetWindowIndex(rIdx);
+                    if (currentWindow >= 0 && window != currentWindow) {
+                        yield return ConvertChunk(sequentialRows, currentWindow, r1, c1, r2, c2, ct);
+                        sequentialRows.Clear();
+                    }
+
+                    currentWindow = window;
+                    sequentialRows.Add(row);
+                }
+
+                if (sequentialRows.Count > 0) {
+                    yield return ConvertChunk(sequentialRows, currentWindow, r1, c1, r2, c2, ct);
+                }
+
+                yield break;
+            }
+
+            int maxPendingChunks = dop;
+            var pending = new Dictionary<int, Task<RangeChunk>>(maxPendingChunks);
+            int activeWindow = -1;
+            List<Row> bufferRows = new();
+
+            foreach (var row in sheetData.Elements<Row>()) {
+                if (canCancel) {
+                    ct.ThrowIfCancellationRequested();
+                }
+
+                int rIdx = checked((int)row.RowIndex!.Value);
+                if (rIdx < r1) continue;
+                if (rIdx > r2) break;
+
+                int window = GetWindowIndex(rIdx);
+                if (activeWindow >= 0 && window != activeWindow) {
+                    ScheduleChunk(bufferRows, activeWindow, r1, c1, r2, c2);
+                    bufferRows = new List<Row>();
+
+                    while (pending.Count >= maxPendingChunks) {
+                        yield return CompleteChunk(nextToYield++);
+                    }
+                }
+
+                activeWindow = window;
+                bufferRows.Add(row);
+            }
+
+            if (bufferRows.Count > 0) {
+                ScheduleChunk(bufferRows, activeWindow, r1, c1, r2, c2);
+            }
+
+            while (pending.Count > 0) {
+                yield return CompleteChunk(nextToYield++);
+            }
+
+            void ScheduleChunk(List<Row> rows, int windowIndex, int rr1, int cc1, int rr2, int cc2) {
+                var snapshot = rows.ToArray();
+                int scheduledIndex = chunkIndex++;
+                pending.Add(scheduledIndex, Task.Run(() => ConvertChunk(snapshot, windowIndex, rr1, cc1, rr2, cc2, ct), ct));
+            }
+
+            RangeChunk CompleteChunk(int index) {
+                if (!pending.TryGetValue(index, out var task)) {
+                    throw new InvalidOperationException($"Chunk {index} was not scheduled.");
+                }
+
+                pending.Remove(index);
+                try {
+                    return task.GetAwaiter().GetResult();
+                } catch (AggregateException ex) when (ex.InnerExceptions.Count == 1) {
+                    throw ex.InnerExceptions[0];
+                }
+            }
+
+            RangeChunk ConvertChunk(IReadOnlyList<Row> rows, int index, int rr1, int cc1, int rr2, int cc2, CancellationToken token) {
+                bool chunkCanCancel = token.CanBeCanceled;
+                if (chunkCanCancel) {
+                    token.ThrowIfCancellationRequested();
+                }
+
+                int startRow = GetWindowStartRow(index);
+                int endRow = Math.Min(startRow + chunkRows - 1, rr2);
+                int height = endRow - startRow + 1;
+                int width = cc2 - cc1 + 1;
+                if (height <= 0 || width <= 0)
+                    return new RangeChunk(startRow, 0, cc1, width, Array.Empty<object?[]>());
+
+                var outRows = new object?[height][];
+                for (int i = 0; i < height; i++) outRows[i] = new object?[width];
+
+                foreach (var rowEl in rows) {
+                    if (chunkCanCancel) {
+                        token.ThrowIfCancellationRequested();
+                    }
+
+                    int rowIndex = checked((int)rowEl.RowIndex!.Value);
+                    int rowOffset = rowIndex - startRow;
+                    if ((uint)rowOffset >= (uint)height) continue;
+
+                    foreach (var cell in rowEl.Elements<Cell>()) {
+                        int c = A1.ParseColumnIndexFromCellReferenceFast(cell.CellReference?.Value);
+                        if (c < cc1 || c > cc2) continue;
+                        if (TryConvertCell(cell, out object? value)) {
+                            outRows[rowOffset][c - cc1] = value ?? outRows[rowOffset][c - cc1];
+                        }
+                    }
+                }
+
+                return new RangeChunk(startRow, height, cc1, width, outRows);
+            }
+
+            int GetWindowIndex(int rowIndex) => (rowIndex - r1) / chunkRows;
+
+            int GetWindowStartRow(int index) => r1 + (index * chunkRows);
+
+            IEnumerable<RangeChunk> ReadBufferedRangeStreamFromFastRange(string range, int firstRow, int firstColumn, int rowsPerChunk, CancellationToken token) {
+                object?[,] values = ReadRange(range, OfficeIMO.Excel.ExcelExecutionMode.Sequential, token);
+                int height = values.GetLength(0);
+                int width = values.GetLength(1);
+                bool matrixCanCancel = token.CanBeCanceled;
+
+                for (int offset = 0; offset < height; offset += rowsPerChunk) {
+                    if (matrixCanCancel) {
+                        token.ThrowIfCancellationRequested();
+                    }
+
+                    int rowCount = Math.Min(rowsPerChunk, height - offset);
+                    var outRows = new object?[rowCount][];
+                    for (int r = 0; r < rowCount; r++) {
+                        var rowValues = new object?[width];
+                        for (int c = 0; c < width; c++) {
+                            rowValues[c] = values[offset + r, c];
+                        }
+
+                        outRows[r] = rowValues;
+                    }
+
+                    yield return new RangeChunk(firstRow + offset, rowCount, firstColumn, width, outRows);
+                }
+            }
+
+            IEnumerable<RangeChunk> ReadBufferedRows(IEnumerable<Row> sourceRows, int rr1, int cc1, int rr2, int cc2, OfficeIMO.Excel.ExcelExecutionMode executionMode, CancellationToken token) {
+                int windowCount = GetWindowIndex(rr2) + 1;
+                var windows = new List<Row>?[windowCount];
+
+                foreach (var row in sourceRows) {
+                    if (canCancel) {
+                        token.ThrowIfCancellationRequested();
+                    }
+
+                    int rowIndex = checked((int)row.RowIndex!.Value);
+                    if (rowIndex < rr1) continue;
+                    if (rowIndex > rr2) continue;
+
+                    int window = GetWindowIndex(rowIndex);
+                    if ((uint)window >= (uint)windows.Length) continue;
+                    windows[window] ??= new List<Row>();
+                    windows[window]!.Add(row);
+                }
+
+                if (executionMode != OfficeIMO.Excel.ExcelExecutionMode.Parallel) {
+                    for (int i = 0; i < windows.Length; i++) {
+                        var rows = windows[i];
+                        if (rows == null) continue;
+
+                        yield return ConvertChunk(rows, i, rr1, cc1, rr2, cc2, token);
+                    }
+
+                    yield break;
+                }
+
+                int maxBufferedPendingChunks = dop;
+                var bufferedPending = new Dictionary<int, Task<RangeChunk>>(maxBufferedPendingChunks);
+                int bufferedScheduleIndex = 0;
+                int bufferedNextToYield = 0;
+
+                for (int i = 0; i < windows.Length; i++) {
+                    var rows = windows[i];
+                    if (rows == null) continue;
+
+                    int scheduledIndex = bufferedScheduleIndex++;
+                    Row[] snapshot = rows.ToArray();
+                    int windowIndex = i;
+                    bufferedPending.Add(scheduledIndex, Task.Run(() => ConvertChunk(snapshot, windowIndex, rr1, cc1, rr2, cc2, token), token));
+
+                    while (bufferedPending.Count >= maxBufferedPendingChunks) {
+                        yield return CompleteBufferedChunk(bufferedNextToYield++);
+                    }
+                }
+
+                while (bufferedPending.Count > 0) {
+                    yield return CompleteBufferedChunk(bufferedNextToYield++);
+                }
+
+                RangeChunk CompleteBufferedChunk(int index) {
+                    if (!bufferedPending.TryGetValue(index, out var task)) {
+                        throw new InvalidOperationException($"Chunk {index} was not scheduled.");
+                    }
+
+                    bufferedPending.Remove(index);
+                    try {
+                        return task.GetAwaiter().GetResult();
+                    } catch (AggregateException ex) when (ex.InnerExceptions.Count == 1) {
+                        throw ex.InnerExceptions[0];
+                    }
+                }
+            }
+
+            IEnumerable<RangeChunk> ReadUnsortedRows(SheetData data, int rr1, int cc1, int rr2, int cc2, OfficeIMO.Excel.ExcelExecutionMode executionMode, CancellationToken token) {
+                var windows = new SortedDictionary<int, List<Row>>();
+                foreach (var row in data.Elements<Row>()) {
+                    if (canCancel) {
+                        token.ThrowIfCancellationRequested();
+                    }
+
+                    int rowIndex = checked((int)row.RowIndex!.Value);
+                    if (rowIndex < rr1) continue;
+                    if (rowIndex > rr2) continue;
+
+                    int window = GetWindowIndex(rowIndex);
+                    if (!windows.TryGetValue(window, out var windowRows)) {
+                        windowRows = new List<Row>();
+                        windows[window] = windowRows;
+                    }
+
+                    windowRows.Add(row);
+                }
+
+                if (executionMode != OfficeIMO.Excel.ExcelExecutionMode.Parallel) {
+                    foreach (var window in windows) {
+                        yield return ConvertChunk(window.Value, window.Key, rr1, cc1, rr2, cc2, token);
+                    }
+
+                    yield break;
+                }
+
+                int maxUnsortedPendingChunks = dop;
+                var unsortedPending = new Dictionary<int, Task<RangeChunk>>(maxUnsortedPendingChunks);
+                int unsortedScheduleIndex = 0;
+                int unsortedNextToYield = 0;
+
+                foreach (var window in windows) {
+                    int scheduledIndex = unsortedScheduleIndex++;
+                    Row[] snapshot = window.Value.ToArray();
+                    int windowIndex = window.Key;
+                    unsortedPending.Add(scheduledIndex, Task.Run(() => ConvertChunk(snapshot, windowIndex, rr1, cc1, rr2, cc2, token), token));
+
+                    while (unsortedPending.Count >= maxUnsortedPendingChunks) {
+                        yield return CompleteUnsortedChunk(unsortedNextToYield++);
+                    }
+                }
+
+                while (unsortedPending.Count > 0) {
+                    yield return CompleteUnsortedChunk(unsortedNextToYield++);
+                }
+
+                RangeChunk CompleteUnsortedChunk(int index) {
+                    if (!unsortedPending.TryGetValue(index, out var task)) {
+                        throw new InvalidOperationException($"Chunk {index} was not scheduled.");
+                    }
+
+                    unsortedPending.Remove(index);
+                    try {
+                        return task.GetAwaiter().GetResult();
+                    } catch (AggregateException ex) when (ex.InnerExceptions.Count == 1) {
+                        throw ex.InnerExceptions[0];
+                    }
+                }
+            }
+        }
+
+    }
+}

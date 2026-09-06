@@ -1,8 +1,4 @@
 using DocumentFormat.OpenXml.Wordprocessing;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 
 namespace OfficeIMO.Word {
     /// <summary>
@@ -17,7 +13,7 @@ namespace OfficeIMO.Word {
         /// <summary>
         /// Get type of Break in given paragraph
         /// </summary>
-        public BreakValues? BreakType {
+        public WordBreakType? BreakType {
             get {
                 if (_run != null) {
                     var brake = _run.ChildElements.OfType<Break>().FirstOrDefault();
@@ -25,7 +21,7 @@ namespace OfficeIMO.Word {
                         return null;
                     }
 
-                    return brake.Type;
+                    return brake.Type?.Value.ToOfficeEnum();
                 }
 
                 return null;
@@ -38,7 +34,7 @@ namespace OfficeIMO.Word {
         /// <param name="document"></param>
         /// <param name="paragraph"></param>
         /// <param name="run"></param>
-        public WordBreak(WordDocument document, Paragraph paragraph, Run run) {
+        internal WordBreak(WordDocument document, Paragraph paragraph, Run run) {
             this._document = document;
             this._paragraph = paragraph;
             this._run = run;
@@ -56,6 +52,11 @@ namespace OfficeIMO.Word {
             } else {
                 if (_run.ChildElements.Count == 1) {
                     this._run.Remove();
+                    if (!_paragraph.ChildElements.OfType<Run>().Any() &&
+                        _paragraph.ChildElements.OfType<Hyperlink>().Any() == false &&
+                        _paragraph.ChildElements.Count <= 1) {
+                        _paragraph.Remove();
+                    }
                 } else {
                     this._run.ChildElements.OfType<Break>().FirstOrDefault()?.Remove();
                 }

@@ -22,9 +22,10 @@ namespace OfficeIMO.Examples.Word {
 
                 var par02 = document.AddParagraph("My declaration");
                 par02.LineSpacing = 360;
-                par02.LineSpacingRule = LineSpacingRuleValues.Exact;
+                par02.LineSpacingRule = WordLineSpacingRule.Exact;
 
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
     }

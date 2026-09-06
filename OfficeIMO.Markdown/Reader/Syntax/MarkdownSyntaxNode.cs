@@ -1,0 +1,420 @@
+namespace OfficeIMO.Markdown;
+
+/// <summary>
+/// A lightweight syntax-tree node built from the parsed markdown document.
+/// </summary>
+public sealed class MarkdownSyntaxNode {
+    private const int IndexShift = 8;
+    private const uint KindMask = (1u << IndexShift) - 1u;
+    private const uint DetachedIndex = (1u << (32 - IndexShift)) - 1u;
+
+    private uint _kindAndIndex;
+    private readonly object? _literalOrMetadata;
+
+    /// <summary>Node kind.</summary>
+    public MarkdownSyntaxKind Kind => (MarkdownSyntaxKind)(_kindAndIndex & KindMask);
+    /// <summary>Optional source span from the original markdown.</summary>
+    public MarkdownSourceSpan? SourceSpan { get; }
+    /// <summary>Optional literal payload for leaf-like nodes.</summary>
+    public string? Literal => _literalOrMetadata is string literal
+        ? literal
+        : (_literalOrMetadata as MarkdownSyntaxNodeMetadata)?.Literal;
+    /// <summary>Optional custom extension kind for nodes emitted by syntax-aware extensions.</summary>
+    public string? CustomKind => (_literalOrMetadata as MarkdownSyntaxNodeMetadata)?.CustomKind;
+    /// <summary>Optional originating model object (document/block/inline) for AST-aware consumers.</summary>
+    public object? AssociatedObject { get; }
+    /// <summary>Generic Markdown attributes associated with this syntax node.</summary>
+    public MarkdownAttributeSet Attributes =>
+        (_literalOrMetadata as MarkdownSyntaxNodeMetadata)?.Attributes ?? MarkdownAttributeSet.Empty;
+    /// <summary>
+    /// Gets a value indicating whether this node was generated while rebuilding syntax from the semantic AST
+    /// rather than directly parsed from matching source text.
+    /// </summary>
+    public bool IsGenerated => (_literalOrMetadata as MarkdownSyntaxNodeMetadata)?.IsGenerated == true;
+    /// <summary>Parent syntax node when this node belongs to a larger syntax tree.</summary>
+    public MarkdownSyntaxNode? Parent { get; private set; }
+    /// <summary>Child syntax nodes.</summary>
+    public IReadOnlyList<MarkdownSyntaxNode> Children { get; }
+    /// <summary>Whether this node behaves like a block/container boundary for navigation.</summary>
+    public bool IsBlockLike => IsBlockLikeKind(Kind);
+    /// <summary>Zero-based child index within <see cref="Parent"/> when available.</summary>
+    public int IndexInParent {
+        get {
+            uint storedIndex = _kindAndIndex >> IndexShift;
+            return storedIndex == DetachedIndex ? -1 : (int)storedIndex;
+        }
+    }
+    /// <summary>Nearest previous sibling node when present.</summary>
+    public MarkdownSyntaxNode? PreviousSibling => Parent == null ? null : Parent.GetChildOrNull(IndexInParent - 1);
+    /// <summary>Nearest next sibling node when present.</summary>
+    public MarkdownSyntaxNode? NextSibling => Parent == null ? null : Parent.GetChildOrNull(IndexInParent + 1);
+    /// <summary>Document root for this node.</summary>
+    public MarkdownSyntaxNode Root => Parent == null ? this : Parent.Root;
+
+    /// <summary>Create a syntax node.</summary>
+    public MarkdownSyntaxNode(
+        MarkdownSyntaxKind kind,
+        MarkdownSourceSpan? sourceSpan = null,
+        string? literal = null,
+        IReadOnlyList<MarkdownSyntaxNode>? children = null,
+        object? associatedObject = null,
+        string? customKind = null,
+        MarkdownAttributeSet? attributes = null,
+        bool isGenerated = false) {
+        if ((uint)kind > KindMask) {
+            throw new ArgumentOutOfRangeException(nameof(kind));
+        }
+
+        _kindAndIndex = (DetachedIndex << IndexShift) | (uint)kind;
+        SourceSpan = sourceSpan;
+        AssociatedObject = associatedObject;
+        if (customKind != null || (attributes != null && !attributes.IsEmpty) || isGenerated) {
+            _literalOrMetadata = new MarkdownSyntaxNodeMetadata(
+                literal,
+                customKind,
+                attributes == null || attributes.IsEmpty ? MarkdownAttributeSet.Empty : attributes,
+                isGenerated);
+        } else {
+            _literalOrMetadata = literal;
+        }
+        Children = children ?? Array.Empty<MarkdownSyntaxNode>();
+        for (int i = 0; i < Children.Count; i++) {
+            Children[i]?.AttachToParent(this, i);
+        }
+    }
+
+    /// <summary>Returns this node and all descendant nodes in depth-first order.</summary>
+    public IEnumerable<MarkdownSyntaxNode> DescendantsAndSelf() {
+        yield return this;
+        for (int i = 0; i < Children.Count; i++) {
+            foreach (var descendant in Children[i].DescendantsAndSelf()) {
+                yield return descendant;
+            }
+        }
+    }
+
+    /// <summary>Returns all descendant nodes in depth-first order, excluding this node.</summary>
+    public IEnumerable<MarkdownSyntaxNode> Descendants() {
+        for (int i = 0; i < Children.Count; i++) {
+            foreach (var descendant in Children[i].DescendantsAndSelf()) {
+                yield return descendant;
+            }
+        }
+    }
+
+    /// <summary>Returns ancestor nodes from the immediate parent up to the root.</summary>
+    public IEnumerable<MarkdownSyntaxNode> Ancestors() {
+        for (var current = Parent; current != null; current = current.Parent) {
+            yield return current;
+        }
+    }
+
+    /// <summary>Returns this node followed by its ancestors up to the root.</summary>
+    public IEnumerable<MarkdownSyntaxNode> AncestorsAndSelf() {
+        for (var current = this; current != null; current = current.Parent) {
+            yield return current;
+        }
+    }
+
+    /// <summary>Finds the deepest node whose source span contains the given 1-based line number.</summary>
+    public MarkdownSyntaxNode? FindDeepestNodeAtLine(int lineNumber) {
+        if (!SourceSpan.HasValue && Children.Count == 0) return null;
+        if (SourceSpan.HasValue && !SourceSpan.Value.ContainsLine(lineNumber)) return null;
+
+        for (int i = 0; i < Children.Count; i++) {
+            if (IsLowerPriorityBroadLookupChild(this, Children[i])) continue;
+
+            var match = Children[i].FindDeepestNodeAtLine(lineNumber);
+            if (match != null) return match;
+        }
+
+        for (int i = 0; i < Children.Count; i++) {
+            if (!IsLowerPriorityBroadLookupChild(this, Children[i])) continue;
+
+            var match = Children[i].FindDeepestNodeAtLine(lineNumber);
+            if (match != null) return match;
+        }
+
+        return SourceSpan.HasValue ? this : null;
+    }
+
+    /// <summary>Finds the deepest node whose source span contains the given 1-based line and column.</summary>
+    public MarkdownSyntaxNode? FindDeepestNodeAtPosition(int lineNumber, int columnNumber) {
+        if (!SourceSpan.HasValue && Children.Count == 0) return null;
+        if (SourceSpan.HasValue && !SourceSpan.Value.ContainsPosition(lineNumber, columnNumber)) return null;
+
+        for (int i = 0; i < Children.Count; i++) {
+            var match = Children[i].FindDeepestNodeAtPosition(lineNumber, columnNumber);
+            if (match != null) return match;
+        }
+
+        return SourceSpan.HasValue ? this : null;
+    }
+
+    /// <summary>Finds the node path from this node to the deepest node whose source span contains the given 1-based line number.</summary>
+    public IReadOnlyList<MarkdownSyntaxNode> FindNodePathAtLine(int lineNumber) {
+        var path = new List<MarkdownSyntaxNode>();
+        if (!TryBuildNodePathAtLine(lineNumber, path)) return Array.Empty<MarkdownSyntaxNode>();
+        return path;
+    }
+
+    /// <summary>Finds the node path from this node to the deepest node whose source span contains the given 1-based line and column.</summary>
+    public IReadOnlyList<MarkdownSyntaxNode> FindNodePathAtPosition(int lineNumber, int columnNumber) {
+        var path = new List<MarkdownSyntaxNode>();
+        if (!TryBuildNodePathAtPosition(lineNumber, columnNumber, path)) return Array.Empty<MarkdownSyntaxNode>();
+        return path;
+    }
+
+    /// <summary>Finds the deepest node whose source span fully contains the given span.</summary>
+    public MarkdownSyntaxNode? FindDeepestNodeContainingSpan(MarkdownSourceSpan span) {
+        if (!SourceSpan.HasValue && Children.Count == 0) return null;
+        if (SourceSpan.HasValue && !SourceSpan.Value.Contains(span)) return null;
+
+        for (int i = 0; i < Children.Count; i++) {
+            if (!HasExactSpan(Children[i], span)) continue;
+
+            var exactMatch = Children[i].FindDeepestNodeContainingSpan(span);
+            if (exactMatch != null) return exactMatch;
+        }
+
+        for (int i = 0; i < Children.Count; i++) {
+            if (IsLowerPriorityBroadLookupChild(this, Children[i])) continue;
+
+            var match = Children[i].FindDeepestNodeContainingSpan(span);
+            if (match != null) return match;
+        }
+
+        for (int i = 0; i < Children.Count; i++) {
+            if (!IsLowerPriorityBroadLookupChild(this, Children[i])) continue;
+
+            var match = Children[i].FindDeepestNodeContainingSpan(span);
+            if (match != null) return match;
+        }
+
+        return SourceSpan.HasValue ? this : null;
+    }
+
+    /// <summary>Finds the node path from this node to the deepest node whose source span fully contains the given span.</summary>
+    public IReadOnlyList<MarkdownSyntaxNode> FindNodePathContainingSpan(MarkdownSourceSpan span) {
+        var path = new List<MarkdownSyntaxNode>();
+        if (!TryBuildNodePathContainingSpan(span, path)) return Array.Empty<MarkdownSyntaxNode>();
+        return path;
+    }
+
+    /// <summary>Finds the deepest node whose source span overlaps the given span.</summary>
+    public MarkdownSyntaxNode? FindDeepestNodeOverlappingSpan(MarkdownSourceSpan span) {
+        if (!SourceSpan.HasValue && Children.Count == 0) return null;
+        if (SourceSpan.HasValue && !SourceSpan.Value.Overlaps(span)) return null;
+
+        for (int i = 0; i < Children.Count; i++) {
+            if (!HasExactSpan(Children[i], span)) continue;
+
+            var exactMatch = Children[i].FindDeepestNodeOverlappingSpan(span);
+            if (exactMatch != null) return exactMatch;
+        }
+
+        for (int i = 0; i < Children.Count; i++) {
+            if (IsLowerPriorityBroadLookupChild(this, Children[i])) continue;
+
+            var match = Children[i].FindDeepestNodeOverlappingSpan(span);
+            if (match != null) return match;
+        }
+
+        for (int i = 0; i < Children.Count; i++) {
+            if (!IsLowerPriorityBroadLookupChild(this, Children[i])) continue;
+
+            var match = Children[i].FindDeepestNodeOverlappingSpan(span);
+            if (match != null) return match;
+        }
+
+        return SourceSpan.HasValue ? this : null;
+    }
+
+    /// <summary>Finds the node path from this node to the deepest node whose source span overlaps the given span.</summary>
+    public IReadOnlyList<MarkdownSyntaxNode> FindNodePathOverlappingSpan(MarkdownSourceSpan span) {
+        var path = new List<MarkdownSyntaxNode>();
+        if (!TryBuildNodePathOverlappingSpan(span, path)) return Array.Empty<MarkdownSyntaxNode>();
+        return path;
+    }
+
+    /// <summary>Finds the nearest block-like syntax node whose source span contains the given 1-based line number.</summary>
+    public MarkdownSyntaxNode? FindNearestBlockAtLine(int lineNumber) => FindNearestBlock(FindNodePathAtLine(lineNumber));
+
+    /// <summary>Finds the nearest block-like syntax node whose source span contains the given 1-based line and column.</summary>
+    public MarkdownSyntaxNode? FindNearestBlockAtPosition(int lineNumber, int columnNumber) => FindNearestBlock(FindNodePathAtPosition(lineNumber, columnNumber));
+
+    /// <summary>Finds the nearest block-like syntax node whose source span fully contains the given span.</summary>
+    public MarkdownSyntaxNode? FindNearestBlockContainingSpan(MarkdownSourceSpan span) => FindNearestBlock(FindNodePathContainingSpan(span));
+
+    /// <summary>Finds the nearest block-like syntax node whose source span overlaps the given span.</summary>
+    public MarkdownSyntaxNode? FindNearestBlockOverlappingSpan(MarkdownSourceSpan span) => FindNearestBlock(FindNodePathOverlappingSpan(span));
+
+    private bool TryBuildNodePathAtLine(int lineNumber, List<MarkdownSyntaxNode> path) {
+        if (!SourceSpan.HasValue && Children.Count == 0) return false;
+        if (SourceSpan.HasValue && !SourceSpan.Value.ContainsLine(lineNumber)) return false;
+
+        path.Add(this);
+        for (int i = 0; i < Children.Count; i++) {
+            if (IsLowerPriorityBroadLookupChild(this, Children[i])) continue;
+
+            if (Children[i].TryBuildNodePathAtLine(lineNumber, path)) return true;
+        }
+
+        for (int i = 0; i < Children.Count; i++) {
+            if (!IsLowerPriorityBroadLookupChild(this, Children[i])) continue;
+
+            if (Children[i].TryBuildNodePathAtLine(lineNumber, path)) return true;
+        }
+
+        return SourceSpan.HasValue;
+    }
+
+    private bool TryBuildNodePathAtPosition(int lineNumber, int columnNumber, List<MarkdownSyntaxNode> path) {
+        if (!SourceSpan.HasValue && Children.Count == 0) return false;
+        if (SourceSpan.HasValue && !SourceSpan.Value.ContainsPosition(lineNumber, columnNumber)) return false;
+
+        path.Add(this);
+        for (int i = 0; i < Children.Count; i++) {
+            if (Children[i].TryBuildNodePathAtPosition(lineNumber, columnNumber, path)) return true;
+        }
+
+        return SourceSpan.HasValue;
+    }
+
+    private bool TryBuildNodePathContainingSpan(MarkdownSourceSpan span, List<MarkdownSyntaxNode> path) {
+        if (!SourceSpan.HasValue && Children.Count == 0) return false;
+        if (SourceSpan.HasValue && !SourceSpan.Value.Contains(span)) return false;
+
+        path.Add(this);
+        for (int i = 0; i < Children.Count; i++) {
+            if (!HasExactSpan(Children[i], span)) continue;
+            if (Children[i].TryBuildNodePathContainingSpan(span, path)) return true;
+        }
+
+        for (int i = 0; i < Children.Count; i++) {
+            if (IsLowerPriorityBroadLookupChild(this, Children[i])) continue;
+
+            if (Children[i].TryBuildNodePathContainingSpan(span, path)) return true;
+        }
+
+        for (int i = 0; i < Children.Count; i++) {
+            if (!IsLowerPriorityBroadLookupChild(this, Children[i])) continue;
+
+            if (Children[i].TryBuildNodePathContainingSpan(span, path)) return true;
+        }
+
+        return SourceSpan.HasValue;
+    }
+
+    private bool TryBuildNodePathOverlappingSpan(MarkdownSourceSpan span, List<MarkdownSyntaxNode> path) {
+        if (!SourceSpan.HasValue && Children.Count == 0) return false;
+        if (SourceSpan.HasValue && !SourceSpan.Value.Overlaps(span)) return false;
+
+        path.Add(this);
+        for (int i = 0; i < Children.Count; i++) {
+            if (!HasExactSpan(Children[i], span)) continue;
+            if (Children[i].TryBuildNodePathOverlappingSpan(span, path)) return true;
+        }
+
+        for (int i = 0; i < Children.Count; i++) {
+            if (IsLowerPriorityBroadLookupChild(this, Children[i])) continue;
+
+            if (Children[i].TryBuildNodePathOverlappingSpan(span, path)) return true;
+        }
+
+        for (int i = 0; i < Children.Count; i++) {
+            if (!IsLowerPriorityBroadLookupChild(this, Children[i])) continue;
+
+            if (Children[i].TryBuildNodePathOverlappingSpan(span, path)) return true;
+        }
+
+        return SourceSpan.HasValue;
+    }
+
+    private static bool HasExactSpan(MarkdownSyntaxNode node, MarkdownSourceSpan span) =>
+        node.SourceSpan.HasValue && node.SourceSpan.Value.Equals(span);
+
+    private static bool IsLowerPriorityBroadLookupChild(MarkdownSyntaxNode parent, MarkdownSyntaxNode child) =>
+        (parent.Kind == MarkdownSyntaxKind.Heading && child.Kind == MarkdownSyntaxKind.HeadingLevel)
+        || (parent.Kind == MarkdownSyntaxKind.ListItem && IsListMarkerTokenKind(child.Kind))
+        || (parent.Kind == MarkdownSyntaxKind.Quote && child.Kind == MarkdownSyntaxKind.QuoteMarker);
+
+    private static bool IsListMarkerTokenKind(MarkdownSyntaxKind kind) =>
+        kind == MarkdownSyntaxKind.ListMarker || kind == MarkdownSyntaxKind.TaskListMarker;
+
+    private static MarkdownSyntaxNode? FindNearestBlock(IReadOnlyList<MarkdownSyntaxNode> path) {
+        for (int i = path.Count - 1; i >= 0; i--) {
+            if (IsBlockLikeKind(path[i].Kind)) return path[i];
+        }
+
+        return null;
+    }
+
+    private static bool IsBlockLikeKind(MarkdownSyntaxKind kind) {
+        switch (kind) {
+            case MarkdownSyntaxKind.Document:
+            case MarkdownSyntaxKind.Heading:
+            case MarkdownSyntaxKind.Paragraph:
+            case MarkdownSyntaxKind.Quote:
+            case MarkdownSyntaxKind.UnorderedList:
+            case MarkdownSyntaxKind.OrderedList:
+            case MarkdownSyntaxKind.ListItem:
+            case MarkdownSyntaxKind.CodeBlock:
+            case MarkdownSyntaxKind.SemanticFencedBlock:
+            case MarkdownSyntaxKind.Table:
+            case MarkdownSyntaxKind.TableHeader:
+            case MarkdownSyntaxKind.TableRow:
+            case MarkdownSyntaxKind.TableCell:
+            case MarkdownSyntaxKind.HorizontalRule:
+            case MarkdownSyntaxKind.Image:
+            case MarkdownSyntaxKind.Callout:
+            case MarkdownSyntaxKind.DefinitionList:
+            case MarkdownSyntaxKind.DefinitionGroup:
+            case MarkdownSyntaxKind.DefinitionItem:
+            case MarkdownSyntaxKind.FootnoteDefinition:
+            case MarkdownSyntaxKind.ReferenceLinkDefinition:
+            case MarkdownSyntaxKind.AbbreviationDefinition:
+            case MarkdownSyntaxKind.Details:
+            case MarkdownSyntaxKind.Summary:
+            case MarkdownSyntaxKind.FrontMatter:
+            case MarkdownSyntaxKind.HtmlRaw:
+            case MarkdownSyntaxKind.HtmlComment:
+            case MarkdownSyntaxKind.Toc:
+            case MarkdownSyntaxKind.TocPlaceholder:
+            case MarkdownSyntaxKind.Unknown:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private void AttachToParent(MarkdownSyntaxNode parent, int index) {
+        if ((uint)index >= DetachedIndex) {
+            throw new InvalidOperationException("A syntax node cannot contain more than 16,777,215 children.");
+        }
+
+        Parent = parent;
+        _kindAndIndex = ((uint)index << IndexShift) | (_kindAndIndex & KindMask);
+    }
+
+    private MarkdownSyntaxNode? GetChildOrNull(int index) =>
+        index >= 0 && index < Children.Count ? Children[index] : null;
+}
+
+internal sealed class MarkdownSyntaxNodeMetadata {
+    internal MarkdownSyntaxNodeMetadata(
+        string? literal,
+        string? customKind,
+        MarkdownAttributeSet attributes,
+        bool isGenerated) {
+        Literal = literal;
+        CustomKind = customKind;
+        Attributes = attributes;
+        IsGenerated = isGenerated;
+    }
+
+    internal string? Literal { get; }
+    internal string? CustomKind { get; }
+    internal MarkdownAttributeSet Attributes { get; }
+    internal bool IsGenerated { get; }
+}

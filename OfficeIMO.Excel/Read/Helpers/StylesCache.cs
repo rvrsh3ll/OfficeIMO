@@ -1,0 +1,298 @@
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Spreadsheet;
+using System.Globalization;
+using System.IO;
+using System.Xml;
+
+namespace OfficeIMO.Excel {
+    internal sealed class StylesCacheProvider {
+        private readonly SpreadsheetDocument? _doc;
+        private readonly Func<Stream>? _openPartStream;
+        private readonly object _gate = new();
+        private StylesCache? _value;
+
+        public StylesCacheProvider(SpreadsheetDocument doc) {
+            _doc = doc;
+            _openPartStream = null;
+        }
+
+        internal StylesCacheProvider(Func<Stream> openPartStream) {
+            _openPartStream = openPartStream ?? throw new ArgumentNullException(nameof(openPartStream));
+        }
+
+        internal StylesCacheProvider(StylesCache value) {
+            _value = value ?? throw new ArgumentNullException(nameof(value));
+        }
+
+        public StylesCache Value {
+            get {
+                var value = _value;
+                if (value != null) {
+                    return value;
+                }
+
+                lock (_gate) {
+                    if (_value != null) {
+                        return _value;
+                    }
+
+                    if (_openPartStream != null) {
+                        using Stream stream = _openPartStream();
+                        return _value = StylesCache.Build(stream);
+                    }
+
+                    return _value = StylesCache.Build(_doc!);
+                }
+            }
+        }
+    }
+
+    internal sealed class StylesCache {
+        private static readonly bool[] EmptyDateStyleIndexes = Array.Empty<bool>();
+        private static readonly XmlReaderSettings StylesXmlReaderSettings = CreateStylesXmlReaderSettings();
+        private bool[] _dateStyleIndexes = EmptyDateStyleIndexes;
+        private bool[] _dateSystemShiftStyleIndexes = EmptyDateStyleIndexes;
+
+        private StylesCache() { }
+
+        public bool HasDateStyles { get; private set; }
+
+        public int CellFormatCount => _dateStyleIndexes.Length;
+
+        public static StylesCache Build(SpreadsheetDocument doc) {
+            var cache = new StylesCache();
+            var sp = doc.WorkbookPart!.WorkbookStylesPart;
+            if (sp == null) return cache;
+
+            if (doc.FileOpenAccess == FileAccess.Read && TryBuildXmlFast(sp, cache)) {
+                return cache;
+            }
+
+            if (sp.Stylesheet == null) return cache;
+
+            Dictionary<uint, string>? nf = null;
+            var numbering = sp.Stylesheet.NumberingFormats;
+            if (numbering != null) {
+                foreach (var n in numbering.Elements<NumberingFormat>()) {
+                    if (n.NumberFormatId?.Value is uint id && n.FormatCode?.Value is string code) {
+                        nf ??= new Dictionary<uint, string>();
+                        nf[id] = code;
+                    }
+                }
+            }
+
+            var xfs = sp.Stylesheet.CellFormats;
+            if (xfs != null) {
+                int idx = 0;
+                foreach (var cf in xfs.Elements<CellFormat>()) {
+                    if (idx >= cache._dateStyleIndexes.Length) {
+                        Array.Resize(ref cache._dateStyleIndexes, Math.Max(4, (idx + 1) * 2));
+                    }
+
+                    var nId = (uint)(cf.NumberFormatId?.Value ?? 0);
+                    bool dateLike = IsDateNumberFormat(nId, nf);
+                    if (dateLike) {
+                        cache._dateStyleIndexes[idx] = true;
+                        cache.HasDateStyles = true;
+                    }
+
+                    if (IsDateSystemShiftNumberFormat(nId, nf)) {
+                        if (idx >= cache._dateSystemShiftStyleIndexes.Length) {
+                            Array.Resize(ref cache._dateSystemShiftStyleIndexes, Math.Max(4, (idx + 1) * 2));
+                        }
+
+                        cache._dateSystemShiftStyleIndexes[idx] = true;
+                    }
+
+                    idx++;
+                }
+
+                if (idx == 0) {
+                    cache._dateStyleIndexes = EmptyDateStyleIndexes;
+                    cache._dateSystemShiftStyleIndexes = EmptyDateStyleIndexes;
+                } else if (idx < cache._dateStyleIndexes.Length) {
+                    Array.Resize(ref cache._dateStyleIndexes, idx);
+                    if (idx < cache._dateSystemShiftStyleIndexes.Length) {
+                        Array.Resize(ref cache._dateSystemShiftStyleIndexes, idx);
+                    }
+                }
+            }
+
+            return cache;
+        }
+
+        internal static StylesCache Build(Stream stream) {
+            var cache = new StylesCache();
+            if (!TryBuildXmlFast(stream, cache)) {
+                throw new XlsxTabularFastPathNotSupportedException(
+                    "The styles part requires the Open XML SDK fallback path.");
+            }
+
+            return cache;
+        }
+
+        internal static StylesCache Empty() => new();
+
+        public bool IsDateLike(uint styleIndex) => styleIndex < (uint)_dateStyleIndexes.Length && _dateStyleIndexes[styleIndex];
+
+        public bool IsDateSystemShiftStyle(uint styleIndex) => styleIndex < (uint)_dateSystemShiftStyleIndexes.Length && _dateSystemShiftStyleIndexes[styleIndex];
+
+        private static bool TryBuildXmlFast(WorkbookStylesPart sp, StylesCache cache) {
+            using var stream = sp.GetStream(FileMode.Open, FileAccess.Read);
+            return TryBuildXmlFast(stream, cache);
+        }
+
+        private static bool TryBuildXmlFast(Stream stream, StylesCache cache) {
+            try {
+                using var reader = XmlReader.Create(stream, StylesXmlReaderSettings);
+                Dictionary<uint, string>? nf = null;
+
+                while (reader.Read()) {
+                    if (reader.NodeType != XmlNodeType.Element) {
+                        continue;
+                    }
+
+                    if (reader.LocalName == "numFmt") {
+                        if (TryParseUIntAttribute(reader.GetAttribute("numFmtId"), out uint id)
+                            && reader.GetAttribute("formatCode") is string code) {
+                            nf ??= new Dictionary<uint, string>();
+                            nf[id] = code;
+                        }
+
+                        continue;
+                    }
+
+                    if (reader.LocalName == "cellXfs") {
+                        ReadCellFormatsXml(reader, cache, nf);
+                        return true;
+                    }
+                }
+
+                cache._dateStyleIndexes = EmptyDateStyleIndexes;
+                cache.HasDateStyles = false;
+                return true;
+            } catch (XmlException) {
+                cache._dateStyleIndexes = EmptyDateStyleIndexes;
+                cache.HasDateStyles = false;
+                return false;
+            } catch (IOException) {
+                cache._dateStyleIndexes = EmptyDateStyleIndexes;
+                cache.HasDateStyles = false;
+                return false;
+            } catch (UnauthorizedAccessException) {
+                cache._dateStyleIndexes = EmptyDateStyleIndexes;
+                cache.HasDateStyles = false;
+                return false;
+            } catch (ObjectDisposedException) {
+                cache._dateStyleIndexes = EmptyDateStyleIndexes;
+                cache.HasDateStyles = false;
+                return false;
+            }
+        }
+
+        private static void ReadCellFormatsXml(XmlReader reader, StylesCache cache, Dictionary<uint, string>? numberingFormats) {
+            if (reader.IsEmptyElement) {
+                cache._dateStyleIndexes = EmptyDateStyleIndexes;
+                cache.HasDateStyles = false;
+                return;
+            }
+
+            int depth = reader.Depth;
+            int index = 0;
+            while (reader.Read()) {
+                if (reader.NodeType == XmlNodeType.EndElement && reader.Depth == depth && reader.LocalName == "cellXfs") {
+                    break;
+                }
+
+                if (reader.NodeType != XmlNodeType.Element || reader.LocalName != "xf") {
+                    continue;
+                }
+
+                if (index == cache._dateStyleIndexes.Length) {
+                    int newSize = Math.Max(4, index * 2);
+                    Array.Resize(ref cache._dateStyleIndexes, newSize);
+                    Array.Resize(ref cache._dateSystemShiftStyleIndexes, newSize);
+                }
+
+                if (TryParseUIntAttribute(reader.GetAttribute("numFmtId"), out uint numberFormatId)
+                    && IsDateNumberFormat(numberFormatId, numberingFormats)) {
+                    cache._dateStyleIndexes[index] = true;
+                    cache.HasDateStyles = true;
+                }
+
+                if (TryParseUIntAttribute(reader.GetAttribute("numFmtId"), out uint shiftNumberFormatId)
+                    && IsDateSystemShiftNumberFormat(shiftNumberFormatId, numberingFormats)) {
+                    cache._dateSystemShiftStyleIndexes[index] = true;
+                }
+
+                index++;
+            }
+
+            if (index == 0) {
+                cache._dateStyleIndexes = EmptyDateStyleIndexes;
+                cache._dateSystemShiftStyleIndexes = EmptyDateStyleIndexes;
+            } else if (index < cache._dateStyleIndexes.Length) {
+                Array.Resize(ref cache._dateStyleIndexes, index);
+                if (index < cache._dateSystemShiftStyleIndexes.Length) {
+                    Array.Resize(ref cache._dateSystemShiftStyleIndexes, index);
+                }
+            }
+        }
+
+        private static bool IsDateNumberFormat(uint id, Dictionary<uint, string>? numberingFormats) {
+            return IsBuiltInDate(id)
+                || (numberingFormats != null
+                    && numberingFormats.TryGetValue(id, out string? code)
+                    && ExcelNumberFormatClassifier.LooksLikeDateFormat(code));
+        }
+
+        private static bool IsDateSystemShiftNumberFormat(uint id, Dictionary<uint, string>? numberingFormats) {
+            return IsBuiltInDateSystemShiftFormat(id)
+                || (numberingFormats != null
+                    && numberingFormats.TryGetValue(id, out string? code)
+                    && ExcelNumberFormatClassifier.LooksLikeDateSystemFormat(code));
+        }
+
+        private static bool IsBuiltInDate(uint id)
+            => ExcelBuiltInNumberFormats.IsDate(id);
+
+        private static bool IsBuiltInDateSystemShiftFormat(uint id)
+            => ExcelBuiltInNumberFormats.IsDateSystemShift(id);
+
+        private static XmlReaderSettings CreateStylesXmlReaderSettings() {
+            return new XmlReaderSettings {
+                DtdProcessing = DtdProcessing.Prohibit,
+                IgnoreComments = true,
+                IgnoreProcessingInstructions = true,
+                IgnoreWhitespace = true,
+                CloseInput = false
+            };
+        }
+
+        private static bool TryParseUIntAttribute(string? value, out uint result) {
+            result = 0;
+            if (string.IsNullOrEmpty(value)) {
+                return false;
+            }
+
+            string text = value!;
+            uint parsed = 0;
+            for (int i = 0; i < text.Length; i++) {
+                int digit = text[i] - '0';
+                if ((uint)digit > 9U) {
+                    return uint.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out result);
+                }
+
+                if (parsed > (uint.MaxValue - (uint)digit) / 10U) {
+                    return uint.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out result);
+                }
+
+                parsed = (parsed * 10U) + (uint)digit;
+            }
+
+            result = parsed;
+            return true;
+        }
+
+    }
+}

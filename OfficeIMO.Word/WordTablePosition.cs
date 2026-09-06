@@ -1,4 +1,5 @@
-﻿using DocumentFormat.OpenXml.Wordprocessing;
+using System;
+using DocumentFormat.OpenXml.Wordprocessing;
 
 namespace OfficeIMO.Word {
     /// <summary>
@@ -6,15 +7,20 @@ namespace OfficeIMO.Word {
     /// </summary>
     public class WordTablePosition {
         private readonly WordTable _table;
-        private readonly TableProperties _tableProperties;
+
+        private TableProperties? TableProperties => _table._tableProperties;
+
+        private TableProperties EnsureTableProperties() {
+            _table.CheckTableProperties();
+            return _table._tableProperties ?? throw new InvalidOperationException("Table properties are not available.");
+        }
 
         /// <summary>
         ///     Constructor for Table Positioning
         /// </summary>
         /// <param name="table"></param>
         internal WordTablePosition(WordTable table) {
-            _table = table;
-            _tableProperties = table._tableProperties;
+            _table = table ?? throw new ArgumentNullException(nameof(table));
         }
 
         /// <summary>
@@ -22,18 +28,18 @@ namespace OfficeIMO.Word {
         /// </summary>
         public short? LeftFromText {
             get {
-                if (_tableProperties != null && _tableProperties.TablePositionProperties != null)
-                    if (_tableProperties.TablePositionProperties.LeftFromText != null)
-                        return _tableProperties.TablePositionProperties.LeftFromText;
+                var tableProperties = TableProperties;
+                if (tableProperties?.TablePositionProperties?.LeftFromText != null)
+                    return tableProperties.TablePositionProperties.LeftFromText;
 
                 return null;
             }
             set {
-                _table.CheckTableProperties();
-                if (_tableProperties.TablePositionProperties == null)
-                    _tableProperties.TablePositionProperties = new TablePositionProperties();
+                var tableProperties = EnsureTableProperties();
+                if (tableProperties.TablePositionProperties == null)
+                    tableProperties.TablePositionProperties = new TablePositionProperties();
 
-                if (value != null) _tableProperties.TablePositionProperties.LeftFromText = value;
+                if (value != null) tableProperties.TablePositionProperties.LeftFromText = value;
             }
         }
 
@@ -42,18 +48,18 @@ namespace OfficeIMO.Word {
         /// </summary>
         public short? RightFromText {
             get {
-                if (_tableProperties != null && _tableProperties.TablePositionProperties != null)
-                    if (_tableProperties.TablePositionProperties.RightFromText != null)
-                        return _tableProperties.TablePositionProperties.RightFromText;
+                var tableProperties = TableProperties;
+                if (tableProperties?.TablePositionProperties?.RightFromText != null)
+                    return tableProperties.TablePositionProperties.RightFromText;
 
                 return null;
             }
             set {
-                _table.CheckTableProperties();
-                if (_tableProperties.TablePositionProperties == null)
-                    _tableProperties.TablePositionProperties = new TablePositionProperties();
+                var tableProperties = EnsureTableProperties();
+                if (tableProperties.TablePositionProperties == null)
+                    tableProperties.TablePositionProperties = new TablePositionProperties();
 
-                if (value != null) _tableProperties.TablePositionProperties.RightFromText = value;
+                if (value != null) tableProperties.TablePositionProperties.RightFromText = value;
             }
         }
 
@@ -62,18 +68,18 @@ namespace OfficeIMO.Word {
         /// </summary>
         public short? BottomFromText {
             get {
-                if (_tableProperties != null && _tableProperties.TablePositionProperties != null)
-                    if (_tableProperties.TablePositionProperties.BottomFromText != null)
-                        return _tableProperties.TablePositionProperties.BottomFromText;
+                var tableProperties = TableProperties;
+                if (tableProperties?.TablePositionProperties?.BottomFromText != null)
+                    return tableProperties.TablePositionProperties.BottomFromText;
 
                 return null;
             }
             set {
-                _table.CheckTableProperties();
-                if (_tableProperties.TablePositionProperties == null)
-                    _tableProperties.TablePositionProperties = new TablePositionProperties();
+                var tableProperties = EnsureTableProperties();
+                if (tableProperties.TablePositionProperties == null)
+                    tableProperties.TablePositionProperties = new TablePositionProperties();
 
-                if (value != null) _tableProperties.TablePositionProperties.BottomFromText = value;
+                if (value != null) tableProperties.TablePositionProperties.BottomFromText = value;
             }
         }
 
@@ -82,64 +88,64 @@ namespace OfficeIMO.Word {
         /// </summary>
         public short? TopFromText {
             get {
-                if (_tableProperties != null && _tableProperties.TablePositionProperties != null)
-                    if (_tableProperties.TablePositionProperties.TopFromText != null)
-                        return _tableProperties.TablePositionProperties.TopFromText;
+                var tableProperties = TableProperties;
+                if (tableProperties?.TablePositionProperties?.TopFromText != null)
+                    return tableProperties.TablePositionProperties.TopFromText;
 
                 return null;
             }
             set {
-                _table.CheckTableProperties();
-                if (_tableProperties.TablePositionProperties == null)
-                    _tableProperties.TablePositionProperties = new TablePositionProperties();
+                var tableProperties = EnsureTableProperties();
+                if (tableProperties.TablePositionProperties == null)
+                    tableProperties.TablePositionProperties = new TablePositionProperties();
 
-                if (value != null) _tableProperties.TablePositionProperties.TopFromText = value;
+                if (value != null) tableProperties.TablePositionProperties.TopFromText = value;
             }
         }
 
         /// <summary>
         ///     Get or set Table Vertical Anchor
         /// </summary>
-        public VerticalAnchorValues? VerticalAnchor {
+        public WordTableVerticalAnchor? VerticalAnchor {
             get {
-                if (_tableProperties != null && _tableProperties.TablePositionProperties != null)
-                    if (_tableProperties.TablePositionProperties.VerticalAnchor != null)
-                        return _tableProperties.TablePositionProperties.VerticalAnchor.Value;
+                var tableProperties = TableProperties;
+                if (tableProperties?.TablePositionProperties?.VerticalAnchor != null)
+                    return tableProperties.TablePositionProperties.VerticalAnchor.Value.ToOfficeEnum();
 
                 return null;
             }
             set {
-                _table.CheckTableProperties();
-                if (_tableProperties.TablePositionProperties == null)
-                    _tableProperties.TablePositionProperties = new TablePositionProperties();
+                var tableProperties = EnsureTableProperties();
+                if (tableProperties.TablePositionProperties == null)
+                    tableProperties.TablePositionProperties = new TablePositionProperties();
 
                 if (value != null)
-                    _tableProperties.TablePositionProperties.VerticalAnchor = value;
+                    tableProperties.TablePositionProperties.VerticalAnchor = value.Value.ToOpenXml();
                 else
-                    _tableProperties.TablePositionProperties.VerticalAnchor = null;
+                    tableProperties.TablePositionProperties.VerticalAnchor = null;
             }
         }
 
         /// <summary>
         ///     Get or set Table Horizontal Anchor
         /// </summary>
-        public HorizontalAnchorValues? HorizontalAnchor {
+        public WordTableHorizontalAnchor? HorizontalAnchor {
             get {
-                if (_tableProperties != null && _tableProperties.TablePositionProperties != null)
-                    if (_tableProperties.TablePositionProperties.HorizontalAnchor != null)
-                        return _tableProperties.TablePositionProperties.HorizontalAnchor.Value;
+                var tableProperties = TableProperties;
+                if (tableProperties?.TablePositionProperties?.HorizontalAnchor != null)
+                    return tableProperties.TablePositionProperties.HorizontalAnchor.Value.ToOfficeEnum();
 
                 return null;
             }
             set {
-                _table.CheckTableProperties();
-                if (_tableProperties.TablePositionProperties == null)
-                    _tableProperties.TablePositionProperties = new TablePositionProperties();
+                var tableProperties = EnsureTableProperties();
+                if (tableProperties.TablePositionProperties == null)
+                    tableProperties.TablePositionProperties = new TablePositionProperties();
 
                 if (value != null)
-                    _tableProperties.TablePositionProperties.HorizontalAnchor = value;
+                    tableProperties.TablePositionProperties.HorizontalAnchor = value.Value.ToOpenXml();
                 else
-                    _tableProperties.TablePositionProperties.HorizontalAnchor = null;
+                    tableProperties.TablePositionProperties.HorizontalAnchor = null;
             }
         }
 
@@ -148,21 +154,21 @@ namespace OfficeIMO.Word {
         /// </summary>
         public int? TablePositionY {
             get {
-                if (_tableProperties != null && _tableProperties.TablePositionProperties != null)
-                    if (_tableProperties.TablePositionProperties.TablePositionY != null)
-                        return _tableProperties.TablePositionProperties.TablePositionY;
+                var tableProperties = TableProperties;
+                if (tableProperties?.TablePositionProperties?.TablePositionY != null)
+                    return tableProperties.TablePositionProperties.TablePositionY;
 
                 return null;
             }
             set {
-                _table.CheckTableProperties();
-                if (_tableProperties.TablePositionProperties == null)
-                    _tableProperties.TablePositionProperties = new TablePositionProperties();
+                var tableProperties = EnsureTableProperties();
+                if (tableProperties.TablePositionProperties == null)
+                    tableProperties.TablePositionProperties = new TablePositionProperties();
 
                 if (value != null)
-                    _tableProperties.TablePositionProperties.TablePositionY = value;
+                    tableProperties.TablePositionProperties.TablePositionY = value;
                 else
-                    _tableProperties.TablePositionProperties.TablePositionY = null;
+                    tableProperties.TablePositionProperties.TablePositionY = null;
             }
         }
 
@@ -171,87 +177,88 @@ namespace OfficeIMO.Word {
         /// </summary>
         public int? TablePositionX {
             get {
-                if (_tableProperties != null && _tableProperties.TablePositionProperties != null)
-                    if (_tableProperties.TablePositionProperties.TablePositionX != null)
-                        return _tableProperties.TablePositionProperties.TablePositionX;
+                var tableProperties = TableProperties;
+                if (tableProperties?.TablePositionProperties?.TablePositionX != null)
+                    return tableProperties.TablePositionProperties.TablePositionX;
 
                 return null;
             }
             set {
-                _table.CheckTableProperties();
-                if (_tableProperties.TablePositionProperties == null)
-                    _tableProperties.TablePositionProperties = new TablePositionProperties();
+                var tableProperties = EnsureTableProperties();
+                if (tableProperties.TablePositionProperties == null)
+                    tableProperties.TablePositionProperties = new TablePositionProperties();
 
                 if (value != null)
-                    _tableProperties.TablePositionProperties.TablePositionX = value;
+                    tableProperties.TablePositionProperties.TablePositionX = value;
                 else
-                    _tableProperties.TablePositionProperties.TablePositionX = null;
+                    tableProperties.TablePositionProperties.TablePositionX = null;
             }
         }
 
         /// <summary>
         ///     Get or set Relative Vertical Alignment from Anchor
         /// </summary>
-        public VerticalAlignmentValues? TablePositionYAlignment {
+        public WordTableVerticalPositionAlignment? TablePositionYAlignment {
             get {
-                if (_tableProperties != null && _tableProperties.TablePositionProperties != null)
-                    if (_tableProperties.TablePositionProperties.TablePositionYAlignment != null)
-                        return _tableProperties.TablePositionProperties.TablePositionYAlignment;
+                var tableProperties = TableProperties;
+                if (tableProperties?.TablePositionProperties?.TablePositionYAlignment != null)
+                    return tableProperties.TablePositionProperties.TablePositionYAlignment.Value.ToOfficeEnum();
 
                 return null;
             }
             set {
-                _table.CheckTableProperties();
-                if (_tableProperties.TablePositionProperties == null)
-                    _tableProperties.TablePositionProperties = new TablePositionProperties();
+                var tableProperties = EnsureTableProperties();
+                if (tableProperties.TablePositionProperties == null)
+                    tableProperties.TablePositionProperties = new TablePositionProperties();
 
                 if (value != null)
-                    _tableProperties.TablePositionProperties.TablePositionYAlignment = value;
+                    tableProperties.TablePositionProperties.TablePositionYAlignment = value.Value.ToOpenXml();
                 else
-                    _tableProperties.TablePositionProperties.TablePositionYAlignment = null;
+                    tableProperties.TablePositionProperties.TablePositionYAlignment = null;
             }
         }
 
         /// <summary>
         ///     Get or set Relative Horizontal Alignment From Anchor
         /// </summary>
-        public HorizontalAlignmentValues? TablePositionXAlignment {
+        public WordTableHorizontalAlignment? TablePositionXAlignment {
             get {
-                if (_tableProperties != null && _tableProperties.TablePositionProperties != null)
-                    if (_tableProperties.TablePositionProperties.TablePositionXAlignment != null)
-                        return _tableProperties.TablePositionProperties.TablePositionXAlignment;
+                var tableProperties = TableProperties;
+                if (tableProperties?.TablePositionProperties?.TablePositionXAlignment != null)
+                    return tableProperties.TablePositionProperties.TablePositionXAlignment.Value.ToOfficeEnum();
 
                 return null;
             }
             set {
-                _table.CheckTableProperties();
-                if (_tableProperties.TablePositionProperties == null)
-                    _tableProperties.TablePositionProperties = new TablePositionProperties();
+                var tableProperties = EnsureTableProperties();
+                if (tableProperties.TablePositionProperties == null)
+                    tableProperties.TablePositionProperties = new TablePositionProperties();
 
                 if (value != null)
-                    _tableProperties.TablePositionProperties.TablePositionXAlignment = value;
+                    tableProperties.TablePositionProperties.TablePositionXAlignment = value.Value.ToOpenXml();
                 else
-                    _tableProperties.TablePositionProperties.TablePositionXAlignment = null;
+                    tableProperties.TablePositionProperties.TablePositionXAlignment = null;
             }
         }
 
         /// <summary>
         ///     Gets or sets Table Overlap
         /// </summary>
-        public TableOverlapValues? TableOverlap {
+        public WordTableOverlap? TableOverlap {
             get {
-                if (_tableProperties != null && _tableProperties.TableOverlap != null)
-                    return _tableProperties.TableOverlap.Val;
+                var tableProperties = TableProperties;
+                if (tableProperties?.TableOverlap?.Val != null)
+                    return tableProperties.TableOverlap.Val.Value.ToOfficeEnum();
 
                 return null;
             }
             set {
-                _table.CheckTableProperties();
-                if (_tableProperties.TableOverlap == null) _tableProperties.TableOverlap = new TableOverlap();
+                var tableProperties = EnsureTableProperties();
+                if (tableProperties.TableOverlap == null) tableProperties.TableOverlap = new TableOverlap();
                 if (value != null)
-                    _tableProperties.TableOverlap.Val = value;
+                    tableProperties.TableOverlap.Val = value.Value.ToOpenXml();
                 else
-                    _tableProperties.TableOverlap.Remove();
+                    tableProperties.TableOverlap.Remove();
             }
         }
     }

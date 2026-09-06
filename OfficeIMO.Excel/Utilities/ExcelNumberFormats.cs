@@ -1,0 +1,64 @@
+using System.Globalization;
+
+namespace OfficeIMO.Excel {
+    /// <summary>
+    /// Maps number format presets to Excel format codes.
+    /// </summary>
+    public static class ExcelNumberFormats {
+        /// <summary>Maximum decimal places accepted by preset number formats.</summary>
+        public const int MaximumDecimalPlaces = 30;
+
+        /// <summary>
+        /// Returns the names of supported number format presets.
+        /// </summary>
+        public static IReadOnlyList<string> GetPresetNames() {
+            return Enum.GetNames(typeof(ExcelNumberPreset));
+        }
+
+        /// <summary>
+        /// Returns an Excel number format code for the given <paramref name="preset"/>,
+        /// optionally controlling decimal places and currency culture.
+        /// </summary>
+        /// <param name="preset">Predefined number format.</param>
+        /// <param name="decimals">Number of decimal places where applicable.</param>
+        /// <param name="culture">Culture used for currency symbol; defaults to current culture.</param>
+        public static string Get(ExcelNumberPreset preset, int decimals = 2, CultureInfo? culture = null) {
+            if (decimals < 0 || decimals > MaximumDecimalPlaces) {
+                throw new ArgumentOutOfRangeException(nameof(decimals), $"Decimals must be between 0 and {MaximumDecimalPlaces}.");
+            }
+
+            culture ??= CultureInfo.CurrentCulture;
+            switch (preset) {
+                case ExcelNumberPreset.General:
+                    return "General";
+                case ExcelNumberPreset.Integer:
+                    return "#,##0";
+                case ExcelNumberPreset.Decimal:
+                    return "#,##0" + (decimals > 0 ? "." + new string('0', decimals) : string.Empty);
+                case ExcelNumberPreset.Percent:
+                    return "0" + (decimals > 0 ? "." + new string('0', decimals) : string.Empty) + "%";
+                case ExcelNumberPreset.Currency: {
+                        var sym = culture.NumberFormat.CurrencySymbol;
+                        // Literal currency symbol, basic grouping with configurable decimals
+                        return "\"" + sym + "\"#,##0" + (decimals > 0 ? "." + new string('0', decimals) : string.Empty);
+                    }
+                case ExcelNumberPreset.Scientific:
+                    return "0" + (decimals > 0 ? "." + new string('0', decimals) : string.Empty) + "E+00";
+                case ExcelNumberPreset.DateShort:
+                    return "yyyy-mm-dd";
+                case ExcelNumberPreset.DateLong:
+                    return "yyyy-mm-dd hh:mm";
+                case ExcelNumberPreset.Time:
+                    return "h:mm:ss";
+                case ExcelNumberPreset.DateTime:
+                    return "yyyy-mm-dd hh:mm:ss";
+                case ExcelNumberPreset.DurationHours:
+                    return "[h]:mm:ss";
+                case ExcelNumberPreset.Text:
+                    return "@";
+                default:
+                    return "General";
+            }
+        }
+    }
+}

@@ -5,7 +5,7 @@ using System.Text;
 using System.Threading.Tasks;
 using DocumentFormat.OpenXml.Wordprocessing;
 using OfficeIMO.Word;
-using Color = SixLabors.ImageSharp.Color;
+using Color = OfficeIMO.Drawing.OfficeColor;
 
 namespace OfficeIMO.Examples.Word {
     internal static partial class Lists {
@@ -13,7 +13,7 @@ namespace OfficeIMO.Examples.Word {
             string filePath = System.IO.Path.Combine(folderPath, "Document with Lists with custom styling.docx");
             using (WordDocument document = WordDocument.Create(filePath)) {
                 var paragraph = document.AddParagraph("This is 1st list - LowerLetterWithBracket");
-                paragraph.ParagraphAlignment = JustificationValues.Center;
+                paragraph.ParagraphAlignment = WordParagraphAlignment.Center;
 
                 WordList wordList1 = document.AddList(WordListStyle.LowerLetterWithBracket);
                 wordList1.Bold = true;
@@ -29,12 +29,13 @@ namespace OfficeIMO.Examples.Word {
                 wordList1.AddItem("Text 3", 2);
 
                 paragraph = document.AddParagraph("This is 2nd list - LowerLetterWithDot");
-                paragraph.ParagraphAlignment = JustificationValues.Center;
+                paragraph.ParagraphAlignment = WordParagraphAlignment.Center;
                 paragraph.Bold = true;
                 paragraph.FontSize = 16;
                 paragraph.Color = Color.AliceBlue;
 
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
     }

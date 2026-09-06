@@ -1,11 +1,16 @@
 using System;
 using DocumentFormat.OpenXml.Wordprocessing;
+using OfficeIMO.Examples.Utils;
 using OfficeIMO.Word;
-using Color = SixLabors.ImageSharp.Color;
+using Color = OfficeIMO.Drawing.OfficeColor;
 
 namespace OfficeIMO.Examples.Word {
     internal static partial class AdvancedDocument {
-
+        /// <summary>
+        /// Creates an advanced document showcasing various features.
+        /// </summary>
+        /// <param name="folderPath">Destination folder for the document.</param>
+        /// <param name="openWord">Whether to open Word after creation.</param>
         public static void Example_AdvancedWord(string folderPath, bool openWord) {
             Console.WriteLine("[*] Creating advanced document");
             string filePath = System.IO.Path.Combine(folderPath, "AdvancedDocument.docx");
@@ -19,16 +24,16 @@ namespace OfficeIMO.Examples.Word {
                 document.Settings.UpdateFieldsOnOpen = true;
 
                 // lets add one of multiple added Cover Pages
-                document.AddCoverPage(CoverPageTemplate.IonDark);
+                document.AddCoverPage(WordCoverPageTemplate.IonDark);
 
                 // lets add Table of Content (1 of 2)
-                document.AddTableOfContent(TableOfContentStyle.Template1);
+                document.AddTableOfContent(WordTableOfContentsStyle.Template1);
 
                 // lets add page break
                 document.AddPageBreak();
 
                 // lets create a list that will be binded to TOC
-                var wordListToc = document.AddTableOfContentList(WordListStyle.Headings111);
+                var wordListToc = document.AddTableOfContentList(WordListStyle.Numbered);
 
                 var elements = document.Elements;
                 Console.WriteLine("Elements count: " + elements.Count);
@@ -43,7 +48,7 @@ namespace OfficeIMO.Examples.Word {
                 table.Rows[3].Cells[2].Paragraphs[0].Color = Color.Blue; ;
                 table.Rows[3].Cells[3].Paragraphs[0].Text = "Different cell";
 
-                document.AddParagraph("As you can see adding a table with some style, and adding content to it ").SetBold().SetUnderline(UnderlineValues.Dotted).AddText("is not really complicated").SetColor(Color.OrangeRed);
+                document.AddParagraph("As you can see adding a table with some style, and adding content to it ").SetBold().SetUnderline(WordUnderlineStyle.Dotted).AddText("is not really complicated").SetColor(Color.OrangeRed);
 
                 wordListToc.AddItem("How to add a list to document?");
 
@@ -62,8 +67,9 @@ namespace OfficeIMO.Examples.Word {
 
                 var paragraphWithHyperlink = document.AddHyperLink("Go to Evotec Blogs", new Uri("https://evotec.xyz"), true, "URL with tooltip");
                 // you can also change the hyperlink text, uri later on using properties
-                paragraphWithHyperlink.Hyperlink.Uri = new Uri("https://evotec.xyz/hub");
-                paragraphWithHyperlink.ParagraphAlignment = JustificationValues.Center;
+                var hyperlink = Guard.NotNull(paragraphWithHyperlink.Hyperlink, "Hyperlink should be created when calling AddHyperLink.");
+                hyperlink.Uri = new Uri("https://evotec.xyz/hub");
+                paragraphWithHyperlink.ParagraphAlignment = WordParagraphAlignment.Center;
 
                 list.AddItem("3rd element of list, but added after hyperlink", 0);
                 list.AddItem("4th element with hyperlink ").AddHyperLink("included.", new Uri("https://evotec.xyz/hub"), addStyle: true);
@@ -77,19 +83,16 @@ namespace OfficeIMO.Examples.Word {
                 listNumbered.AddItem("Different list number 4", 1);
 
                 var section = document.AddSection();
-                section.PageOrientation = PageOrientationValues.Landscape;
+                section.PageOrientation = OfficePageOrientation.Landscape;
                 section.PageSettings.PageSize = WordPageSize.A4;
 
                 wordListToc.AddItem("Adding headers / footers");
 
-                // lets add headers and footers
-                document.AddHeadersAndFooters();
-
-                // adding text to default header
-                document.Header.Default.AddParagraph("Text added to header - Default");
+                // add header text without null checks
+                document.HeaderDefaultOrCreate.AddParagraph("Text added to header - Default");
 
                 var section1 = document.AddSection();
-                section1.PageOrientation = PageOrientationValues.Portrait;
+                section1.PageOrientation = OfficePageOrientation.Portrait;
                 section1.PageSettings.PageSize = WordPageSize.A5;
 
                 wordListToc.AddItem("Adding custom properties and page numbers to document");
@@ -99,7 +102,7 @@ namespace OfficeIMO.Examples.Word {
                 document.CustomDocumentProperties.Add("IsTodayGreatDay", new WordCustomProperty(true));
 
                 // add page numbers
-                document.Footer.Default.AddPageNumber(WordPageNumberStyle.PlainNumber);
+                document.FooterDefaultOrCreate.AddPageNumber(WordPageNumberStyle.PlainNumber);
 
                 // add watermark
                 document.Sections[0].AddWatermark(WordWatermarkStyle.Text, "Draft");
@@ -110,7 +113,8 @@ namespace OfficeIMO.Examples.Word {
                 var elementsByType = document.ElementsByType;
                 Console.WriteLine("ElementsByType count in the end: " + elementsByType.Count);
 
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
     }

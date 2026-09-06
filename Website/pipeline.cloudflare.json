@@ -1,0 +1,56 @@
+{
+  "$schema": "https://raw.githubusercontent.com/EvotecIT/PSPublishModule/main/Schemas/powerforge.web.pipelinespec.schema.json",
+  "steps": [
+    {
+      "task": "deployment-verify",
+      "id": "verify-converter-deployment",
+      "pathPrefixes": "/apps/officeimo-converter/",
+      "attempts": 12,
+      "delayMs": 30000,
+      "requestAttempts": 3,
+      "requestRetryDelayMs": 250,
+      "timeoutMs": 30000,
+      "maxFiles": 1024,
+      "maxResponseBytes": 67108864,
+      "maxTotalBytes": 268435456,
+      "reportPath": "./_reports/converter-deployment.json",
+      "summaryPath": "./_reports/converter-deployment.md"
+    },
+    {
+      "task": "cloudflare",
+      "id": "verify-cache",
+      "dependsOn": "verify-converter-deployment",
+      "operation": "verify",
+      "siteConfig": "./site.json",
+      "warmupRequests": 1,
+      "paths": [
+        "/",
+        "/api/",
+        "/api/word/",
+        "/api/word/index.json",
+        "/agents.json",
+        "/.well-known/api-catalog",
+        "/apps/officeimo-converter/",
+        "/apps/officeimo-converter/converter.css"
+      ],
+      "discoverAssetsFrom": "/apps/officeimo-converter/",
+      "assetPathPatterns": [
+        "/apps/officeimo-converter/_framework/blazor.webassembly.*.js",
+        "/apps/officeimo-converter/_framework/dotnet.*.js",
+        "/apps/officeimo-converter/_framework/dotnet.native.*.js",
+        "/apps/officeimo-converter/_framework/dotnet.runtime.*.js"
+      ],
+      "allowStatuses": "HIT,REVALIDATED,EXPIRED",
+      "reportPath": "./_reports/cloudflare-cache.json",
+      "summaryPath": "./_reports/cloudflare-cache.md"
+    },
+    {
+      "task": "agent-ready",
+      "id": "verify-agent-readiness-live",
+      "dependsOn": "verify-cache",
+      "operation": "scan",
+      "config": "./site.json",
+      "failOnFailures": true
+    }
+  ]
+}

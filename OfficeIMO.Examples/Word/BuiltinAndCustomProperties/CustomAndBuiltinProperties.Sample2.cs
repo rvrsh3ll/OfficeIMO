@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -8,15 +8,19 @@ using OfficeIMO.Word;
 
 namespace OfficeIMO.Examples.Word {
     internal static partial class CustomAndBuiltinProperties {
+        /// <summary>
+        /// Loads a document and prints basic property information.
+        /// </summary>
+        /// <param name="openWord">Whether to open Word after loading the document.</param>
         public static void Example_Load(bool openWord = false) {
             Console.WriteLine("[*] Loading basic document");
 
             string folderPath = Path.Combine(Directory.GetCurrentDirectory(), "Templates");
             string filePath = Path.Combine(folderPath, "DocumentWithSection.docx");
-            //filePath = @"C:\Support\GitHub\OfficeIMO\OfficeIMO.Tests\Documents\DocumentWithSection.docx";
-            //filePath = @"C:\Support\GitHub\OfficeIMO\OfficeIMO.Tests\Documents\EmptyDocumentWithSection.docx";
+            //filePath = @"C:\Support\GitHub\OfficeIMO\OfficeIMO.TestAssets\Documents\DocumentWithSection.docx";
+            //filePath = @"C:\Support\GitHub\OfficeIMO\OfficeIMO.TestAssets\Documents\EmptyDocumentWithSection.docx";
 
-            using (WordDocument document = WordDocument.Load(filePath, true)) {
+            using (WordDocument document = WordDocument.Load(filePath, new OfficeIMO.Word.WordLoadOptions { AccessMode = OfficeIMO.DocumentAccessMode.ReadOnly })) {
                 Console.WriteLine("+ Document Path: " + document.FilePath);
                 Console.WriteLine("+ Document Title: " + document.BuiltinDocumentProperties.Title);
                 Console.WriteLine("+ Document Author: " + document.BuiltinDocumentProperties.Creator);
@@ -25,7 +29,7 @@ namespace OfficeIMO.Examples.Word {
                 Console.WriteLine("+ PageBreaks: " + document.PageBreaks.Count);
                 Console.WriteLine("+ Sections: " + document.Sections.Count);
 
-                document.Open(openWord);
+                if (openWord) document.OpenInApplication();
             }
         }
 

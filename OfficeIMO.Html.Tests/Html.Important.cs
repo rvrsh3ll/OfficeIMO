@@ -1,0 +1,28 @@
+using System;
+using System.Linq;
+using OfficeIMO.Word.Html;
+using Xunit;
+
+namespace OfficeIMO.Tests {
+    public partial class Html {
+        [Fact]
+        public void HtmlToWord_StylesheetImportant_OverridesInline() {
+            string html = "<style>p { color:#0000ff !important; }</style><p style=\"color:#ff0000\">Test</p>";
+            var doc = OfficeIMO.Html.HtmlConversionDocument.Parse(html).ToWordDocument(new HtmlToWordOptions());
+            var run = doc.Paragraphs[0].GetRuns().First();
+            Assert.Equal("0000FF", run.ColorHex);
+            string roundTrip = doc.ToHtml();
+            Assert.Contains(">Test</", roundTrip, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void HtmlToWord_ImportantBeatsSpecificity() {
+            string html = "<style>p { color:#0000ff !important; } div p { color:#ff0000; }</style><div><p>Test</p></div>";
+            var doc = OfficeIMO.Html.HtmlConversionDocument.Parse(html).ToWordDocument(new HtmlToWordOptions());
+            var run = doc.Paragraphs[0].GetRuns().First();
+            Assert.Equal("0000FF", run.ColorHex);
+            string roundTrip = doc.ToHtml();
+            Assert.Contains(">Test</", roundTrip, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+}

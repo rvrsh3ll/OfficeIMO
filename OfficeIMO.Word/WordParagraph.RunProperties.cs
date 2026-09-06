@@ -1,27 +1,29 @@
-using System;
 using DocumentFormat.OpenXml.Wordprocessing;
-using DocumentFormat.OpenXml;
 
 namespace OfficeIMO.Word {
+    /// <summary>
+    /// Manages run property settings.
+    /// </summary>
     public partial class WordParagraph {
+        private static bool IsOnOffPropertyEnabled(OnOffType? property) {
+            return property != null && (property.Val == null || property.Val.Value);
+        }
 
+        /// <summary>
+        /// Gets or sets a value indicating whether the run is bold.
+        /// </summary>
         public bool Bold {
             get {
-                var runProperties = IsHyperLink ? this.Hyperlink._runProperties : _runProperties;
-                if (runProperties != null && runProperties.Bold != null) {
-                    return true;
-                } else {
-                    return false;
-                }
+                var runProperties = IsHyperLink ? this.Hyperlink?._runProperties : _runProperties;
+                return IsOnOffPropertyEnabled(runProperties?.Bold);
             }
             set {
                 RunProperties runProperties;
                 if (IsHyperLink) {
-                    VerifyRunProperties(this.Hyperlink._hyperlink, this.Hyperlink._run, this.Hyperlink._runProperties);
-                    runProperties = this.Hyperlink._runProperties;
+                    var hyperlink = this.Hyperlink!;
+                    runProperties = VerifyRunProperties(hyperlink._hyperlink!, hyperlink._run!, hyperlink._runProperties);
                 } else {
-                    VerifyRunProperties();
-                    runProperties = _runProperties;
+                    runProperties = VerifyRunProperties();
                 }
                 if (value == true) {
                     runProperties.Bold = new Bold();
@@ -38,23 +40,21 @@ namespace OfficeIMO.Word {
             }
         }
 
+        /// <summary>
+        /// Gets or sets a value indicating whether the run is italic.
+        /// </summary>
         public bool Italic {
             get {
-                var runProperties = IsHyperLink ? this.Hyperlink._runProperties : _runProperties;
-                if (runProperties != null && runProperties.Italic != null) {
-                    return true;
-                } else {
-                    return false;
-                }
+                var runProperties = IsHyperLink ? this.Hyperlink?._runProperties : _runProperties;
+                return IsOnOffPropertyEnabled(runProperties?.Italic);
             }
             set {
                 RunProperties runProperties;
                 if (IsHyperLink) {
-                    VerifyRunProperties(this.Hyperlink._hyperlink, this.Hyperlink._run, this.Hyperlink._runProperties);
-                    runProperties = this.Hyperlink._runProperties;
+                    var hyperlink = this.Hyperlink!;
+                    runProperties = VerifyRunProperties(hyperlink._hyperlink!, hyperlink._run!, hyperlink._runProperties);
                 } else {
-                    VerifyRunProperties();
-                    runProperties = _runProperties;
+                    runProperties = VerifyRunProperties();
                 }
                 if (value != true) {
                     runProperties.Italic = null;
@@ -64,53 +64,52 @@ namespace OfficeIMO.Word {
             }
         }
 
-        public UnderlineValues? Underline {
+        /// <summary>
+        /// Gets or sets the underline style for the run.
+        /// </summary>
+        public WordUnderlineStyle? Underline {
             get {
-                var runProperties = IsHyperLink ? this.Hyperlink._runProperties : _runProperties;
+                var runProperties = IsHyperLink ? this.Hyperlink?._runProperties : _runProperties;
                 if (runProperties != null && runProperties.Underline != null) {
-                    return runProperties.Underline.Val;
-                } else {
-                    return null;
+                    return runProperties.Underline.Val?.Value.ToOfficeEnum();
                 }
+                return null;
             }
             set {
                 RunProperties runProperties;
                 if (IsHyperLink) {
-                    VerifyRunProperties(this.Hyperlink._hyperlink, this.Hyperlink._run, this.Hyperlink._runProperties);
-                    runProperties = this.Hyperlink._runProperties;
+                    var hyperlink = this.Hyperlink!;
+                    runProperties = VerifyRunProperties(hyperlink._hyperlink!, hyperlink._run!, hyperlink._runProperties);
                 } else {
-                    VerifyRunProperties();
-                    runProperties = _runProperties;
+                    runProperties = VerifyRunProperties();
                 }
                 if (value != null) {
                     if (runProperties.Underline == null) {
                         runProperties.Underline = new Underline();
                     }
 
-                    runProperties.Underline.Val = value;
+                    runProperties.Underline.Val = value.Value.ToOpenXml();
                 } else {
                     if (runProperties.Underline != null) runProperties.Underline.Remove();
                 }
             }
         }
 
+        /// <summary>
+        /// Gets or sets a value indicating whether spelling and grammar checks are disabled.
+        /// </summary>
         public bool DoNotCheckSpellingOrGrammar {
             get {
-                var runProperties = IsHyperLink ? this.Hyperlink._runProperties : _runProperties;
-                if (runProperties != null && runProperties.NoProof != null) {
-                    return true;
-                } else {
-                    return false;
-                }
+                var runProperties = IsHyperLink ? this.Hyperlink?._runProperties : _runProperties;
+                return IsOnOffPropertyEnabled(runProperties?.NoProof);
             }
             set {
                 RunProperties runProperties;
                 if (IsHyperLink) {
-                    VerifyRunProperties(this.Hyperlink._hyperlink, this.Hyperlink._run, this.Hyperlink._runProperties);
-                    runProperties = this.Hyperlink._runProperties;
+                    var hyperlink = this.Hyperlink!;
+                    runProperties = VerifyRunProperties(hyperlink._hyperlink!, hyperlink._run!, hyperlink._runProperties);
                 } else {
-                    VerifyRunProperties();
-                    runProperties = _runProperties;
+                    runProperties = VerifyRunProperties();
                 }
                 if (value != true) {
                     if (runProperties.NoProof != null) runProperties.NoProof.Remove();
@@ -120,23 +119,24 @@ namespace OfficeIMO.Word {
             }
         }
 
+        /// <summary>
+        /// Gets or sets the character spacing value in twentieths of a point.
+        /// </summary>
         public int? Spacing {
             get {
-                var runProperties = IsHyperLink ? this.Hyperlink._runProperties : _runProperties;
+                var runProperties = IsHyperLink ? this.Hyperlink?._runProperties : _runProperties;
                 if (runProperties != null && runProperties.Spacing != null) {
-                    return runProperties.Spacing.Val;
-                } else {
-                    return null;
+                    return runProperties.Spacing.Val?.Value;
                 }
+                return null;
             }
             set {
                 RunProperties runProperties;
                 if (IsHyperLink) {
-                    VerifyRunProperties(this.Hyperlink._hyperlink, this.Hyperlink._run, this.Hyperlink._runProperties);
-                    runProperties = this.Hyperlink._runProperties;
+                    var hyperlink = this.Hyperlink!;
+                    runProperties = VerifyRunProperties(hyperlink._hyperlink!, hyperlink._run!, hyperlink._runProperties);
                 } else {
-                    VerifyRunProperties();
-                    runProperties = _runProperties;
+                    runProperties = VerifyRunProperties();
                 }
                 if (value != null) {
                     Spacing spacing = new Spacing();
@@ -148,23 +148,21 @@ namespace OfficeIMO.Word {
             }
         }
 
+        /// <summary>
+        /// Gets or sets a value indicating whether the run is struck through.
+        /// </summary>
         public bool Strike {
             get {
-                var runProperties = IsHyperLink ? this.Hyperlink._runProperties : _runProperties;
-                if (runProperties != null && runProperties.Strike != null) {
-                    return true;
-                } else {
-                    return false;
-                }
+                var runProperties = IsHyperLink ? this.Hyperlink?._runProperties : _runProperties;
+                return IsOnOffPropertyEnabled(runProperties?.Strike);
             }
             set {
                 RunProperties runProperties;
                 if (IsHyperLink) {
-                    VerifyRunProperties(this.Hyperlink._hyperlink, this.Hyperlink._run, this.Hyperlink._runProperties);
-                    runProperties = this.Hyperlink._runProperties;
+                    var hyperlink = this.Hyperlink!;
+                    runProperties = VerifyRunProperties(hyperlink._hyperlink!, hyperlink._run!, hyperlink._runProperties);
                 } else {
-                    VerifyRunProperties();
-                    runProperties = _runProperties;
+                    runProperties = VerifyRunProperties();
                 }
                 if (value != true) {
                     if (runProperties.Strike != null) runProperties.Strike.Remove();
@@ -174,23 +172,21 @@ namespace OfficeIMO.Word {
             }
         }
 
+        /// <summary>
+        /// Gets or sets a value indicating whether the run has a double strikethrough.
+        /// </summary>
         public bool DoubleStrike {
             get {
-                var runProperties = IsHyperLink ? this.Hyperlink._runProperties : _runProperties;
-                if (runProperties != null && runProperties.DoubleStrike != null) {
-                    return true;
-                } else {
-                    return false;
-                }
+                var runProperties = IsHyperLink ? this.Hyperlink?._runProperties : _runProperties;
+                return IsOnOffPropertyEnabled(runProperties?.DoubleStrike);
             }
             set {
                 RunProperties runProperties;
                 if (IsHyperLink) {
-                    VerifyRunProperties(this.Hyperlink._hyperlink, this.Hyperlink._run, this.Hyperlink._runProperties);
-                    runProperties = this.Hyperlink._runProperties;
+                    var hyperlink = this.Hyperlink!;
+                    runProperties = VerifyRunProperties(hyperlink._hyperlink!, hyperlink._run!, hyperlink._runProperties);
                 } else {
-                    VerifyRunProperties();
-                    runProperties = _runProperties;
+                    runProperties = VerifyRunProperties();
                 }
                 if (value != true) {
                     if (runProperties.DoubleStrike != null) runProperties.DoubleStrike.Remove();
@@ -199,71 +195,165 @@ namespace OfficeIMO.Word {
                 }
             }
         }
-        public int? FontSize {
+
+        /// <summary>
+        /// Gets or sets a value indicating whether the run text is outlined.
+        /// </summary>
+        public bool Outline {
             get {
-                var runProperties = IsHyperLink ? this.Hyperlink._runProperties : _runProperties;
-                if (runProperties != null && runProperties.FontSize != null) {
-                    var fontSizeInHalfPoint = int.Parse(runProperties.FontSize.Val);
-                    return fontSizeInHalfPoint / 2;
-                } else {
-                    return null;
-                }
+                var runProperties = IsHyperLink ? this.Hyperlink?._runProperties : _runProperties;
+                return IsOnOffPropertyEnabled(runProperties?.Outline);
             }
             set {
                 RunProperties runProperties;
                 if (IsHyperLink) {
-                    VerifyRunProperties(this.Hyperlink._hyperlink, this.Hyperlink._run, this.Hyperlink._runProperties);
-                    runProperties = this.Hyperlink._runProperties;
+                    var hyperlink = this.Hyperlink!;
+                    runProperties = VerifyRunProperties(hyperlink._hyperlink!, hyperlink._run!, hyperlink._runProperties);
                 } else {
-                    VerifyRunProperties();
-                    runProperties = _runProperties;
+                    runProperties = VerifyRunProperties();
+                }
+                if (value != true) {
+                    if (runProperties.Outline != null) runProperties.Outline.Remove();
+                } else {
+                    runProperties.Outline = new Outline();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether the run has a shadow effect.
+        /// </summary>
+        public bool Shadow {
+            get {
+                var runProperties = IsHyperLink ? this.Hyperlink?._runProperties : _runProperties;
+                return IsOnOffPropertyEnabled(runProperties?.Shadow);
+            }
+            set {
+                RunProperties runProperties;
+                if (IsHyperLink) {
+                    var hyperlink = this.Hyperlink!;
+                    runProperties = VerifyRunProperties(hyperlink._hyperlink!, hyperlink._run!, hyperlink._runProperties);
+                } else {
+                    runProperties = VerifyRunProperties();
+                }
+                if (value != true) {
+                    if (runProperties.Shadow != null) runProperties.Shadow.Remove();
+                } else {
+                    runProperties.Shadow = new Shadow();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether the run is embossed.
+        /// </summary>
+        public bool Emboss {
+            get {
+                var runProperties = IsHyperLink ? this.Hyperlink?._runProperties : _runProperties;
+                return IsOnOffPropertyEnabled(runProperties?.Emboss);
+            }
+            set {
+                RunProperties runProperties;
+                if (IsHyperLink) {
+                    var hyperlink = this.Hyperlink!;
+                    runProperties = VerifyRunProperties(hyperlink._hyperlink!, hyperlink._run!, hyperlink._runProperties);
+                } else {
+                    runProperties = VerifyRunProperties();
+                }
+                if (value != true) {
+                    if (runProperties.Emboss != null) runProperties.Emboss.Remove();
+                } else {
+                    runProperties.Emboss = new Emboss();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets the font size in points.
+        /// </summary>
+        public int? FontSize {
+            get {
+                double? points = FontSizePoints;
+                return points.HasValue ? checked((int)points.Value) : null;
+            }
+            set => FontSizePoints = value;
+        }
+
+        /// <summary>
+        /// Gets or sets the font size in points with Word's native half-point precision.
+        /// Values finer than half a point are rounded away from zero to the nearest representable size.
+        /// </summary>
+        public double? FontSizePoints {
+            get {
+                var runProperties = IsHyperLink ? this.Hyperlink?._runProperties : _runProperties;
+                string? value = runProperties?.FontSize?.Val?.Value;
+                return int.TryParse(value, System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out int halfPoints)
+                    ? halfPoints / 2D
+                    : (double?)null;
+            }
+            set {
+                RunProperties runProperties;
+                if (IsHyperLink) {
+                    var hyperlink = this.Hyperlink!;
+                    runProperties = VerifyRunProperties(hyperlink._hyperlink!, hyperlink._run!, hyperlink._runProperties);
+                } else {
+                    runProperties = VerifyRunProperties();
                 }
                 if (value != null) {
-                    FontSize fontSize = new FontSize();
-                    fontSize.Val = (value * 2).ToString();
-                    runProperties.FontSize = fontSize;
+                    if (double.IsNaN(value.Value) || double.IsInfinity(value.Value) ||
+                        value.Value < 0D || value.Value > int.MaxValue / 2D) {
+                        throw new ArgumentOutOfRangeException(nameof(value));
+                    }
+                    int halfPoints = checked((int)Math.Round(value.Value * 2D, MidpointRounding.AwayFromZero));
+                    runProperties.FontSize = new FontSize {
+                        Val = halfPoints.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    };
                 } else {
                     if (runProperties.FontSize != null) runProperties.FontSize.Remove();
                 }
             }
         }
 
-        public SixLabors.ImageSharp.Color? Color {
+        /// <summary>
+        /// Gets or sets the text color using <see cref="OfficeIMO.Drawing.OfficeColor"/>.
+        /// </summary>
+        public OfficeIMO.Drawing.OfficeColor? Color {
             get {
                 if (ColorHex == "") {
                     return null;
                 }
-                return SixLabors.ImageSharp.Color.Parse("#" + ColorHex);
-
+                return Helpers.ParseColor(ColorHex);
             }
             set {
                 if (value != null) {
-                    this.ColorHex = value.Value.ToHexColor();
+                    this.ColorHex = value.Value.ToRgbHex();
                 }
             }
         }
 
+        /// <summary>
+        /// Gets or sets the text color as a hexadecimal string.
+        /// </summary>
         public string ColorHex {
             get {
-                var runProperties = IsHyperLink ? this.Hyperlink._runProperties : _runProperties;
+                var runProperties = IsHyperLink ? this.Hyperlink?._runProperties : _runProperties;
                 if (runProperties != null && runProperties.Color != null) {
-                    return runProperties.Color.Val;
-                } else {
-                    return "";
+                    return runProperties.Color.Val?.Value ?? "";
                 }
+                return "";
             }
             set {
                 RunProperties runProperties;
                 if (IsHyperLink) {
-                    VerifyRunProperties(this.Hyperlink._hyperlink, this.Hyperlink._run, this.Hyperlink._runProperties);
-                    runProperties = this.Hyperlink._runProperties;
+                    var hyperlink = this.Hyperlink!;
+                    runProperties = VerifyRunProperties(hyperlink._hyperlink!, hyperlink._run!, hyperlink._runProperties);
                 } else {
-                    VerifyRunProperties();
-                    runProperties = _runProperties;
+                    runProperties = VerifyRunProperties();
                 }
                 if (value != "") {
                     var color = new DocumentFormat.OpenXml.Wordprocessing.Color();
-                    color.Val = value.Replace("#", "");
+                    color.Val = Helpers.NormalizeOpenXmlColor(value);
                     runProperties.Color = color;
                 } else {
                     if (runProperties.Color != null) runProperties.Color.Remove();
@@ -271,28 +361,29 @@ namespace OfficeIMO.Word {
             }
         }
 
-        public ThemeColorValues? ThemeColor {
+        /// <summary>
+        /// Gets or sets the theme color applied to the run.
+        /// </summary>
+        public WordThemeColor? ThemeColor {
             get {
-                var runProperties = IsHyperLink ? this.Hyperlink._runProperties : _runProperties;
+                var runProperties = IsHyperLink ? this.Hyperlink?._runProperties : _runProperties;
                 if (runProperties != null && runProperties.Color != null && runProperties.Color.ThemeColor != null) {
-                    return runProperties.Color.ThemeColor.Value;
-                } else {
-                    return null;
+                    return runProperties.Color.ThemeColor?.Value.ToOfficeEnum();
                 }
+                return null;
             }
             set {
                 RunProperties runProperties;
                 if (IsHyperLink) {
-                    VerifyRunProperties(this.Hyperlink._hyperlink, this.Hyperlink._run, this.Hyperlink._runProperties);
-                    runProperties = this.Hyperlink._runProperties;
+                    var hyperlink = this.Hyperlink!;
+                    runProperties = VerifyRunProperties(hyperlink._hyperlink!, hyperlink._run!, hyperlink._runProperties);
                 } else {
-                    VerifyRunProperties();
-                    runProperties = _runProperties;
+                    runProperties = VerifyRunProperties();
                 }
                 if (value != null) {
                     var color = new DocumentFormat.OpenXml.Wordprocessing.Color {
                         ThemeColor = new EnumValue<ThemeColorValues> {
-                            Value = value.Value
+                            Value = value.Value.ToOpenXml()
                         }
                     };
                     runProperties.Color = color;
@@ -302,58 +393,67 @@ namespace OfficeIMO.Word {
             }
         }
 
-        public HighlightColorValues? Highlight {
+        /// <summary>
+        /// Gets or sets the highlight color applied to the run.
+        /// </summary>
+        public WordHighlightColor? Highlight {
             get {
-                var runProperties = IsHyperLink ? this.Hyperlink._runProperties : _runProperties;
+                var runProperties = IsHyperLink ? this.Hyperlink?._runProperties : _runProperties;
                 if (runProperties != null && runProperties.Highlight != null) {
-                    return runProperties.Highlight.Val;
-                } else {
-                    return null;
+                    return runProperties.Highlight.Val?.Value.ToOfficeEnum();
                 }
+                return null;
             }
             set {
+                RunProperties? existingRunProperties = IsHyperLink ? this.Hyperlink?._runProperties : _runProperties;
+                if (!value.HasValue) {
+                    existingRunProperties?.Highlight?.Remove();
+                    return;
+                }
+
                 RunProperties runProperties;
                 if (IsHyperLink) {
-                    VerifyRunProperties(this.Hyperlink._hyperlink, this.Hyperlink._run, this.Hyperlink._runProperties);
-                    runProperties = this.Hyperlink._runProperties;
+                    var hyperlink = this.Hyperlink!;
+                    runProperties = VerifyRunProperties(hyperlink._hyperlink!, hyperlink._run!, hyperlink._runProperties);
                 } else {
-                    VerifyRunProperties();
-                    runProperties = _runProperties;
+                    runProperties = VerifyRunProperties();
                 }
                 var highlight = new Highlight {
-                    Val = value
+                    Val = value.Value.ToOpenXml()
                 };
                 runProperties.Highlight = highlight;
             }
         }
 
-        public CapsStyle CapsStyle {
+        /// <summary>
+        /// Gets or sets the capitalization style for the run.
+        /// </summary>
+        public WordCapsStyle CapsStyle {
             get {
-                var runProperties = IsHyperLink ? this.Hyperlink._runProperties : _runProperties;
-                if (runProperties != null && runProperties.Caps != null) {
-                    return CapsStyle.Caps;
-                } else if (runProperties != null && runProperties.SmallCaps != null) {
-                    return CapsStyle.SmallCaps;
+                var runProperties = IsHyperLink ? this.Hyperlink?._runProperties : _runProperties;
+                if (IsOnOffPropertyEnabled(runProperties?.Caps)) {
+                    return WordCapsStyle.Caps;
+                } else if (IsOnOffPropertyEnabled(runProperties?.SmallCaps)) {
+                    return WordCapsStyle.SmallCaps;
                 } else {
-                    return CapsStyle.None;
+                    return WordCapsStyle.None;
                 }
             }
             set {
                 RunProperties runProperties;
                 if (IsHyperLink) {
-                    VerifyRunProperties(this.Hyperlink._hyperlink, this.Hyperlink._run, this.Hyperlink._runProperties);
-                    runProperties = this.Hyperlink._runProperties;
+                    var hyperlink = this.Hyperlink!;
+                    runProperties = VerifyRunProperties(hyperlink._hyperlink!, hyperlink._run!, hyperlink._runProperties);
                 } else {
-                    VerifyRunProperties();
-                    runProperties = _runProperties;
+                    runProperties = VerifyRunProperties();
                 }
-                if (value == CapsStyle.None) {
+                if (value == WordCapsStyle.None) {
                     runProperties.Caps = null;
                     runProperties.SmallCaps = null;
-                } else if (value == CapsStyle.Caps) {
+                } else if (value == WordCapsStyle.Caps) {
                     runProperties.Caps = new Caps();
                     runProperties.SmallCaps = null;
-                } else if (value == CapsStyle.SmallCaps) {
+                } else if (value == WordCapsStyle.SmallCaps) {
                     runProperties.SmallCaps = new SmallCaps();
                     runProperties.Caps = null;
                 }
@@ -368,23 +468,21 @@ namespace OfficeIMO.Word {
         /// please use FontFamilyHighAnsi, FontFamilyEastAsia or FontFamilyComplexScript
         /// in proper order (to overwrite given FontFamily)
         /// </summary>
-        public string FontFamily {
+        public string? FontFamily {
             get {
-                var runProperties = IsHyperLink ? this.Hyperlink._runProperties : _runProperties;
+                var runProperties = IsHyperLink ? this.Hyperlink?._runProperties : _runProperties;
                 if (runProperties != null && runProperties.RunFonts != null) {
                     return runProperties.RunFonts.Ascii;
-                } else {
-                    return null;
                 }
+                return null;
             }
             set {
                 RunProperties runProperties;
                 if (IsHyperLink) {
-                    VerifyRunProperties(this.Hyperlink._hyperlink, this.Hyperlink._run, this.Hyperlink._runProperties);
-                    runProperties = this.Hyperlink._runProperties;
+                    var hyperlink = this.Hyperlink!;
+                    runProperties = VerifyRunProperties(hyperlink._hyperlink!, hyperlink._run!, hyperlink._runProperties);
                 } else {
-                    VerifyRunProperties();
-                    runProperties = _runProperties;
+                    runProperties = VerifyRunProperties();
                 }
 
                 if (runProperties.RunFonts == null) {
@@ -404,23 +502,24 @@ namespace OfficeIMO.Word {
             }
         }
 
-        public string FontFamilyHighAnsi {
+        /// <summary>
+        /// Gets or sets the HighAnsi font family.
+        /// </summary>
+        public string? FontFamilyHighAnsi {
             get {
-                var runProperties = IsHyperLink ? this.Hyperlink._runProperties : _runProperties;
+                var runProperties = IsHyperLink ? this.Hyperlink?._runProperties : _runProperties;
                 if (runProperties != null && runProperties.RunFonts != null) {
                     return runProperties.RunFonts.HighAnsi;
-                } else {
-                    return null;
                 }
+                return null;
             }
             set {
                 RunProperties runProperties;
                 if (IsHyperLink) {
-                    VerifyRunProperties(this.Hyperlink._hyperlink, this.Hyperlink._run, this.Hyperlink._runProperties);
-                    runProperties = this.Hyperlink._runProperties;
+                    var hyperlink = this.Hyperlink!;
+                    runProperties = VerifyRunProperties(hyperlink._hyperlink!, hyperlink._run!, hyperlink._runProperties);
                 } else {
-                    VerifyRunProperties();
-                    runProperties = _runProperties;
+                    runProperties = VerifyRunProperties();
                 }
                 if (runProperties.RunFonts == null) {
                     runProperties.RunFonts = new RunFonts { };
@@ -434,23 +533,24 @@ namespace OfficeIMO.Word {
             }
         }
 
-        public string FontFamilyEastAsia {
+        /// <summary>
+        /// Gets or sets the East Asia font family.
+        /// </summary>
+        public string? FontFamilyEastAsia {
             get {
-                var runProperties = IsHyperLink ? this.Hyperlink._runProperties : _runProperties;
+                var runProperties = IsHyperLink ? this.Hyperlink?._runProperties : _runProperties;
                 if (runProperties != null && runProperties.RunFonts != null) {
                     return runProperties.RunFonts.EastAsia;
-                } else {
-                    return null;
                 }
+                return null;
             }
             set {
                 RunProperties runProperties;
                 if (IsHyperLink) {
-                    VerifyRunProperties(this.Hyperlink._hyperlink, this.Hyperlink._run, this.Hyperlink._runProperties);
-                    runProperties = this.Hyperlink._runProperties;
+                    var hyperlink = this.Hyperlink!;
+                    runProperties = VerifyRunProperties(hyperlink._hyperlink!, hyperlink._run!, hyperlink._runProperties);
                 } else {
-                    VerifyRunProperties();
-                    runProperties = _runProperties;
+                    runProperties = VerifyRunProperties();
                 }
                 if (runProperties.RunFonts == null) {
                     runProperties.RunFonts = new RunFonts { };
@@ -464,23 +564,24 @@ namespace OfficeIMO.Word {
             }
         }
 
-        public string FontFamilyComplexScript {
+        /// <summary>
+        /// Gets or sets the complex script font family.
+        /// </summary>
+        public string? FontFamilyComplexScript {
             get {
-                var runProperties = IsHyperLink ? this.Hyperlink._runProperties : _runProperties;
+                var runProperties = IsHyperLink ? this.Hyperlink?._runProperties : _runProperties;
                 if (runProperties != null && runProperties.RunFonts != null) {
                     return runProperties.RunFonts.ComplexScript;
-                } else {
-                    return null;
                 }
+                return null;
             }
             set {
                 RunProperties runProperties;
                 if (IsHyperLink) {
-                    VerifyRunProperties(this.Hyperlink._hyperlink, this.Hyperlink._run, this.Hyperlink._runProperties);
-                    runProperties = this.Hyperlink._runProperties;
+                    var hyperlink = this.Hyperlink!;
+                    runProperties = VerifyRunProperties(hyperlink._hyperlink!, hyperlink._run!, hyperlink._runProperties);
                 } else {
-                    VerifyRunProperties();
-                    runProperties = _runProperties;
+                    runProperties = VerifyRunProperties();
                 }
                 if (runProperties.RunFonts == null) {
                     runProperties.RunFonts = new RunFonts { };
@@ -490,6 +591,94 @@ namespace OfficeIMO.Word {
                     runProperties.RunFonts.ComplexScript = null;
                 } else {
                     runProperties.RunFonts.ComplexScript = value;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets the language applied to the run.
+        /// </summary>
+        public string? Language {
+            get {
+                var runProperties = IsHyperLink ? this.Hyperlink?._runProperties : _runProperties;
+                return runProperties?.Languages?.Val;
+            }
+            set {
+                RunProperties runProperties;
+                if (IsHyperLink) {
+                    var hyperlink = this.Hyperlink!;
+                    runProperties = VerifyRunProperties(hyperlink._hyperlink!, hyperlink._run!, hyperlink._runProperties);
+                } else {
+                    runProperties = VerifyRunProperties();
+                }
+
+                if (string.IsNullOrWhiteSpace(value)) {
+                    runProperties.Languages?.Remove();
+                } else {
+                    var language = value!.Trim();
+                    var languages = runProperties.Languages ?? new Languages();
+                    runProperties.Languages = languages;
+                    languages.Val = language;
+                    languages.EastAsia = language;
+                    languages.Bidi = language;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets the character style applied to the run.
+        /// </summary>
+        public WordCharacterStyles? CharacterStyle {
+            get {
+                var runProperties = IsHyperLink ? this.Hyperlink?._runProperties : _runProperties;
+                if (runProperties != null && runProperties.RunStyle != null) {
+                    var styleId = runProperties.RunStyle.Val;
+                    if (!string.IsNullOrEmpty(styleId)) {
+                        return WordCharacterStyle.GetStyle(styleId!);
+                    }
+                }
+                return null;
+            }
+            set {
+                RunProperties runProperties;
+                if (IsHyperLink) {
+                    var hyperlink = this.Hyperlink!;
+                    runProperties = VerifyRunProperties(hyperlink._hyperlink!, hyperlink._run!, hyperlink._runProperties);
+                } else {
+                    runProperties = VerifyRunProperties();
+                }
+
+                if (value == null) {
+                    if (runProperties.RunStyle != null) runProperties.RunStyle.Remove();
+                } else {
+                    if (runProperties.RunStyle == null) runProperties.RunStyle = new RunStyle();
+                    runProperties.RunStyle.Val = WordCharacterStyle.ToStringStyle(value.Value);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets the style identifier applied to the run.
+        /// </summary>
+        public string? CharacterStyleId {
+            get {
+                var runProperties = IsHyperLink ? this.Hyperlink?._runProperties : _runProperties;
+                return runProperties?.RunStyle?.Val;
+            }
+            set {
+                RunProperties runProperties;
+                if (IsHyperLink) {
+                    var hyperlink = this.Hyperlink!;
+                    runProperties = VerifyRunProperties(hyperlink._hyperlink!, hyperlink._run!, hyperlink._runProperties);
+                } else {
+                    runProperties = VerifyRunProperties();
+                }
+
+                if (string.IsNullOrEmpty(value)) {
+                    if (runProperties.RunStyle != null) runProperties.RunStyle.Remove();
+                } else {
+                    if (runProperties.RunStyle == null) runProperties.RunStyle = new RunStyle();
+                    runProperties.RunStyle.Val = value;
                 }
             }
         }

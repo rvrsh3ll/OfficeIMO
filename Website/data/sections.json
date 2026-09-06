@@ -1,0 +1,31 @@
+{
+  "features": {
+    "label": "Why OfficeIMO?",
+    "title": "Focused Tools for Document Workflows"
+  },
+  "formats": {
+    "label": "Supported Formats",
+    "title": "Many Formats, Explicit Boundaries"
+  },
+  "showcase": {
+    "label": "Showcase",
+    "title": "What You Can Build"
+  },
+  "code_examples": {
+    "label": "Code Examples",
+    "title": "Multiple Ways to Build Documents"
+  },
+  "comparison": {
+    "label": "Comparison",
+    "title": "How OfficeIMO Compares"
+  },
+  "how_it_works": {
+    "label": "Choose a workflow",
+    "title": "Start with what you need to do"
+  },
+  "products": {
+    "label": "Product family",
+    "title": "Focused packages, one document platform",
+    "description": "Install only the document engines, converters, readers, or automation surfaces your application needs."
+  }
+}

@@ -1,12 +1,12 @@
 using System;
-using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using DocumentFormat.OpenXml;
-
 using DocumentFormat.OpenXml.Wordprocessing;
 
 namespace OfficeIMO.Word {
+    /// <summary>
+    /// Represents a table in a Word document and provides methods for
+    /// manipulating its content and formatting.
+    /// </summary>
     public partial class WordTable {
         /// <summary>
         /// Add comment to a Table
@@ -15,20 +15,45 @@ namespace OfficeIMO.Word {
         /// <param name="initials">Provide initials of an author</param>
         /// <param name="comment">Provide comment to insert</param>
         public void AddComment(string author, string initials, string comment) {
+            TableCell[] cells = _table.Elements<TableRow>()
+                .SelectMany(static row => row.Elements<TableCell>())
+                .ToArray();
+            TableCell? firstCell = cells.FirstOrDefault();
+            TableCell? lastCell = cells.LastOrDefault();
+            if (firstCell == null || lastCell == null) {
+                return;
+            }
+
+            Paragraph firstParagraph = firstCell.Elements<Paragraph>().FirstOrDefault()
+                ?? firstCell.AppendChild(new Paragraph());
+            Paragraph lastParagraph = lastCell.Elements<Paragraph>().LastOrDefault()
+                ?? lastCell.AppendChild(new Paragraph());
             WordComment wordComment = WordComment.Create(_document, author, initials, comment);
             InsertComment(wordComment,
-                this.FirstRow.FirstCell.Paragraphs[0]._paragraph,
-                this.LastRow.LastCell.Paragraphs[0]._paragraph,
-                this.LastRow.LastCell.Paragraphs[0]._paragraph);
+                firstParagraph,
+                lastParagraph,
+                lastParagraph);
         }
 
         internal void InsertComment(WordComment wordComment, OpenXmlElement rangeStart, OpenXmlElement rangeEnd, OpenXmlElement reference) {
             // Specify the text range for the Comment.
             // Insert the new CommentRangeStart before the first run of paragraph.
-            rangeStart.InsertBefore(new CommentRangeStart() { Id = wordComment.Id }, rangeStart.GetFirstChild<OpenXmlElement>());
+            var commentStart = new CommentRangeStart { Id = wordComment.Id };
+            OpenXmlElement? firstChild = rangeStart.GetFirstChild<OpenXmlElement>();
+            if (firstChild == null) {
+                rangeStart.Append(commentStart);
+            } else {
+                rangeStart.InsertBefore(commentStart, firstChild);
+            }
 
             // Insert the new CommentRangeEnd after last run of paragraph.
-            var cmtEnd = rangeEnd.InsertAfter(new CommentRangeEnd() { Id = wordComment.Id }, rangeEnd.Elements().Last());
+            var cmtEnd = new CommentRangeEnd { Id = wordComment.Id };
+            OpenXmlElement? lastChild = rangeEnd.Elements().LastOrDefault();
+            if (lastChild == null) {
+                rangeEnd.Append(cmtEnd);
+            } else {
+                rangeEnd.InsertAfter(cmtEnd, lastChild);
+            }
 
             // Compose a run with CommentReference and insert it.
             reference.InsertAfter(new Run(new CommentReference() { Id = wordComment.Id }), cmtEnd);
@@ -46,20 +71,20 @@ namespace OfficeIMO.Word {
             CheckTableProperties();
 
             // Determine the target total width and type to distribute
-            TableWidthUnitValues targetType = this.WidthType ?? TableWidthUnitValues.Pct; // Default to Pct if not set
+            WordTableWidthUnit targetType = this.WidthType ?? WordTableWidthUnit.Pct; // Default to Pct if not set
             int targetTotalWidth;
 
-            if (targetType == TableWidthUnitValues.Pct) {
+            if (targetType == WordTableWidthUnit.Pct) {
                 targetTotalWidth = this.Width ?? 5000; // Default to 100% (5000) if width not set
-            } else if (targetType == TableWidthUnitValues.Dxa) {
+            } else if (targetType == WordTableWidthUnit.Dxa) {
                 targetTotalWidth = this.Width ?? 0;
                 // If Dxa width is 0 or not set, it's ambiguous. Default to distributing 100% Pct.
                 if (targetTotalWidth <= 0) {
-                    targetType = TableWidthUnitValues.Pct;
+                    targetType = WordTableWidthUnit.Pct;
                     targetTotalWidth = 5000;
                 }
             } else { // Auto or unspecified - default to distributing 100% Pct
-                targetType = TableWidthUnitValues.Pct;
+                targetType = WordTableWidthUnit.Pct;
                 targetTotalWidth = 5000;
             }
 
@@ -95,14 +120,14 @@ namespace OfficeIMO.Word {
                         if (!tcPr.Elements<TableCellWidth>().Any()) tcPr.Append(tcW);
 
                         // Set the calculated type and width for the cell
-                        tcW.Type = targetType;
+                        tcW.Type = targetType.ToOpenXml();
                         tcW.Width = newColumnWidths[j].ToString();
                     }
                 }
             }
 
             // Update the TableGrid for consistency
-            TableGrid tableGrid = _table.GetFirstChild<TableGrid>();
+            TableGrid? tableGrid = _table.GetFirstChild<TableGrid>();
             if (tableGrid != null) {
                 tableGrid.RemoveAllChildren<GridColumn>();
                 foreach (int width in newColumnWidths) {
@@ -111,10 +136,168 @@ namespace OfficeIMO.Word {
             }
         }
 
+        /// <summary>
+        /// Normalizes this table for online viewers by updating tblGrid only.
+        /// Does not change authoring semantics (tblW, width type, positioning).
+        /// Skips pure-Auto tables (keeps Word's native behavior):
+        ///   - no table preferred width (or Auto),
+        ///   - no column width type set,
+        ///   - and all cells carry only the library's default tcW (DXA 2400).
+        /// </summary>
+        public void NormalizeForOnline() {
+            try {
+                bool explicitTableWidth = (this.WidthType == WordTableWidthUnit.Dxa && (this.Width ?? 0) > 0)
+                                       || (this.WidthType == WordTableWidthUnit.Pct && (this.Width ?? 0) > 0);
+                bool columnWidthTypeSet = this.ColumnWidthType != null;
+
+                // Treat the library's constructor default (DXA 2400) as non-explicit.
+                bool anyExplicitCellWidths = false;
+                foreach (var r in Rows) {
+                    foreach (var c in r.Cells) {
+                        if (c.Width.HasValue) {
+                            if (c.WidthType != WordTableWidthUnit.Dxa || c.Width!.Value != 2400) {
+                                anyExplicitCellWidths = true; break;
+                            }
+                        }
+                    }
+                    if (anyExplicitCellWidths) break;
+                }
+
+                bool pureAuto = !explicitTableWidth && !columnWidthTypeSet && !anyExplicitCellWidths;
+                if (pureAuto) {
+                    // Still convert merges so Online viewers display merged headers properly
+                    ConvertHorizontalMergesToGridSpan();
+                    return;
+                }
+
+                // Only update tblGrid using current widths/types
+                ConvertHorizontalMergesToGridSpan();
+                RefreshGrid();
+
+                // Normalize host cell vertical margins to 0 for consistency (Word Online tends
+                // to honor default bottom margin more aggressively than desktop).
+                if (IsNestedTable) EnsureHostCellVerticalMargins(72);
+
+                // Desktop Word may suppress top border when style-only; make sure
+                // the first row has a top border if absent (nested tables only).
+                if (IsNestedTable) EnsureFirstRowTopBorder();
+            } catch { }
+        }
+
+        /// <summary>
+        /// Ensures the parent cell of a nested table has at least the provided top/bottom
+        /// padding (cell margins) so the inner table does not touch the borders vertically.
+        /// No effect for non-nested tables. Applied conservatively (only when current value is null or 0).
+        /// </summary>
+        private void EnsureFirstRowTopBorder() {
+            if (Rows.Count == 0) return;
+            var first = Rows[0];
+            foreach (var cell in first.Cells) {
+                // Do not overwrite if user already set something
+                if (cell.Borders.TopStyle == null) {
+                    cell.Borders.TopStyle = WordBorderStyle.Single;
+                    cell.Borders.TopSize = 4;
+                    // Let Word/consumers choose the default color; do not emit "auto" as an explicit hex.
+                    cell.Borders.TopColorHex = null;
+                }
+            }
+        }
+
+        private void EnsureHostCellVerticalMargins(int twips) {
+            if (!IsNestedTable) return;
+            if (_table.Parent is not TableCell parentCell) return;
+            parentCell.TableCellProperties ??= new TableCellProperties();
+            var tcPr = parentCell.TableCellProperties!;
+            tcPr.TableCellMargin ??= new TableCellMargin();
+            var mar = tcPr.TableCellMargin!;
+            mar.TopMargin ??= new TopMargin();
+            mar.TopMargin.Width = twips.ToString();
+            mar.TopMargin.Type = TableWidthUnitValues.Dxa;
+            mar.BottomMargin ??= new BottomMargin();
+            mar.BottomMargin.Width = twips.ToString();
+            mar.BottomMargin.Type = TableWidthUnitValues.Dxa;
+        }
+
+        /// <summary>
+        /// Converts w:hMerge (restart/continue) patterns to w:gridSpan and removes
+        /// the continued cells. Many online viewers ignore hMerge but support gridSpan.
+        /// </summary>
+        private void ConvertHorizontalMergesToGridSpan() {
+            try {
+                foreach (var row in Rows) {
+                    // Work on raw OpenXml cells list to allow removals during iteration
+                    var cells = row._tableRow.ChildElements.OfType<TableCell>().ToList();
+                    for (int i = 0; i < cells.Count; i++) {
+                        var tc = cells[i];
+                        var tcPr = tc.TableCellProperties;
+                        if (tcPr?.HorizontalMerge?.Val?.Value == MergedCellValues.Restart) {
+                            // Identify the full run of continued cells so we can both compute
+                            // the span and opportunistically preserve styling information
+                            // (such as shading) that may have been applied to the merged-out cells.
+                            int span = 1;
+                            int groupEndIndex = i;
+                            for (int j = i + 1; j < cells.Count; j++) {
+                                var nextPr = cells[j].TableCellProperties;
+                                if (nextPr?.HorizontalMerge?.Val?.Value == MergedCellValues.Continue) {
+                                    span++;
+                                    groupEndIndex = j;
+                                } else {
+                                    break;
+                                }
+                            }
+
+                            // If there is a cell immediately after the merged run and it does not
+                            // have explicit shading, propagate shading from the last continued cell.
+                            // This preserves column-style shading that would otherwise be lost when
+                            // the continued cells are removed.
+                            if (groupEndIndex > i && groupEndIndex + 1 < cells.Count) {
+                                var lastContinuedCell = cells[groupEndIndex];
+                                var afterCell = cells[groupEndIndex + 1];
+
+                                var srcShading = lastContinuedCell.TableCellProperties?.Shading;
+                                if (srcShading?.Fill != null) {
+                                    afterCell.TableCellProperties ??= new TableCellProperties();
+                                    // Override any existing shading so that column-style
+                                    // colors applied to merged-out cells remain visible
+                                    // on the first non-merged neighbor (e.g. header C).
+                                    afterCell.TableCellProperties.Shading =
+                                        (Shading)srcShading.CloneNode(true);
+                                }
+                            }
+
+                            // Remove continued cells from DOM and local list, starting from the end
+                            for (int removeIndex = groupEndIndex; removeIndex > i; removeIndex--) {
+                                cells[removeIndex].Remove();
+                                cells.RemoveAt(removeIndex);
+                            }
+
+                            // Set gridSpan on the restart cell
+                            if (tc.TableCellProperties == null) tc.TableCellProperties = new TableCellProperties();
+                            var gridSpan = tc.TableCellProperties.GetFirstChild<GridSpan>();
+                            if (gridSpan == null) {
+                                tc.TableCellProperties.AppendChild(new GridSpan() { Val = span });
+                            } else {
+                                gridSpan.Val = span;
+                            }
+                            // Remove hMerge properties from the restart cell for clarity
+                            tc.TableCellProperties.HorizontalMerge?.Remove();
+                            WordTableCell.NormalizeTableCellPropertiesOrder(tc.TableCellProperties);
+                        }
+                    }
+                }
+            } catch { }
+        }
+
+        /// <summary>
+        /// Applies a table style defined in the document.
+        /// </summary>
+        /// <param name="styleId">Identifier of the table style to apply.</param>
+        /// <returns>The current <see cref="WordTable"/> instance.</returns>
         public WordTable SetStyleId(string styleId) {
-            //Todo Check the styleId exist
+            // Todo: Verify that the style exists in the document.
             if (!string.IsNullOrEmpty(styleId)) {
-                if (_tableProperties?.TableStyle == null) {
+                CheckTableProperties();
+                if (_tableProperties!.TableStyle == null) {
                     _tableProperties.TableStyle = new TableStyle() { Val = styleId };
                 } else {
                     _tableProperties.TableStyle.Val = styleId;
@@ -142,64 +325,36 @@ namespace OfficeIMO.Word {
 
             // Clone the row to avoid the "part of a tree" error
             var clonedRow = (TableRow)row._tableRow.CloneNode(true);
+            _document.AssignNewSdtIds(clonedRow);
 
             // Insert the new row after the last row
             var insertedRow = lastRow.InsertAfterSelf(clonedRow);
+            InvalidateRowElements();
 
-            return new WordTableRow(this, insertedRow, _document);
+            return GetOrCreateRow(insertedRow, initializeCells: true);
         }
 
         /// <summary>
-        /// Sets the table layout with proper AutoFit options
+        /// Merges a rectangular range of cells.
         /// </summary>
-        /// <param name="layoutType">Type of layout to apply</param>
-        /// <param name="percentage">Optional percentage for fixed width (0-100)</param>
-        public void SetTableLayout(WordTableLayoutType layoutType, int? percentage = null) {
-            CheckTableProperties();
+        /// <param name="rowIndex">Zero-based starting row index.</param>
+        /// <param name="columnIndex">Zero-based starting column index.</param>
+        /// <param name="rowSpan">Number of rows spanned by the merged region.</param>
+        /// <param name="colSpan">Number of columns spanned by the merged region.</param>
+        /// <param name="copyParagraphs">
+        /// If set to <c>true</c>, paragraphs from merged cells are copied into the first cell.
+        /// </param>
+        public void MergeCells(int rowIndex, int columnIndex, int rowSpan, int colSpan, bool copyParagraphs = false) {
+            if (rowSpan < 1 || colSpan < 1) {
+                return;
+            }
 
-            // Apply the appropriate settings based on the layout type
-            switch (layoutType) {
-                case WordTableLayoutType.FixedWidth:
-                    // Set OpenXML layout type to Fixed
-                    if (_tableProperties.TableLayout == null) {
-                        _tableProperties.TableLayout = new TableLayout();
-                    }
-                    _tableProperties.TableLayout.Type = TableLayoutValues.Fixed;
+            for (int r = rowIndex; r < rowIndex + rowSpan; r++) {
+                Rows[r].Cells[columnIndex].MergeHorizontally(colSpan - 1, copyParagraphs);
+            }
 
-                    if (percentage.HasValue) {
-                        // For fixed width, set the width to the specified percentage
-                        this.WidthType = TableWidthUnitValues.Pct;
-                        this.Width = percentage.Value * 50; // Convert percentage to Word's internal units (50 = 1%)
-                    } else {
-                        // Default to 100% if no percentage specified
-                        this.WidthType = TableWidthUnitValues.Pct;
-                        this.Width = 5000; // 100% width
-                    }
-                    break;
-
-                case WordTableLayoutType.AutoFitToContents:
-                    // Set OpenXML layout type to Autofit
-                    if (_tableProperties.TableLayout == null) {
-                        _tableProperties.TableLayout = new TableLayout();
-                    }
-                    _tableProperties.TableLayout.Type = TableLayoutValues.Autofit;
-
-                    // For AutoFit to Contents
-                    this.WidthType = TableWidthUnitValues.Auto;
-                    this.Width = 0;
-                    break;
-
-                case WordTableLayoutType.AutoFitToWindow:
-                    // Set OpenXML layout type to Fixed
-                    if (_tableProperties.TableLayout == null) {
-                        _tableProperties.TableLayout = new TableLayout();
-                    }
-                    _tableProperties.TableLayout.Type = TableLayoutValues.Fixed;
-
-                    // For AutoFit to Window
-                    this.WidthType = TableWidthUnitValues.Pct;
-                    this.Width = 5000; // 100% width
-                    break;
+            for (int c = columnIndex; c < columnIndex + colSpan; c++) {
+                Rows[rowIndex].MergeVertically(c, rowSpan - 1, copyParagraphs);
             }
         }
 
@@ -210,7 +365,7 @@ namespace OfficeIMO.Word {
             CheckTableProperties();
 
             // 1. Set Table Layout to Autofit
-            if (_tableProperties.TableLayout == null) {
+            if (_tableProperties!.TableLayout == null) {
                 _tableProperties.TableLayout = new TableLayout();
             }
             _tableProperties.TableLayout.Type = TableLayoutValues.Autofit;
@@ -318,12 +473,12 @@ namespace OfficeIMO.Word {
         private void ApplyCalculatedWidths(List<int> columnWidths) {
             // Set column widths
             this.ColumnWidth = columnWidths;
-            this.ColumnWidthType = TableWidthUnitValues.Dxa;
+            this.ColumnWidthType = WordTableWidthUnit.Dxa;
 
             // Ensure the overall table width is set appropriately
             if (columnWidths.Sum() > 0) {
                 this.Width = columnWidths.Sum();
-                this.WidthType = TableWidthUnitValues.Dxa;
+                this.WidthType = WordTableWidthUnit.Dxa;
             }
         }
 
@@ -334,7 +489,7 @@ namespace OfficeIMO.Word {
             CheckTableProperties();
 
             // 1. Set Table Layout to Fixed (or ensure it exists)
-            if (_tableProperties.TableLayout == null) {
+            if (_tableProperties!.TableLayout == null) {
                 _tableProperties.TableLayout = new TableLayout();
             }
             _tableProperties.TableLayout.Type = TableLayoutValues.Fixed;
@@ -395,7 +550,7 @@ namespace OfficeIMO.Word {
 
             // Set table layout type to Fixed
             CheckTableProperties();
-            if (_tableProperties.TableLayout == null) {
+            if (_tableProperties!.TableLayout == null) {
                 _tableProperties.TableLayout = new TableLayout();
             }
             _tableProperties.TableLayout.Type = TableLayoutValues.Fixed;
@@ -407,25 +562,96 @@ namespace OfficeIMO.Word {
             _tableProperties.TableWidth.Type = TableWidthUnitValues.Pct;
             _tableProperties.TableWidth.Width = (percentage * 50).ToString(); // Convert percentage to Word units (50 = 1%)
 
-            // Set fixed column widths proportionally
-            if (Rows.Count > 0) {
-                int columnCount = Rows[0].Cells.Count;
-                int columnWidth = percentage * 50 / columnCount;
+        }
 
-                foreach (var row in Rows) {
-                    foreach (var cell in row.Cells) {
-                        var tcPr = cell._tableCellProperties;
-                        if (tcPr == null) {
-                            tcPr = new TableCellProperties();
-                            cell._tableCellProperties = tcPr;
-                        }
+        private void SetLayoutAlgorithm(TableLayoutValues layout) {
+            CheckTableProperties();
+            _tableProperties!.TableLayout ??= new TableLayout();
+            _tableProperties.TableLayout.Type = layout;
+        }
 
-                        if (tcPr.TableCellWidth == null) {
-                            tcPr.TableCellWidth = new TableCellWidth();
-                        }
-                        tcPr.TableCellWidth.Type = TableWidthUnitValues.Pct;
-                        tcPr.TableCellWidth.Width = columnWidth.ToString();
+        /// <summary>
+        /// Sets column widths using percentages. Values are scaled proportionally when they don't sum to 100.
+        /// </summary>
+        /// <param name="percentages">Column percentages in any positive ratio.</param>
+        public void SetColumnWidthsPercentage(params int[] percentages) {
+            if (percentages == null) {
+                throw new ArgumentNullException(nameof(percentages));
+            }
+
+            if (Rows.Count == 0 || Rows[0].Cells.Count == 0) {
+                throw new InvalidOperationException("Cannot set column widths on an empty table.");
+            }
+
+            int columnCount = Rows[0].Cells.Count;
+            if (percentages.Length != columnCount) {
+                throw new ArgumentException($"Expected {columnCount} percentage values but received {percentages.Length}.", nameof(percentages));
+            }
+
+            if (percentages.Any(value => value < 0)) {
+                throw new ArgumentOutOfRangeException(nameof(percentages), "Percentages must be non-negative.");
+            }
+
+            int total = percentages.Sum();
+            if (total == 0) {
+                throw new ArgumentException("At least one percentage must be greater than zero.", nameof(percentages));
+            }
+
+            CheckTableProperties();
+            if (_tableProperties!.TableLayout == null) {
+                _tableProperties.TableLayout = new TableLayout();
+            }
+            _tableProperties.TableLayout.Type = TableLayoutValues.Fixed;
+
+            if (_tableProperties.TableWidth == null) {
+                _tableProperties.TableWidth = new TableWidth();
+            }
+            _tableProperties.TableWidth.Type = TableWidthUnitValues.Pct;
+            _tableProperties.TableWidth.Width = "5000"; // 100%
+
+            var widths = new int[columnCount];
+            var remainders = new int[columnCount];
+            int assigned = 0;
+
+            for (int i = 0; i < columnCount; i++) {
+                long scaled = (long)percentages[i] * 5000;
+                int width = (int)(scaled / total);
+                widths[i] = width;
+                remainders[i] = (int)(scaled % total);
+                assigned += width;
+            }
+
+            int diff = 5000 - assigned;
+            if (diff > 0) {
+                var indices = Enumerable.Range(0, columnCount)
+                    .OrderByDescending(i => remainders[i])
+                    .ThenBy(i => i)
+                    .ToArray();
+                for (int i = 0; i < diff; i++) {
+                    widths[indices[i % indices.Length]]++;
+                }
+            }
+
+            foreach (var row in Rows) {
+                if (row.Cells.Count != columnCount) {
+                    continue;
+                }
+
+                for (int columnIndex = 0; columnIndex < columnCount; columnIndex++) {
+                    var cell = row.Cells[columnIndex];
+                    var tcPr = cell._tableCellProperties;
+                    if (tcPr == null) {
+                        tcPr = new TableCellProperties();
+                        cell._tableCell.InsertAt(tcPr, 0);
+                        cell._tableCellProperties = tcPr;
                     }
+
+                    if (tcPr.TableCellWidth == null) {
+                        tcPr.TableCellWidth = new TableCellWidth();
+                    }
+
+                    tcPr.TableCellWidth.Type = TableWidthUnitValues.Pct;
+                    tcPr.TableCellWidth.Width = widths[columnIndex].ToString();
                 }
             }
         }
@@ -433,57 +659,20 @@ namespace OfficeIMO.Word {
         /// <summary>
         /// Gets the current table layout mode based on its properties
         /// </summary>
-        /// <returns>The current WordTableLayoutType</returns>
-        public WordTableLayoutType GetCurrentLayoutType() {
+        /// <returns>The current WordTableLayoutMode</returns>
+        private WordTableLayoutMode GetCurrentLayoutMode() {
             // Get properties defensively
             TableLayoutValues? layoutType = null;
-            TableWidthUnitValues? widthType = null;
-            string widthValue = null;
-
             if (_tableProperties != null) {
                 if (_tableProperties.TableLayout != null && _tableProperties.TableLayout.Type != null) {
                     layoutType = _tableProperties.TableLayout.Type.Value;
                 }
-                if (_tableProperties.TableWidth != null) {
-                    if (_tableProperties.TableWidth.Type != null) {
-                        widthType = _tableProperties.TableWidth.Type.Value;
-                    }
-                    widthValue = _tableProperties.TableWidth.Width;
-                }
             }
 
-            // Debugging line (optional, remove in production)
-            // Console.WriteLine($"DEBUG: Layout={layoutType}, WidthType={widthType}, WidthValue={widthValue}");
-
-            // --- Decision Logic ---
-
-            // 1. Explicit Autofit Layout = AutoFitToContents (Highest priority)
-            if (layoutType.HasValue && layoutType.Value == TableLayoutValues.Autofit) {
-                return WordTableLayoutType.AutoFitToContents;
-            }
-
-            // 2. Width Type Percentage = AutoFitToWindow or FixedWidth
-            if (widthType.HasValue && widthType.Value == TableWidthUnitValues.Pct) {
-                if (widthValue == "5000") {
-                    return WordTableLayoutType.AutoFitToWindow;
-                } else {
-                    return WordTableLayoutType.FixedWidth;
-                }
-            }
-
-            // 3. Width Type DXA = FixedWidth
-            if (widthType.HasValue && widthType.Value == TableWidthUnitValues.Dxa) {
-                return WordTableLayoutType.FixedWidth;
-            }
-
-            // 4. Width Type Auto or No Width Spec -> Defaults to AutoFitToWindow visually in Word
-            // (Unless LayoutType was explicitly Autofit, which is handled in #1)
-            if ((widthType.HasValue && widthType.Value == TableWidthUnitValues.Auto) || !widthType.HasValue) {
-                return WordTableLayoutType.AutoFitToWindow;
-            }
-
-            // Final fallback - should technically not be reached if logic covers all OpenXML states
-            return WordTableLayoutType.AutoFitToWindow;
+            // Word defaults to autofit when tblLayout is omitted.
+            return layoutType == TableLayoutValues.Fixed
+                ? WordTableLayoutMode.Fixed
+                : WordTableLayoutMode.AutoFit;
         }
 
         /// <summary>
@@ -493,8 +682,97 @@ namespace OfficeIMO.Word {
         public void SetWidthPercentage(int percentage) {
             if (percentage < 0) percentage = 0;
             if (percentage > 100) percentage = 100;
-            this.WidthType = TableWidthUnitValues.Pct;
+            this.WidthType = WordTableWidthUnit.Pct;
             this.Width = percentage * 50; // Convert percentage to Word's internal units (50 = 1%)
+        }
+
+        /// <summary>
+        /// Creates a deep copy of the current table and inserts it after the table.
+        /// </summary>
+        /// <returns>The newly cloned <see cref="WordTable"/>.</returns>
+        /// <example>
+        /// <code>
+        /// WordTable clone = table.Clone();
+        /// </code>
+        /// </example>
+        public WordTable Clone() {
+            return CloneAfterSelf();
+        }
+
+        /// <summary>
+        /// Clones the table and inserts the clone after the current table.
+        /// </summary>
+        /// <returns>The cloned <see cref="WordTable"/>.</returns>
+        /// <example>
+        /// <code>
+        /// WordTable copy = table.CloneAfterSelf();
+        /// </code>
+        /// </example>
+        public WordTable CloneAfterSelf() {
+            var clonedTable = (Table)_table.CloneNode(true);
+            _document.AssignNewSdtIds(clonedTable);
+            _table.InsertAfterSelf(clonedTable);
+            return new WordTable(_document, clonedTable);
+        }
+
+        /// <summary>
+        /// Clones the table and inserts the clone before the current table.
+        /// </summary>
+        /// <returns>The cloned <see cref="WordTable"/>.</returns>
+        /// <example>
+        /// <code>
+        /// WordTable copy = table.CloneBeforeSelf();
+        /// </code>
+        /// </example>
+        public WordTable CloneBeforeSelf() {
+            var clonedTable = (Table)_table.CloneNode(true);
+            _document.AssignNewSdtIds(clonedTable);
+            _table.InsertBeforeSelf(clonedTable);
+            return new WordTable(_document, clonedTable);
+        }
+
+        /// <summary>
+        /// Clones the table and inserts it relative to the specified paragraph.
+        /// </summary>
+        /// <param name="paragraph">Reference paragraph for insertion.</param>
+        /// <param name="after">If true inserts after the paragraph, otherwise before.</param>
+        /// <returns>The cloned <see cref="WordTable"/>.</returns>
+        /// <example>
+        /// <code>
+        /// WordTable copy = table.Clone(paragraph, after: false);
+        /// </code>
+        /// </example>
+        public WordTable Clone(WordParagraph paragraph, bool after = true) {
+            var clonedTable = (Table)_table.CloneNode(true);
+            _document.AssignNewSdtIds(clonedTable);
+            if (after) {
+                paragraph._paragraph.InsertAfterSelf(clonedTable);
+            } else {
+                paragraph._paragraph.InsertBeforeSelf(clonedTable);
+            }
+            return new WordTable(_document, clonedTable);
+        }
+
+        /// <summary>
+        /// Clones the table and inserts it relative to another table.
+        /// </summary>
+        /// <param name="table">Reference table for insertion.</param>
+        /// <param name="after">If true inserts after the table, otherwise before.</param>
+        /// <returns>The cloned <see cref="WordTable"/>.</returns>
+        /// <example>
+        /// <code>
+        /// WordTable copy = table1.Clone(table2, after: true);
+        /// </code>
+        /// </example>
+        public WordTable Clone(WordTable table, bool after = true) {
+            var clonedTable = (Table)_table.CloneNode(true);
+            _document.AssignNewSdtIds(clonedTable);
+            if (after) {
+                table._table.InsertAfterSelf(clonedTable);
+            } else {
+                table._table.InsertBeforeSelf(clonedTable);
+            }
+            return new WordTable(_document, clonedTable);
         }
     }
 }

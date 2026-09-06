@@ -1,0 +1,860 @@
+using System;
+using System.IO;
+using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Drawing;
+using DocumentFormat.OpenXml.Drawing.Wordprocessing;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Validation;
+using HeaderFooterValues = DocumentFormat.OpenXml.Wordprocessing.HeaderFooterValues;
+using OfficeIMO.Drawing;
+using OfficeIMO.Word;
+using Xunit;
+
+using Path = System.IO.Path;
+
+namespace OfficeIMO.Tests {
+    public partial class Word {
+
+        [Fact]
+        public void Test_AddSvgImage_UsesSharedImageFormatForSvgBlipExtension() {
+            string filePath = Path.Combine(_directoryWithFiles, "AddSvgImageUsesSharedFormat.docx");
+            string imagePath = Path.Combine(_directoryWithImages, "Sample.svg");
+            if (File.Exists(filePath)) {
+                File.Delete(filePath);
+            }
+
+            using (var document = WordDocument.Create(filePath)) {
+                document.AddParagraph().AddImage(imagePath, 50, 50);
+                document.Save();
+            }
+
+            using WordprocessingDocument package = WordprocessingDocument.Open(filePath, false);
+            var imagePart = package.MainDocumentPart!.ImageParts.Single();
+            string documentXml = package.MainDocumentPart.Document!.OuterXml;
+
+            Assert.Equal(OfficeImageInfo.GetMimeType(OfficeImageFormat.Svg), imagePart.ContentType);
+            Assert.Contains("svgBlip", documentXml, StringComparison.Ordinal);
+            Assert.Contains("http://schemas.microsoft.com/office/drawing/2010/main", documentXml, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Test_CreatingWordDocumentWithImages() {
+            var filePath = Path.Combine(_directoryWithFiles, "CreatedDocumentWithImages.docx");
+            using var document = WordDocument.Create(filePath);
+
+            document.BuiltinDocumentProperties.Title = "This is sparta";
+            document.BuiltinDocumentProperties.Creator = "Przemek";
+
+            var paragraph = document.AddParagraph("This paragraph starts with some text");
+            paragraph.Text = "0th This paragraph started with some other text and was overwritten and made bold.";
+
+            // lets add image to paragraph
+            paragraph.AddImage(Path.Combine(_directoryWithImages, "PrzemyslawKlysAndKulkozaurr.jpg"), 22, 22);
+            var paragraphImage = paragraph.Image;
+            Assert.NotNull(paragraphImage);
+            Assert.True(paragraphImage!.WrapText == WordImageTextWrapping.InLineWithText);
+
+            paragraphImage.WrapText = WordImageTextWrapping.BehindText;
+
+            Assert.True(paragraphImage.WrapText == WordImageTextWrapping.BehindText);
+
+            paragraphImage.WrapText = WordImageTextWrapping.InLineWithText;
+
+            Assert.True(paragraphImage.WrapText == WordImageTextWrapping.InLineWithText);
+
+            var paragraph5 = paragraph.AddText("and more text");
+            paragraph5.Bold = true;
+
+            Assert.Equal(22d, paragraphImage.Height ?? default, 15);
+            Assert.Equal(22d, paragraphImage.Width ?? default, 15);
+
+            document.AddParagraph("This adds another picture with 500x500");
+
+            var filePathImage = Path.Combine(_directoryWithImages, "Kulek.jpg");
+            var paragraph2 = document.AddParagraph();
+            paragraph2.AddImage(filePathImage, 500, 500);
+            var paragraph2Image = paragraph2.Image;
+            Assert.NotNull(paragraph2Image);
+#pragma warning disable CS0618
+            paragraph2Image.BlackWiteMode = WordImageBlackWhiteMode.GrayWhite;
+#pragma warning restore CS0618
+            Assert.Equal(WordImageBlackWhiteMode.GrayWhite, paragraph2Image.BlackWhiteMode);
+            paragraph2Image!.Rotation = 180;
+            paragraph2Image.Shape = OfficePresetShapeType.ActionButtonMovie;
+
+            Assert.Equal(500d, paragraph2Image.Height ?? default, 15);
+            Assert.Equal(500d, paragraph2Image.Width ?? default, 15);
+
+            document.AddParagraph("This adds another picture with 100x100");
+
+            var paragraph3 = document.AddParagraph();
+            paragraph3.AddImage(filePathImage, 100, 100);
+
+            // we add paragraph with an image
+            var paragraph4 = document.AddParagraph();
+            paragraph4.AddImage(filePathImage);
+            var paragraph4Image = paragraph4.Image;
+            Assert.NotNull(paragraph4Image);
+
+            // we can also overwrite height later on
+            paragraph4Image!.Height = 50;
+            paragraph4Image.Width = 50;
+            // this doesn't work
+            paragraph4Image.HorizontalFlip = true;
+
+
+            Assert.Equal(50d, paragraph4Image.Height ?? default, 15);
+            Assert.Equal(50d, paragraph4Image.Width ?? default, 15);
+
+            // or we can get any image and overwrite it's size
+            var firstImage = document.Images[0];
+            Assert.NotNull(firstImage);
+            firstImage!.Height = 200;
+            firstImage.Width = 200;
+
+            Assert.Equal(200d, firstImage.Height ?? default, 15);
+            Assert.Equal(200d, firstImage.Width ?? default, 15);
+
+            var fileToSave = Path.Combine(_directoryDocuments, "CreatedDocumentWithImagesPrzemyslawKlysAndKulkozaurr.jpg");
+            firstImage.Save(fileToSave);
+
+            var fileInfo = new FileInfo(fileToSave);
+
+            Assert.True(fileInfo.Length > 0);
+            Assert.True(File.Exists(fileToSave));
+
+            Assert.Equal(4, document.Images.Count);
+            Assert.Equal(4, document.Sections[0].Images.Count);
+            document.Save();
+
+            Assert.True(HasUnexpectedElements(document) == false, "Document has unexpected elements. Order of elements matters!");
+        }
+
+        [Fact]
+        public void Test_CreatingWordDocumentWithImageFromNonSeekableStream() {
+            var filePath = Path.Combine(_directoryWithFiles, "CreatedDocumentWithNonSeekableImage.docx");
+            var imagePath = Path.Combine(_directoryWithImages, "Kulek.jpg");
+
+            using (var document = WordDocument.Create(filePath)) {
+                var paragraph = document.AddParagraph();
+                using var stream = new NonSeekableReadStream(File.ReadAllBytes(imagePath));
+                paragraph.AddImage(stream, "Kulek.jpg", null, null);
+
+                Assert.Single(document.Images);
+                Assert.True(document.Images[0].Width > 0);
+                Assert.True(document.Images[0].Height > 0);
+                document.Save();
+            }
+
+            using (var document = WordDocument.Load(filePath)) {
+                Assert.Single(document.Images);
+                Assert.Equal("Kulek.jpg", document.Images[0].FileName);
+            }
+        }
+
+        [Fact]
+        public void Test_CreatingWordDocumentWithMultipleImagesUsesUniqueDrawingIds() {
+            string filePath = Path.Combine(_directoryWithFiles, "CreatedDocumentWithMultipleImagesUniqueDrawingIds.docx");
+            using (WordDocument document = WordDocument.Create(filePath)) {
+                document.AddParagraph().AddImage(Path.Combine(_directoryWithImages, "EvotecLogo.png"), 100, 40);
+                document.AddParagraph().AddImage(Path.Combine(_directoryWithImages, "Kulek.jpg"), 100, 100);
+                document.Save();
+            }
+
+            using WordprocessingDocument package = WordprocessingDocument.Open(filePath, false);
+            var errors = new OpenXmlValidator().Validate(package).ToList();
+            Assert.Empty(errors);
+        }
+
+
+        [Fact]
+        public void Test_CreatingWordDocumentWithImagesHeadersAndFooters() {
+            var imagePaths = System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "Images");
+
+            var filePath = Path.Combine(_directoryWithFiles, "CreatingWordDocumentWithImagesHeadersAndFooters.docx");
+            using var document = WordDocument.Create(filePath);
+
+            var image = Path.Combine(_directoryWithImages, "PrzemyslawKlysAndKulkozaurr.jpg");
+
+            document.AddHeadersAndFooters();
+            document.DifferentOddAndEvenPages = true;
+
+            var defaultHeader = RequireSectionHeader(document, 0, HeaderFooterValues.Default);
+            var evenHeader = RequireSectionHeader(document, 0, HeaderFooterValues.Even);
+            var defaultFooter = RequireSectionFooter(document, 0, HeaderFooterValues.Default);
+            var evenFooter = RequireSectionFooter(document, 0, HeaderFooterValues.Even);
+
+            Assert.True(defaultHeader.Images.Count == 0);
+            Assert.True(evenHeader.Images.Count == 0);
+            Assert.True(document.Images.Count == 0);
+            Assert.True(defaultFooter.Images.Count == 0);
+            Assert.True(evenFooter.Images.Count == 0);
+
+
+            // add image to header, directly to paragraph
+            defaultHeader.AddParagraph().AddImage(image, 100, 100);
+
+            // add image to footer, directly to paragraph
+            defaultFooter.AddParagraph().AddImage(image, 200, 200);
+
+            Assert.True(defaultHeader.Images.Count == 1);
+            Assert.True(evenHeader.Images.Count == 0);
+            Assert.True(document.Images.Count == 0);
+            Assert.True(defaultFooter.Images.Count == 1);
+            Assert.True(evenFooter.Images.Count == 0);
+
+            const string fileNameImage = "Kulek.jpg";
+            var filePathImage = System.IO.Path.Combine(imagePaths, fileNameImage);
+            var paragraph = document.AddParagraph();
+            using (var imageStream = System.IO.File.OpenRead(filePathImage)) {
+                paragraph.AddImage(imageStream, fileNameImage, 300, 300);
+            }
+            Assert.True(defaultHeader.Images.Count == 1);
+            Assert.True(evenHeader.Images.Count == 0);
+
+            Assert.True(document.Images.Count == 1);
+            Assert.True(defaultFooter.Images.Count == 1);
+            Assert.True(evenFooter.Images.Count == 0);
+
+            Assert.True(document.Images[0].FileName == fileNameImage);
+            Assert.True(document.Images[0].Rotation == null);
+            Assert.True(document.Images[0].Width == 300);
+            Assert.True(document.Images[0].Height == 300);
+
+            const string fileNameImageEvotec = "EvotecLogo.png";
+            var filePathImageEvotec = System.IO.Path.Combine(imagePaths, fileNameImageEvotec);
+            var paragraphHeader = evenHeader.AddParagraph();
+            using (var imageStream = System.IO.File.OpenRead(filePathImageEvotec)) {
+                paragraphHeader.AddImage(imageStream, fileNameImageEvotec, 300, 300, WordImageTextWrapping.InLineWithText, "This is a test");
+                var headerImage = paragraphHeader.Image;
+                Assert.NotNull(headerImage);
+                Assert.True(headerImage!.CompressionQuality == WordImageCompressionQuality.Print);
+            }
+
+            Assert.True(defaultHeader.Images.Count == 1);
+            Assert.True(evenHeader.Images.Count == 1);
+            Assert.True(evenHeader.Images[0].FileName == fileNameImageEvotec);
+            Assert.True(evenHeader.Images[0].Description == "This is a test");
+
+            var headerEvenImage = evenHeader.Images[0];
+            Assert.NotNull(headerEvenImage);
+            headerEvenImage!.Description = "Different description";
+            Assert.True(headerEvenImage.VerticalFlip == null);
+            Assert.True(headerEvenImage.HorizontalFlip == null);
+            headerEvenImage.VerticalFlip = true;
+
+            Assert.True(headerEvenImage.Description == "Different description");
+            Assert.True(headerEvenImage.VerticalFlip == true);
+            Assert.True(headerEvenImage.CompressionQuality == WordImageCompressionQuality.Print);
+            headerEvenImage.CompressionQuality = WordImageCompressionQuality.HighQualityPrint;
+            Assert.True(headerEvenImage.CompressionQuality == WordImageCompressionQuality.HighQualityPrint);
+
+            document.Save();
+        }
+
+
+
+        [Fact]
+        public void Test_LoadingWordDocumentWithImages() {
+            var documentsPaths = System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "Documents");
+            var source = Path.Combine(documentsPaths, "DocumentWithImagesWraps.docx");
+            var filePath = Path.Combine(_directoryWithFiles, "DocumentWithImagesWraps.docx");
+            File.Copy(source, filePath, true);
+            using (var document = WordDocument.Load(filePath)) {
+                Assert.True(document.Paragraphs.Count == 36);
+                Assert.True(document.Images.Count == 4);
+                var defaultHeader = RequireSectionHeader(document, 0, HeaderFooterValues.Default);
+                var defaultFooter = RequireSectionFooter(document, 0, HeaderFooterValues.Default);
+                Assert.True(defaultHeader.Images.Count == 1);
+                Assert.True(defaultFooter.Images.Count == 0);
+
+                Assert.True(document.Images[0].WrapText == WordImageTextWrapping.InLineWithText);
+                Assert.True(document.Images[1].WrapText == WordImageTextWrapping.Square);
+                Assert.True(document.Images[2].WrapText == WordImageTextWrapping.InFrontOfText);
+                Assert.True(document.Images[3].WrapText == WordImageTextWrapping.BehindText);
+                Assert.True(defaultHeader.Images[0].WrapText == WordImageTextWrapping.InLineWithText);
+
+                Assert.NotNull(document.Images[0].Shape);
+                Assert.NotNull(document.Images[1].Shape);
+                Assert.NotNull(document.Images[2].Shape);
+                Assert.NotNull(document.Images[3].Shape);
+
+                document.Images[0].Shape = OfficePresetShapeType.Cloud;
+
+                Assert.True(document.Images[0].Shape == OfficePresetShapeType.Cloud);
+                document.Save();
+            }
+        }
+
+        [Fact]
+        public void Test_CreatingWordDocumentWithImagesWraps() {
+            var imagePaths = System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "Images");
+            var filePath = Path.Combine(_directoryWithFiles, "CreatedDocumentWithImagesWraps.docx");
+            using var document = WordDocument.Create(filePath);
+
+            const string fileNameImage = "Kulek.jpg";
+            var filePathImage = System.IO.Path.Combine(imagePaths, fileNameImage);
+
+            var paragraph1 = document.AddParagraph("This is a test document with images wraps");
+            paragraph1.AddImage(filePathImage, 100, 100, WordImageTextWrapping.InLineWithText);
+
+            var paragraph2 = document.AddParagraph("This is a test document with images wraps");
+            paragraph2.AddImage(filePathImage, 100, 100, WordImageTextWrapping.BehindText);
+            var paragraph2Image = paragraph2.Image;
+            Assert.NotNull(paragraph2Image);
+            Assert.True(paragraph2Image!.CompressionQuality == WordImageCompressionQuality.Print);
+            paragraph2Image.CompressionQuality = WordImageCompressionQuality.HighQualityPrint;
+            Assert.True(paragraph2Image.CompressionQuality == WordImageCompressionQuality.HighQualityPrint);
+
+            var paragraph3 = document.AddParagraph("This is a test document with images wraps");
+            paragraph3.AddImage(filePathImage, 100, 100, WordImageTextWrapping.InFrontOfText);
+
+            var paragraph4 = document.AddParagraph("This is a test document with images wraps");
+            paragraph4.AddImage(filePathImage, 100, 100, WordImageTextWrapping.TopAndBottom);
+
+            var paragraph5 = document.AddParagraph("This is a test document with images wraps");
+            paragraph5.AddImage(filePathImage, 100, 100, WordImageTextWrapping.Square);
+
+            var paragraph6 = document.AddParagraph("This is a test document with images wraps");
+            paragraph6.AddImage(filePathImage, 100, 100, WordImageTextWrapping.Tight);
+
+            var paragraph7 = document.AddParagraph("This is a test document with images wraps");
+            paragraph7.AddImage(filePathImage, 100, 100, WordImageTextWrapping.Through);
+
+            Assert.True(document.Paragraphs.Count == 7);
+            Assert.NotNull(document.Paragraphs[0].Image);
+            Assert.True(document.Paragraphs[0].Image!.WrapText == WordImageTextWrapping.InLineWithText);
+            Assert.NotNull(document.Paragraphs[1].Image);
+            Assert.True(document.Paragraphs[1].Image!.WrapText == WordImageTextWrapping.BehindText);
+            Assert.NotNull(document.Paragraphs[2].Image);
+            Assert.True(document.Paragraphs[2].Image!.WrapText == WordImageTextWrapping.InFrontOfText);
+            Assert.NotNull(document.Paragraphs[3].Image);
+            Assert.True(document.Paragraphs[3].Image!.WrapText == WordImageTextWrapping.TopAndBottom);
+            Assert.NotNull(document.Paragraphs[4].Image);
+            Assert.True(document.Paragraphs[4].Image!.WrapText == WordImageTextWrapping.Square);
+            Assert.NotNull(document.Paragraphs[5].Image);
+            Assert.True(document.Paragraphs[5].Image!.WrapText == WordImageTextWrapping.Tight);
+            Assert.NotNull(document.Paragraphs[6].Image);
+            Assert.True(document.Paragraphs[6].Image!.WrapText == WordImageTextWrapping.Through);
+
+            document.Save();
+
+            Assert.True(HasUnexpectedElements(document) == false, "Document has unexpected elements. Order of elements matters!");
+        }
+
+        [Fact]
+        public void Test_CreatingWordDocumentWithFixedImages() {
+            var imagePaths = System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "Images");
+            var filePath = Path.Combine(_directoryWithFiles, "CreatingWordDocumentWithFixedImages.docx");
+            using var document = WordDocument.Create(filePath);
+
+            const string fileNameImage = "Kulek.jpg";
+            var filePathImage = System.IO.Path.Combine(imagePaths, fileNameImage);
+
+            var paragraph1 = document.AddParagraph("This is a test document with images wraps");
+            paragraph1.AddImage(filePathImage, 100, 100, WordImageTextWrapping.InLineWithText);
+
+            var paragraph2 = document.AddParagraph("This is a test document with images wraps");
+            paragraph2.AddImage(filePathImage, 100, 100, WordImageTextWrapping.Square);
+
+            Assert.True(document.Paragraphs.Count == 2);
+            var firstParaImage = document.Paragraphs[0].Image;
+            var secondParaImage = document.Paragraphs[1].Image;
+            Assert.NotNull(firstParaImage);
+            Assert.True(firstParaImage!.WrapText == WordImageTextWrapping.InLineWithText);
+            Assert.NotNull(secondParaImage);
+            Assert.True(secondParaImage!.WrapText == WordImageTextWrapping.Square);
+            Assert.Throws<System.InvalidOperationException>(() => firstParaImage.horizontalPosition);
+            Assert.Throws<System.InvalidOperationException>(() => firstParaImage.verticalPosition);
+
+            int emus = 914400;
+            HorizontalRelativePositionValues hRelativeFromGood = HorizontalRelativePositionValues.RightMargin;
+            HorizontalRelativePositionValues hRelativeFromFail = HorizontalRelativePositionValues.LeftMargin;
+            VerticalRelativePositionValues vRelativeFromGood = VerticalRelativePositionValues.Page;
+            VerticalRelativePositionValues vRelativeFromFail = VerticalRelativePositionValues.Line;
+
+            HorizontalPosition horizontalPosition1 = new HorizontalPosition() {
+                RelativeFrom = hRelativeFromGood,
+                PositionOffset = new PositionOffset { Text = $"{emus}" }
+            };
+
+            VerticalPosition verticalPosition1 = new VerticalPosition() {
+                RelativeFrom = vRelativeFromGood,
+                PositionOffset = new PositionOffset { Text = $"{emus}" }
+            };
+
+            Assert.Throws<System.InvalidOperationException>(() => firstParaImage.horizontalPosition = horizontalPosition1);
+            Assert.Throws<System.InvalidOperationException>(() => firstParaImage.verticalPosition = verticalPosition1);
+
+            PositionOffset positionOffsetGood = new PositionOffset { Text = $"{emus}" };
+            PositionOffset positionOffsetFail = new PositionOffset { Text = $"{2 * emus}" };
+            Assert.NotEqual(positionOffsetFail.Text, positionOffsetGood.Text);
+
+            secondParaImage.horizontalPosition = horizontalPosition1;
+            Assert.Equal(positionOffsetGood.Text, secondParaImage.horizontalPosition.PositionOffset.Text);
+            Assert.NotEqual(positionOffsetFail.Text, secondParaImage.horizontalPosition.PositionOffset.Text);
+            Assert.Equal(hRelativeFromGood, secondParaImage.horizontalPosition.RelativeFrom?.Value ?? default);
+            Assert.NotEqual(hRelativeFromFail, secondParaImage.horizontalPosition.RelativeFrom?.Value ?? default);
+
+
+            secondParaImage.verticalPosition = verticalPosition1;
+            Assert.Equal(positionOffsetGood.Text, secondParaImage.verticalPosition.PositionOffset.Text);
+            Assert.NotEqual(positionOffsetFail.Text, secondParaImage.verticalPosition.PositionOffset.Text);
+            Assert.Equal(vRelativeFromGood, secondParaImage.verticalPosition.RelativeFrom?.Value ?? default);
+            Assert.NotEqual(vRelativeFromFail, secondParaImage.verticalPosition.RelativeFrom?.Value ?? default);
+
+            document.Save();
+
+            Assert.True(HasUnexpectedElements(document) == false, "Document has unexpected elements. Order of elements matters!");
+        }
+
+        [Fact]
+        public void Test_CreatingWordDocumentWithImagesInTable() {
+            var imagePaths = System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "Images");
+            var filePath = Path.Combine(_directoryWithFiles, "CreatedDocumentWithImagesInTable.docx");
+            using var document = WordDocument.Create(filePath);
+
+            const string fileNameImage = "Kulek.jpg";
+            var filePathImage = System.IO.Path.Combine(imagePaths, fileNameImage);
+
+            var table = document.AddTable(2, 2);
+            table.Rows[0].Cells[0].Paragraphs[0].AddImage(filePathImage, 200, 200);
+
+            // not really necessary to add new paragraph since one is already there by default
+            var paragraph = table.Rows[0].Cells[1].AddParagraph();
+            paragraph.AddImage(filePathImage, 200, 200);
+
+            document.AddHeadersAndFooters();
+
+            var defaultHeader = RequireSectionHeader(document, 0, HeaderFooterValues.Default);
+            var tableInHeader = defaultHeader.AddTable(2, 2);
+            tableInHeader.Rows[0].Cells[0].Paragraphs[0].AddImage(filePathImage, 200, 200);
+
+            // not really necessary to add new paragraph since one is already there by default
+            var paragraphInHeader = tableInHeader.Rows[0].Cells[1].AddParagraph();
+            paragraphInHeader.AddImage(filePathImage, 200, 200);
+
+            Assert.True(document.Tables.Count == 1);
+            Assert.True(document.Tables[0].Rows.Count == 2);
+            Assert.True(document.Tables[0].Rows[0].Cells.Count == 2);
+
+            Assert.True(defaultHeader.Tables.Count == 1);
+
+            document.Save();
+
+            Assert.True(HasUnexpectedElements(document) == false, "Document has unexpected elements. Order of elements matters!");
+
+            using var reloaded = WordDocument.Load(filePath);
+            Assert.Equal(2, reloaded.Images.Count);
+            Assert.Equal(2, reloaded.ParagraphsImages.Count);
+        }
+
+        [Fact]
+        public void Test_CreatingWordDocumentWithImagesInline() {
+            var filePath = Path.Combine(_directoryWithFiles, "CreatedDocumentWithImagesInline.docx");
+            using var document = WordDocument.Create(filePath);
+
+            var paragraph = document.AddParagraph("This paragraph starts with some text");
+            paragraph.Text = "0th This paragraph started with some other text and was overwritten and made bold.";
+
+            // lets add image to paragraph
+            var imageParagraph = paragraph.AddImage(Path.Combine(_directoryWithImages, "PrzemyslawKlysAndKulkozaurr.jpg"), 22, 22, WordImageTextWrapping.InLineWithText);
+
+            Assert.True(document.Images[0].WrapText == WordImageTextWrapping.InLineWithText);
+
+            var inlineImage = imageParagraph.Image;
+            Assert.NotNull(inlineImage);
+            Assert.True(inlineImage!.WrapText == WordImageTextWrapping.InLineWithText);
+
+            inlineImage.WrapText = WordImageTextWrapping.Square;
+
+            Assert.True(inlineImage.WrapText == WordImageTextWrapping.Square);
+
+            var paragraph5 = paragraph.AddText("and more text");
+            paragraph5.Bold = true;
+
+
+            document.Save();
+
+            Assert.True(HasUnexpectedElements(document) == false, "Document has unexpected elements. Order of elements matters!");
+        }
+
+        [Fact]
+        public void Test_AddImageFromBase64() {
+            var filePath = Path.Combine(_directoryWithFiles, "DocumentBase64Image.docx");
+            using var document = WordDocument.Create(filePath);
+
+            var bytes = File.ReadAllBytes(Path.Combine(_directoryWithImages, "Kulek.jpg"));
+            var base64 = Convert.ToBase64String(bytes);
+
+            var paragraph = document.AddParagraph();
+            paragraph.AddImageFromBase64(base64, "Kulek.jpg", 50, 50);
+
+            Assert.Single(document.Images);
+            document.Save();
+        }
+
+        [Fact]
+        public void Test_ImageTransparency() {
+            var filePath = Path.Combine(_directoryWithFiles, "DocumentImageTransparency.docx");
+            using var document = WordDocument.Create(filePath);
+
+            var paragraph = document.AddParagraph();
+            paragraph.AddImage(Path.Combine(_directoryWithImages, "Kulek.jpg"), 50, 50);
+            var image = paragraph.Image;
+            Assert.NotNull(image);
+            image!.Transparency = 25;
+
+            document.Save();
+
+            using (var reloaded = WordDocument.Load(filePath)) {
+                Assert.Equal(25, reloaded.Images[0].Transparency);
+            }
+
+            using (var doc = DocumentFormat.OpenXml.Packaging.WordprocessingDocument.Open(filePath, false)) {
+                Assert.NotNull(doc.MainDocumentPart);
+                var blip = doc.MainDocumentPart!.Document.Descendants<DocumentFormat.OpenXml.Drawing.Blip>().First();
+                var alpha = blip.GetFirstChild<DocumentFormat.OpenXml.Drawing.AlphaModulationFixed>();
+                Assert.Equal(75000, alpha?.Amount?.Value ?? default);
+            }
+        }
+
+        [Fact]
+        public void Test_ImageTransparency50() {
+            var filePath = Path.Combine(_directoryWithFiles, "DocumentImageTransparency50.docx");
+            using var document = WordDocument.Create(filePath);
+
+            var paragraph = document.AddParagraph();
+            paragraph.AddImage(Path.Combine(_directoryWithImages, "Kulek.jpg"), 50, 50);
+            var image = paragraph.Image;
+            Assert.NotNull(image);
+            image!.Transparency = 50;
+
+            document.Save();
+
+            using (var reloaded = WordDocument.Load(filePath)) {
+                Assert.Equal(50, reloaded.Images[0].Transparency);
+            }
+
+            using (var doc = DocumentFormat.OpenXml.Packaging.WordprocessingDocument.Open(filePath, false)) {
+                Assert.NotNull(doc.MainDocumentPart);
+                var blip = doc.MainDocumentPart!.Document.Descendants<DocumentFormat.OpenXml.Drawing.Blip>().First();
+                var alpha = blip.GetFirstChild<DocumentFormat.OpenXml.Drawing.AlphaModulationFixed>();
+                Assert.Equal(50000, alpha?.Amount?.Value ?? default);
+            }
+        }
+
+        [Fact]
+        public void Test_ImageTransparencyNotSet() {
+            var filePath = Path.Combine(_directoryWithFiles, "DocumentImageTransparencyNone.docx");
+            using var document = WordDocument.Create(filePath);
+
+            var paragraph = document.AddParagraph();
+            paragraph.AddImage(Path.Combine(_directoryWithImages, "Kulek.jpg"), 50, 50);
+
+            document.Save();
+
+            using (var reloaded = WordDocument.Load(filePath)) {
+                Assert.Null(reloaded.Images[0].Transparency);
+            }
+
+            using (var doc = DocumentFormat.OpenXml.Packaging.WordprocessingDocument.Open(filePath, false)) {
+                Assert.NotNull(doc.MainDocumentPart);
+                var blip = doc.MainDocumentPart!.Document.Descendants<DocumentFormat.OpenXml.Drawing.Blip>().First();
+                var alpha = blip.GetFirstChild<DocumentFormat.OpenXml.Drawing.AlphaModulationFixed>();
+                Assert.Null(alpha);
+            }
+        }
+      
+        [Fact]
+        public void Test_ImageCropping() {
+            var filePath = Path.Combine(_directoryWithFiles, "DocumentImageCrop.docx");
+            using (var document = WordDocument.Create(filePath)) {
+            var paragraph = document.AddParagraph();
+            paragraph.AddImage(Path.Combine(_directoryWithImages, "Kulek.jpg"), 100, 100);
+            var image = paragraph.Image;
+            Assert.NotNull(image);
+
+            image!.CropTopCentimeters = 1;
+            image.CropBottomCentimeters = 2;
+            image.CropLeftCentimeters = 3;
+            image.CropRightCentimeters = 4;
+
+                document.Save();
+            }
+
+            using (var document = WordDocument.Load(filePath)) {
+                Assert.Equal(1, document.Images[0].CropTopCentimeters);
+                Assert.Equal(2, document.Images[0].CropBottomCentimeters);
+                Assert.Equal(3, document.Images[0].CropLeftCentimeters);
+                Assert.Equal(4, document.Images[0].CropRightCentimeters);
+            }
+        }
+
+        [Fact]
+        public void Test_ImageFillModeAndLocalDpi() {
+            var filePath = Path.Combine(_directoryWithFiles, "DocumentImageFillMode.docx");
+            using (var document = WordDocument.Create(filePath)) {
+                var paragraph = document.AddParagraph();
+                paragraph.AddImage(Path.Combine(_directoryWithImages, "Kulek.jpg"), 50, 50);
+                var image = paragraph.Image;
+                Assert.NotNull(image);
+                image!.FillMode = WordImageFillMode.Tile;
+                image.UseLocalDpi = true;
+                document.Save();
+            }
+
+            using (var document = WordDocument.Load(filePath)) {
+                Assert.Equal(WordImageFillMode.Tile, document.Images[0].FillMode);
+                Assert.True(document.Images[0].UseLocalDpi == true);
+            }
+
+            using (var pkg = WordprocessingDocument.Open(filePath, false)) {
+                Assert.NotNull(pkg.MainDocumentPart);
+                var blipFill = pkg.MainDocumentPart!.Document.Descendants<DocumentFormat.OpenXml.Drawing.Pictures.BlipFill>().First();
+                Assert.NotNull(blipFill.GetFirstChild<DocumentFormat.OpenXml.Drawing.Tile>());
+                var blip = blipFill.Blip;
+                Assert.NotNull(blip);
+                var ext = blip!.GetFirstChild<BlipExtensionList>()?.OfType<BlipExtension>().FirstOrDefault(e => e.Uri == "{28A0092B-C50C-407E-A947-70E740481C1C}");
+                Assert.NotNull(ext?.GetFirstChild<DocumentFormat.OpenXml.Office2010.Drawing.UseLocalDpi>());
+            }
+        }
+
+        [Fact]
+        public void Test_ImageFillMode_Fit() {
+            var filePath = Path.Combine(_directoryWithFiles, "DocumentImageFillModeFit.docx");
+            using (var document = WordDocument.Create(filePath)) {
+                var paragraph = document.AddParagraph();
+                paragraph.AddImage(Path.Combine(_directoryWithImages, "Kulek.jpg"), 100, 50);
+                var image = paragraph.Image;
+                Assert.NotNull(image);
+                image!.FillMode = WordImageFillMode.Fit;
+                document.Save();
+            }
+
+            using (var document = WordDocument.Load(filePath)) {
+                Assert.Equal(WordImageFillMode.Fit, document.Images[0].FillMode);
+            }
+
+            using (var pkg = WordprocessingDocument.Open(filePath, false)) {
+                Assert.NotNull(pkg.MainDocumentPart);
+                var blipFill = pkg.MainDocumentPart!.Document.Descendants<DocumentFormat.OpenXml.Drawing.Pictures.BlipFill>().First();
+                var stretch = blipFill.GetFirstChild<DocumentFormat.OpenXml.Drawing.Stretch>();
+                Assert.NotNull(stretch);
+                Assert.Null(stretch.GetFirstChild<DocumentFormat.OpenXml.Drawing.FillRectangle>());
+                Assert.Null(blipFill.GetFirstChild<DocumentFormat.OpenXml.Drawing.Tile>());
+            }
+        }
+
+        [Fact]
+        public void Test_ImageFillMode_Center() {
+            var filePath = Path.Combine(_directoryWithFiles, "DocumentImageFillModeCenter.docx");
+            using (var document = WordDocument.Create(filePath)) {
+                var paragraph = document.AddParagraph();
+                paragraph.AddImage(Path.Combine(_directoryWithImages, "Kulek.jpg"), 100, 50);
+                var image = paragraph.Image;
+                Assert.NotNull(image);
+                image!.FillMode = WordImageFillMode.Center;
+                document.Save();
+            }
+
+            using (var document = WordDocument.Load(filePath)) {
+                Assert.Equal(WordImageFillMode.Center, document.Images[0].FillMode);
+            }
+
+            using (var pkg = WordprocessingDocument.Open(filePath, false)) {
+                Assert.NotNull(pkg.MainDocumentPart);
+                var blipFill = pkg.MainDocumentPart!.Document.Descendants<DocumentFormat.OpenXml.Drawing.Pictures.BlipFill>().First();
+                var tile = blipFill.GetFirstChild<DocumentFormat.OpenXml.Drawing.Tile>();
+                Assert.NotNull(tile);
+                Assert.Equal(RectangleAlignmentValues.Center, tile.Alignment?.Value ?? default);
+            }
+        }
+
+        [Fact]
+        public void Test_AddExternalImage() {
+            var filePath = Path.Combine(_directoryWithFiles, "DocumentExternalImage.docx");
+            using (var document = WordDocument.Create(filePath)) {
+                var paragraph = document.AddParagraph();
+                paragraph.AddImage(new Uri("http://example.com/image.png"), 50, 50);
+                Assert.Single(document.Images);
+                var extImage = document.Images[0];
+                Assert.NotNull(extImage);
+                Assert.True(extImage!.IsExternal);
+                Assert.Equal(new Uri("http://example.com/image.png"), extImage.ExternalUri);
+                Assert.Throws<InvalidOperationException>(() => extImage.Save("tmp.png"));
+                extImage.Remove();
+                Assert.Empty(document.Images);
+                document.Save();
+            }
+
+            using (var pkg = WordprocessingDocument.Open(filePath, false)) {
+                // ensure document opens correctly after removing the external image
+                Assert.NotNull(pkg.MainDocumentPart);
+                Assert.NotNull(pkg.MainDocumentPart!.Document);
+            }
+        }
+
+        [Fact]
+        public void Test_AddExternalImagesToNotesAndComments_OwnsRelationshipsInStoryParts() {
+            string filePath = Path.Combine(_directoryWithFiles, "DocumentExternalImagesInStories.docx");
+            var footnoteUri = new Uri("https://example.com/images/footnote.png");
+            var endnoteUri = new Uri("https://example.com/images/endnote.png");
+            var commentUri = new Uri("https://example.com/images/comment.png");
+
+            using (var document = WordDocument.Create(filePath)) {
+                WordParagraph paragraph = document.AddParagraph("External story images");
+                WordParagraph footnoteReference = paragraph.AddFootNote("Footnote ");
+                footnoteReference.FootNote!.Paragraphs![1].AddImage(footnoteUri, 20, 16);
+                WordParagraph endnoteReference = paragraph.AddEndNote("Endnote ");
+                endnoteReference.EndNote!.Paragraphs![1].AddImage(endnoteUri, 24, 18);
+                paragraph.AddComment("OfficeIMO", "OI", "Comment ");
+                Assert.Single(document.Comments).Paragraphs[0].AddImage(commentUri, 18, 14);
+                document.Save();
+            }
+
+            using WordprocessingDocument package = WordprocessingDocument.Open(filePath, false);
+            MainDocumentPart mainPart = package.MainDocumentPart!;
+            AssertExternalImageRelationship(mainPart.FootnotesPart!, mainPart.FootnotesPart!.Footnotes!, footnoteUri);
+            AssertExternalImageRelationship(mainPart.EndnotesPart!, mainPart.EndnotesPart!.Endnotes!, endnoteUri);
+            AssertExternalImageRelationship(
+                mainPart.WordprocessingCommentsPart!,
+                mainPart.WordprocessingCommentsPart!.Comments!,
+                commentUri);
+            Assert.DoesNotContain(
+                mainPart.ExternalRelationships,
+                relationship => relationship.RelationshipType.EndsWith("/image", StringComparison.Ordinal));
+        }
+
+        [Fact]
+        public void Test_ImageNonVisualProperties() {
+            var filePath = Path.Combine(_directoryWithFiles, "DocumentImageNvProps.docx");
+            using (var document = WordDocument.Create(filePath)) {
+                var paragraph = document.AddParagraph();
+                paragraph.AddImage(Path.Combine(_directoryWithImages, "Kulek.jpg"), 50, 50);
+                var image = paragraph.Image;
+                Assert.NotNull(image);
+                image!.Title = "MyTitle";
+                image.Hidden = true;
+                image.PreferRelativeResize = true;
+                image.NoChangeAspect = true;
+                image.FixedOpacity = 80;
+                document.Save();
+            }
+
+            using (var pkg = WordprocessingDocument.Open(filePath, false)) {
+                Assert.NotNull(pkg.MainDocumentPart);
+                var pic = pkg.MainDocumentPart!.Document.Descendants<DocumentFormat.OpenXml.Drawing.Pictures.Picture>().First();
+                var nv = pic.NonVisualPictureProperties;
+                Assert.NotNull(nv);
+                Assert.Equal("MyTitle", nv!.NonVisualDrawingProperties?.Title);
+                Assert.True(nv.NonVisualDrawingProperties?.Hidden?.Value ?? false);
+                Assert.True(nv.NonVisualPictureDrawingProperties?.PreferRelativeResize?.Value ?? false);
+                Assert.True(nv.NonVisualPictureDrawingProperties?.PictureLocks?.NoChangeAspect?.Value ?? false);
+                var ar = pic.BlipFill?.Blip?.GetFirstChild<DocumentFormat.OpenXml.Drawing.AlphaReplace>();
+                Assert.Equal(80000, ar?.Alpha?.Value ?? default);
+            }
+        }
+
+        [Fact]
+        public void Test_ImageEffects() {
+            var filePath = Path.Combine(_directoryWithFiles, "DocumentImageEffects.docx");
+            using (var document = WordDocument.Create(filePath)) {
+                var paragraph = document.AddParagraph();
+                paragraph.AddImage(Path.Combine(_directoryWithImages, "Kulek.jpg"), 50, 50);
+                var img = paragraph.Image;
+                Assert.NotNull(img);
+                img!.AlphaInversionColor = OfficeIMO.Drawing.OfficeColor.Red;
+                img.BlackWhiteThreshold = 60;
+                img.BlurRadius = 2000;
+                img.BlurGrow = true;
+                img.ColorChangeFrom = OfficeIMO.Drawing.OfficeColor.Parse("#97E4FE");
+                img.ColorChangeTo = OfficeIMO.Drawing.OfficeColor.Parse("#FF3399");
+                img.ColorReplacement = OfficeIMO.Drawing.OfficeColor.Lime;
+                img.DuotoneColor1 = OfficeIMO.Drawing.OfficeColor.Black;
+                img.DuotoneColor2 = OfficeIMO.Drawing.OfficeColor.White;
+                img.GrayScale = true;
+                img.LuminanceBrightness = 65;
+                img.LuminanceContrast = 30;
+                img.TintAmount = 50;
+                img.TintHue = 300;
+                document.Save();
+            }
+
+            using (var reloaded = WordDocument.Load(filePath)) {
+                var img = reloaded.Images[0];
+                Assert.Equal("FF0000", img.AlphaInversionColorHex);
+                Assert.Equal(60, img.BlackWhiteThreshold);
+                Assert.Equal(2000, img.BlurRadius);
+                Assert.True(img.BlurGrow == true);
+                Assert.Equal("97E4FE", img.ColorChangeFromHex);
+                Assert.Equal("FF3399", img.ColorChangeToHex);
+                Assert.Equal("00FF00", img.ColorReplacementHex);
+                Assert.Equal("000000", img.DuotoneColor1Hex);
+                Assert.Equal("FFFFFF", img.DuotoneColor2Hex);
+                Assert.True(img.GrayScale == true);
+                Assert.Equal(65, img.LuminanceBrightness);
+                Assert.Equal(30, img.LuminanceContrast);
+                Assert.Equal(50, img.TintAmount);
+                Assert.Equal(300, img.TintHue);
+            }
+        }
+
+        [Fact]
+        public void Test_GetImagesMethods() {
+            var filePath = Path.Combine(_directoryDocuments, "DocumentWithImages.docx");
+            using var document = WordDocument.Load(filePath);
+
+            var bytes = document.GetImageBytes();
+            Assert.Equal(document.Images.Count, bytes.Count);
+
+            for (int i = 0; i < bytes.Count; i++) {
+                var savePath = Path.Combine(_directoryWithFiles, $"extracted_{i}.bin");
+                File.WriteAllBytes(savePath, bytes[i]);
+                Assert.True(new FileInfo(savePath).Length > 0);
+            }
+
+            var streams = document.OpenImageStreams();
+            Assert.Equal(document.Images.Count, streams.Count);
+            for (int i = 0; i < streams.Count; i++) {
+                var path2 = Path.Combine(_directoryWithFiles, $"stream_{i}.bin");
+                using var fs = new FileStream(path2, FileMode.Create);
+                streams[i].CopyTo(fs);
+                Assert.True(new FileInfo(path2).Length > 0);
+            }
+        }
+
+        [Fact]
+        public void Test_ImageStreamPerformance() {
+            var filePath = Path.Combine(_directoryWithFiles, "ImageStreamPerformance.docx");
+            var imagePath = Path.Combine(_directoryWithImages, "Kulek.jpg");
+
+            using (var document = WordDocument.Create(filePath)) {
+                document.AddParagraph().AddImage(imagePath, 100, 100);
+                document.Save();
+            }
+
+            using var loaded = WordDocument.Load(filePath);
+            var image = loaded.Images[0];
+
+            using var stream = image.OpenRead();
+            Assert.False(stream is MemoryStream);
+            Assert.Equal(new FileInfo(imagePath).Length, stream.Length);
+            var buffer = new byte[1];
+            var bytesRead = stream.Read(buffer, 0, 1);
+            Assert.Equal(1, bytesRead);
+        }
+
+        private static void AssertExternalImageRelationship(OpenXmlPart part, OpenXmlElement root, Uri expectedUri) {
+            Blip blip = Assert.Single(root.Descendants<Blip>());
+            string relationshipId = Assert.IsType<StringValue>(blip.Link).Value!;
+            ExternalRelationship relationship = Assert.Single(
+                part.ExternalRelationships,
+                candidate => candidate.Id == relationshipId);
+            Assert.Equal(expectedUri, relationship.Uri);
+            Assert.EndsWith("/image", relationship.RelationshipType, StringComparison.Ordinal);
+        }
+
+    }
+
+}

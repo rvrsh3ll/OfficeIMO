@@ -17,10 +17,12 @@ namespace OfficeIMO.Examples.Word {
 
                 document.PageSettings.PageSize = WordPageSize.A4;
 
-                Console.WriteLine(document.PageSettings.Height.ToString());
-                Console.WriteLine(document.PageSettings.Width.ToString());
-                Console.WriteLine(document.PageSettings.Code.ToString());
-                Console.WriteLine(document.PageSettings.PageSize);
+                var pageSettings = document.PageSettings ?? throw new InvalidOperationException("Page settings are not initialized.");
+
+                Console.WriteLine(pageSettings.Height?.ToString() ?? "Height not set");
+                Console.WriteLine(pageSettings.Width?.ToString() ?? "Width not set");
+                Console.WriteLine(pageSettings.Code?.ToString() ?? "Code not set");
+                Console.WriteLine(pageSettings.PageSize?.ToString() ?? "Page size not set");
 
                 document.BuiltinDocumentProperties.Title = "Cover Page Templates";
                 document.BuiltinDocumentProperties.Subject = "How to use Cover Pages with TOC";
@@ -29,13 +31,13 @@ namespace OfficeIMO.Examples.Word {
 
                 document.Settings.UpdateFieldsOnOpen = true;
 
-                document.AddCoverPage(CoverPageTemplate.IonDark);
+                document.AddCoverPage(WordCoverPageTemplate.IonDark);
 
-                document.AddTableOfContent(TableOfContentStyle.Template1);
+                document.AddTableOfContent(WordTableOfContentsStyle.Template1);
 
                 document.AddPageBreak();
 
-                var wordListToc = document.AddTableOfContentList(WordListStyle.Headings111);
+                var wordListToc = document.AddTableOfContentList(WordListStyle.Numbered);
 
                 wordListToc.AddItem("Prepare document");
 
@@ -49,7 +51,8 @@ namespace OfficeIMO.Examples.Word {
 
                 wordListToc.AddItem("More on the next page");
 
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
     }

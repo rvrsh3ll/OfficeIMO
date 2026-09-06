@@ -1,17 +1,31 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Wordprocessing;
 
 namespace OfficeIMO.Word {
+    /// <summary>
+    /// Border presets that can be applied to a document section.
+    /// </summary>
     public enum WordBorder {
+        /// <summary>
+        /// No preset border is applied.
+        /// </summary>
         None,
+        /// <summary>
+        /// Custom border configured by the user.
+        /// </summary>
         Custom,
+        /// <summary>
+        /// Box border around the page.
+        /// </summary>
         Box,
+        /// <summary>
+        /// Border with a shadow effect.
+        /// </summary>
         Shadow
     }
 
+    /// <summary>
+    /// Provides access to page border settings for a section.
+    /// </summary>
     public class WordBorders {
         private readonly WordDocument _document;
         private readonly WordSection _section;
@@ -21,600 +35,542 @@ namespace OfficeIMO.Word {
             _section = wordSection;
         }
 
-        public UInt32Value LeftSize {
+        /// <summary>
+        /// Gets or sets the width of the left border.
+        /// </summary>
+        public uint? LeftSize {
             get {
-                var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                if (pageBorder != null) {
-                    return pageBorder.LeftBorder.Size;
-                }
-
-                return null;
+                return _section._sectionProperties.GetFirstChild<PageBorders>()?.LeftBorder?.Size?.Value;
             }
             set {
                 var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
                 if (pageBorder == null) {
-                    _section._sectionProperties.Append(Custom);
-                    pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
+                    pageBorder = Custom;
+                    _section._sectionProperties.Append(pageBorder);
                 }
 
-                if (pageBorder.LeftBorder == null) {
-                    pageBorder.LeftBorder = new LeftBorder();
-                }
-
-                pageBorder.LeftBorder.Size = value;
+                var leftBorder = pageBorder.LeftBorder ?? (pageBorder.LeftBorder = new LeftBorder());
+                leftBorder.Size = value;
             }
         }
 
-        public string LeftColorHex {
+        /// <summary>
+        /// Gets or sets the left border color using a hexadecimal value.
+        /// </summary>
+        public string? LeftColorHex {
             get {
-                var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                if (pageBorder != null) {
-                    return (pageBorder.LeftBorder.Color).Value.Replace("#", "");
-                }
-
-                return null;
+                var color = _section._sectionProperties.GetFirstChild<PageBorders>()?.LeftBorder?.Color?.Value;
+                return Helpers.NormalizeOpenXmlColor(color);
             }
             set {
                 var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
                 if (pageBorder == null) {
-                    _section._sectionProperties.Append(Custom);
-                    pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
+                    pageBorder = Custom;
+                    _section._sectionProperties.Append(pageBorder);
                 }
 
-                if (pageBorder.LeftBorder == null) {
-                    pageBorder.LeftBorder = new LeftBorder();
-                }
-
-                pageBorder.LeftBorder.Color = value.Replace("#", "");
+                var leftBorder = pageBorder.LeftBorder ?? (pageBorder.LeftBorder = new LeftBorder());
+                leftBorder.Color = Helpers.NormalizeOpenXmlColor(value);
             }
         }
 
-        public SixLabors.ImageSharp.Color LeftColor {
-            get { return SixLabors.ImageSharp.Color.Parse("#" + LeftColorHex); }
-            set { this.LeftColorHex = value.ToHexColor(); }
+        /// <summary>
+        /// Gets or sets the left border color using a <see cref="OfficeIMO.Drawing.OfficeColor"/> value.
+        /// </summary>
+        public OfficeIMO.Drawing.OfficeColor LeftColor {
+            get {
+                var hex = LeftColorHex;
+                return Helpers.ParseColor(hex ?? throw new InvalidOperationException("LeftColorHex is null"));
+            }
+            set {
+                LeftColorHex = value.ToRgbHex();
+            }
         }
 
-        public BorderValues? LeftStyle {
+        /// <summary>
+        /// Gets or sets the style of the left border.
+        /// </summary>
+        public WordBorderStyle? LeftStyle {
             get {
-                var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                if (pageBorder != null) {
-                    return pageBorder.LeftBorder.Val;
-                }
-
-                return null;
+                return _section._sectionProperties.GetFirstChild<PageBorders>()?.LeftBorder?.Val?.Value.ToOfficeEnum();
             }
             set {
                 var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
                 if (pageBorder == null) {
-                    _section._sectionProperties.Append(Custom);
-                    pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
+                    pageBorder = Custom;
+                    _section._sectionProperties.Append(pageBorder);
                 }
 
-                if (pageBorder.LeftBorder == null) {
-                    pageBorder.LeftBorder = new LeftBorder();
+                var leftBorder = pageBorder.LeftBorder ?? (pageBorder.LeftBorder = new LeftBorder());
+                if (value.HasValue) {
+                    leftBorder.Val = value.Value.ToOpenXml();
+                } else {
+                    leftBorder.Val = null;
                 }
-
-                pageBorder.LeftBorder.Val = value;
             }
         }
 
-        public UInt32Value LeftSpace {
+        /// <summary>
+        /// Gets or sets the space between the left border and page text.
+        /// </summary>
+        public uint? LeftSpace {
             get {
-                var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                if (pageBorder != null) {
-                    return pageBorder.LeftBorder.Space;
-                }
-
-                return null;
+                return _section._sectionProperties.GetFirstChild<PageBorders>()?.LeftBorder?.Space?.Value;
             }
             set {
                 var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
                 if (pageBorder == null) {
-                    _section._sectionProperties.Append(Custom);
-                    pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
+                    pageBorder = Custom;
+                    _section._sectionProperties.Append(pageBorder);
                 }
 
-                if (pageBorder.LeftBorder == null) {
-                    pageBorder.LeftBorder = new LeftBorder();
-                }
-
-                pageBorder.LeftBorder.Space = value;
+                var leftBorder = pageBorder.LeftBorder ?? (pageBorder.LeftBorder = new LeftBorder());
+                leftBorder.Space = value;
             }
         }
 
+        /// <summary>
+        /// Gets or sets a value indicating whether the left border has a shadow.
+        /// </summary>
         public bool? LeftShadow {
             get {
-                var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                if (pageBorder != null && pageBorder.LeftBorder.Shadow != null) {
-                    return pageBorder.LeftBorder.Shadow;
-                }
-
-                return null;
+                var shadow = _section._sectionProperties.GetFirstChild<PageBorders>()?.LeftBorder?.Shadow;
+                return shadow != null ? shadow.Value : (bool?)null;
             }
             set {
                 var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
                 if (pageBorder == null) {
-                    _section._sectionProperties.Append(Custom);
-                    pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
+                    pageBorder = Custom;
+                    _section._sectionProperties.Append(pageBorder);
                 }
 
-                if (pageBorder.LeftBorder == null) {
-                    pageBorder.LeftBorder = new LeftBorder();
-                }
-
-                pageBorder.LeftBorder.Shadow = value;
+                var leftBorder = pageBorder.LeftBorder ?? (pageBorder.LeftBorder = new LeftBorder());
+                leftBorder.Shadow = value;
             }
         }
 
+        /// <summary>
+        /// Gets or sets a value indicating whether the left border is part of a frame.
+        /// </summary>
         public bool? LeftFrame {
             get {
-                var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                if (pageBorder != null && pageBorder.LeftBorder.Frame != null) {
-                    return pageBorder.LeftBorder.Frame;
-                }
-
-                return null;
+                var frame = _section._sectionProperties.GetFirstChild<PageBorders>()?.LeftBorder?.Frame;
+                return frame != null ? frame.Value : (bool?)null;
             }
             set {
                 var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
                 if (pageBorder == null) {
-                    _section._sectionProperties.Append(Custom);
-                    pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
+                    pageBorder = Custom;
+                    _section._sectionProperties.Append(pageBorder);
                 }
 
-                if (pageBorder.LeftBorder == null) {
-                    pageBorder.LeftBorder = new LeftBorder();
-                }
-
-                pageBorder.LeftBorder.Frame = value;
+                var leftBorder = pageBorder.LeftBorder ?? (pageBorder.LeftBorder = new LeftBorder());
+                leftBorder.Frame = value;
             }
         }
 
-        public UInt32Value RightSize {
+        /// <summary>
+        /// Gets or sets the width of the right border.
+        /// </summary>
+        public uint? RightSize {
             get {
-                var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                if (pageBorder != null) {
-                    return pageBorder.RightBorder.Size;
-                }
-
-                return null;
+                return _section._sectionProperties.GetFirstChild<PageBorders>()?.RightBorder?.Size?.Value;
             }
             set {
                 var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
                 if (pageBorder == null) {
-                    _section._sectionProperties.Append(Custom);
-                    pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
+                    pageBorder = Custom;
+                    _section._sectionProperties.Append(pageBorder);
                 }
 
-                if (pageBorder.RightBorder == null) {
-                    pageBorder.RightBorder = new RightBorder();
-                }
-
-                pageBorder.RightBorder.Size = value;
+                var rightBorder = pageBorder.RightBorder ?? (pageBorder.RightBorder = new RightBorder());
+                rightBorder.Size = value;
             }
         }
 
-        public string RightColorHex {
+        /// <summary>
+        /// Gets or sets the right border color using a hexadecimal value.
+        /// </summary>
+        public string? RightColorHex {
             get {
-                var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                if (pageBorder != null) {
-                    return (pageBorder.RightBorder.Color).Value.Replace("#", "");
-                }
-
-                return null;
+                var color = _section._sectionProperties.GetFirstChild<PageBorders>()?.RightBorder?.Color?.Value;
+                return Helpers.NormalizeOpenXmlColor(color);
             }
             set {
                 var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
                 if (pageBorder == null) {
-                    _section._sectionProperties.Append(Custom);
-                    pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
+                    pageBorder = Custom;
+                    _section._sectionProperties.Append(pageBorder);
                 }
 
-                if (pageBorder.RightBorder == null) {
-                    pageBorder.RightBorder = new RightBorder();
-                }
-
-                pageBorder.RightBorder.Color = value.Replace("#", "");
+                var rightBorder = pageBorder.RightBorder ?? (pageBorder.RightBorder = new RightBorder());
+                rightBorder.Color = Helpers.NormalizeOpenXmlColor(value);
             }
         }
 
-        public SixLabors.ImageSharp.Color RightColor {
-            get { return SixLabors.ImageSharp.Color.Parse("#" + RightColorHex); }
-            set { this.RightColorHex = value.ToHexColor(); }
-        }
-
-        public BorderValues? RightStyle {
+        /// <summary>
+        /// Gets or sets the right border color using a <see cref="OfficeIMO.Drawing.OfficeColor"/> value.
+        /// </summary>
+        public OfficeIMO.Drawing.OfficeColor RightColor {
             get {
-                var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                if (pageBorder != null) {
-                    return pageBorder.RightBorder.Val;
-                }
-
-                return null;
+                var hex = RightColorHex;
+                return Helpers.ParseColor(hex ?? throw new InvalidOperationException("RightColorHex is null"));
             }
             set {
-                var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                if (pageBorder == null) {
-                    _section._sectionProperties.Append(Custom);
-                    pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                }
-
-                if (pageBorder.RightBorder == null) {
-                    pageBorder.RightBorder = new RightBorder();
-                }
-
-                pageBorder.RightBorder.Val = value;
+                RightColorHex = value.ToRgbHex();
             }
         }
 
-        public UInt32Value RightSpace {
+        /// <summary>
+        /// Gets or sets the style of the right border.
+        /// </summary>
+        public WordBorderStyle? RightStyle {
             get {
-                var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                if (pageBorder != null) {
-                    return pageBorder.RightBorder.Space;
-                }
-
-                return null;
+                return _section._sectionProperties.GetFirstChild<PageBorders>()?.RightBorder?.Val?.Value.ToOfficeEnum();
             }
             set {
                 var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
                 if (pageBorder == null) {
-                    _section._sectionProperties.Append(Custom);
-                    pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
+                    pageBorder = Custom;
+                    _section._sectionProperties.Append(pageBorder);
                 }
 
-                if (pageBorder.RightBorder == null) {
-                    pageBorder.RightBorder = new RightBorder();
+                var rightBorder = pageBorder.RightBorder ?? (pageBorder.RightBorder = new RightBorder());
+                if (value.HasValue) {
+                    rightBorder.Val = value.Value.ToOpenXml();
+                } else {
+                    rightBorder.Val = null;
                 }
-
-                pageBorder.RightBorder.Space = value;
             }
         }
 
+        /// <summary>
+        /// Gets or sets the space between the right border and page text.
+        /// </summary>
+        public uint? RightSpace {
+            get {
+                return _section._sectionProperties.GetFirstChild<PageBorders>()?.RightBorder?.Space?.Value;
+            }
+            set {
+                var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
+                if (pageBorder == null) {
+                    pageBorder = Custom;
+                    _section._sectionProperties.Append(pageBorder);
+                }
+
+                var rightBorder = pageBorder.RightBorder ?? (pageBorder.RightBorder = new RightBorder());
+                rightBorder.Space = value;
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether the right border has a shadow.
+        /// </summary>
         public bool? RightShadow {
             get {
-                var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                if (pageBorder != null && pageBorder.RightBorder.Shadow != null) {
-                    return pageBorder.RightBorder.Shadow;
-                }
-
-                return null;
+                var shadow = _section._sectionProperties.GetFirstChild<PageBorders>()?.RightBorder?.Shadow;
+                return shadow != null ? shadow.Value : (bool?)null;
             }
             set {
                 var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
                 if (pageBorder == null) {
-                    _section._sectionProperties.Append(Custom);
-                    pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
+                    pageBorder = Custom;
+                    _section._sectionProperties.Append(pageBorder);
                 }
 
-                if (pageBorder.RightBorder == null) {
-                    pageBorder.RightBorder = new RightBorder();
-                }
-
-                pageBorder.RightBorder.Shadow = value;
+                var rightBorder = pageBorder.RightBorder ?? (pageBorder.RightBorder = new RightBorder());
+                rightBorder.Shadow = value;
             }
         }
 
+        /// <summary>
+        /// Gets or sets a value indicating whether the right border is part of a frame.
+        /// </summary>
         public bool? RightFrame {
             get {
-                var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                if (pageBorder != null && pageBorder.RightBorder.Frame != null) {
-                    return pageBorder.RightBorder.Frame;
-                }
-
-                return null;
+                var frame = _section._sectionProperties.GetFirstChild<PageBorders>()?.RightBorder?.Frame;
+                return frame != null ? frame.Value : (bool?)null;
             }
             set {
                 var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
                 if (pageBorder == null) {
-                    _section._sectionProperties.Append(Custom);
-                    pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
+                    pageBorder = Custom;
+                    _section._sectionProperties.Append(pageBorder);
                 }
 
-                if (pageBorder.RightBorder == null) {
-                    pageBorder.RightBorder = new RightBorder();
-                }
-
-                pageBorder.RightBorder.Frame = value;
+                var rightBorder = pageBorder.RightBorder ?? (pageBorder.RightBorder = new RightBorder());
+                rightBorder.Frame = value;
             }
         }
 
-        public UInt32Value TopSize {
+        /// <summary>
+        /// Gets or sets the width of the top border.
+        /// </summary>
+        public uint? TopSize {
             get {
-                var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                if (pageBorder != null) {
-                    return pageBorder.TopBorder.Size;
-                }
-
-                return null;
+                return _section._sectionProperties.GetFirstChild<PageBorders>()?.TopBorder?.Size?.Value;
             }
             set {
                 var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
                 if (pageBorder == null) {
-                    _section._sectionProperties.Append(Custom);
-                    pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
+                    pageBorder = Custom;
+                    _section._sectionProperties.Append(pageBorder);
                 }
 
-                if (pageBorder.TopBorder == null) {
-                    pageBorder.TopBorder = new TopBorder();
-                }
-
-                pageBorder.TopBorder.Size = value;
+                var topBorder = pageBorder.TopBorder ?? (pageBorder.TopBorder = new TopBorder());
+                topBorder.Size = value;
             }
         }
 
-        public string TopColorHex {
+        /// <summary>
+        /// Gets or sets the top border color using a hexadecimal value.
+        /// </summary>
+        public string? TopColorHex {
             get {
-                var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                if (pageBorder != null) {
-                    return (pageBorder.TopBorder.Color).Value.Replace("#", "");
-                }
-
-                return null;
+                var color = _section._sectionProperties.GetFirstChild<PageBorders>()?.TopBorder?.Color?.Value;
+                return Helpers.NormalizeOpenXmlColor(color);
             }
             set {
                 var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
                 if (pageBorder == null) {
-                    _section._sectionProperties.Append(Custom);
-                    pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
+                    pageBorder = Custom;
+                    _section._sectionProperties.Append(pageBorder);
                 }
 
-                if (pageBorder.TopBorder == null) {
-                    pageBorder.TopBorder = new TopBorder();
-                }
-
-                pageBorder.TopBorder.Color = value.Replace("#", "");
+                var topBorder = pageBorder.TopBorder ?? (pageBorder.TopBorder = new TopBorder());
+                topBorder.Color = Helpers.NormalizeOpenXmlColor(value);
             }
         }
 
-        public SixLabors.ImageSharp.Color TopColor {
-            get { return SixLabors.ImageSharp.Color.Parse("#" + TopColorHex); }
-            set { this.TopColorHex = value.ToHexColor(); }
-        }
-
-        public BorderValues? TopStyle {
+        /// <summary>
+        /// Gets or sets the top border color using a <see cref="OfficeIMO.Drawing.OfficeColor"/> value.
+        /// </summary>
+        public OfficeIMO.Drawing.OfficeColor TopColor {
             get {
-                var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                if (pageBorder != null) {
-                    return pageBorder.TopBorder.Val;
-                }
-
-                return null;
+                var hex = TopColorHex;
+                return Helpers.ParseColor(hex ?? throw new InvalidOperationException("TopColorHex is null"));
             }
             set {
-                var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                if (pageBorder == null) {
-                    _section._sectionProperties.Append(Custom);
-                    pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                }
-
-                if (pageBorder.TopBorder == null) {
-                    pageBorder.TopBorder = new TopBorder();
-                }
-
-                pageBorder.TopBorder.Val = value;
+                TopColorHex = value.ToRgbHex();
             }
         }
 
-        public UInt32Value TopSpace {
+        /// <summary>
+        /// Gets or sets the style of the top border.
+        /// </summary>
+        public WordBorderStyle? TopStyle {
             get {
-                var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                if (pageBorder != null) {
-                    return pageBorder.TopBorder.Space;
-                }
-
-                return null;
+                return _section._sectionProperties.GetFirstChild<PageBorders>()?.TopBorder?.Val?.Value.ToOfficeEnum();
             }
             set {
                 var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
                 if (pageBorder == null) {
-                    _section._sectionProperties.Append(Custom);
-                    pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
+                    pageBorder = Custom;
+                    _section._sectionProperties.Append(pageBorder);
                 }
 
-                if (pageBorder.TopBorder == null) {
-                    pageBorder.TopBorder = new TopBorder();
+                var topBorder = pageBorder.TopBorder ?? (pageBorder.TopBorder = new TopBorder());
+                if (value.HasValue) {
+                    topBorder.Val = value.Value.ToOpenXml();
+                } else {
+                    topBorder.Val = null;
                 }
-
-                pageBorder.TopBorder.Space = value;
             }
         }
 
+        /// <summary>
+        /// Gets or sets the space between the top border and page text.
+        /// </summary>
+        public uint? TopSpace {
+            get {
+                return _section._sectionProperties.GetFirstChild<PageBorders>()?.TopBorder?.Space?.Value;
+            }
+            set {
+                var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
+                if (pageBorder == null) {
+                    pageBorder = Custom;
+                    _section._sectionProperties.Append(pageBorder);
+                }
+
+                var topBorder = pageBorder.TopBorder ?? (pageBorder.TopBorder = new TopBorder());
+                topBorder.Space = value;
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether the top border has a shadow.
+        /// </summary>
         public bool? TopShadow {
             get {
                 var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                if (pageBorder != null && pageBorder.TopBorder.Shadow != null) {
-                    return pageBorder.TopBorder.Shadow;
-                }
-
-                return null;
+                var shadow = pageBorder?.TopBorder?.Shadow;
+                return shadow != null ? shadow.Value : (bool?)null;
             }
             set {
                 var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
                 if (pageBorder == null) {
-                    _section._sectionProperties.Append(Custom);
-                    pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
+                    pageBorder = Custom;
+                    _section._sectionProperties.Append(pageBorder);
                 }
 
-                if (pageBorder.TopBorder == null) {
-                    pageBorder.TopBorder = new TopBorder();
-                }
-
-                pageBorder.TopBorder.Shadow = value;
+                var topBorder = pageBorder.TopBorder ?? (pageBorder.TopBorder = new TopBorder());
+                topBorder.Shadow = value;
             }
         }
 
+        /// <summary>
+        /// Gets or sets a value indicating whether the top border is part of a frame.
+        /// </summary>
         public bool? TopFrame {
             get {
                 var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                if (pageBorder != null && pageBorder.TopBorder.Frame != null) {
-                    return pageBorder.TopBorder.Frame;
-                }
-
-                return null;
+                var frame = pageBorder?.TopBorder?.Frame;
+                return frame != null ? frame.Value : (bool?)null;
             }
             set {
                 var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
                 if (pageBorder == null) {
-                    _section._sectionProperties.Append(Custom);
-                    pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
+                    pageBorder = Custom;
+                    _section._sectionProperties.Append(pageBorder);
                 }
 
-                if (pageBorder.TopBorder == null) {
-                    pageBorder.TopBorder = new TopBorder();
-                }
-
-                pageBorder.TopBorder.Frame = value;
+                var topBorder = pageBorder.TopBorder ?? (pageBorder.TopBorder = new TopBorder());
+                topBorder.Frame = value;
             }
         }
 
 
-        public UInt32Value BottomSize {
+        /// <summary>
+        /// Gets or sets the width of the bottom border.
+        /// </summary>
+        public uint? BottomSize {
             get {
-                var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                if (pageBorder != null) {
-                    return pageBorder.BottomBorder.Size;
-                }
-
-                return null;
+                return _section._sectionProperties.GetFirstChild<PageBorders>()?.BottomBorder?.Size?.Value;
             }
             set {
                 var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
                 if (pageBorder == null) {
-                    _section._sectionProperties.Append(Custom);
-                    pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
+                    pageBorder = Custom;
+                    _section._sectionProperties.Append(pageBorder);
                 }
 
-                if (pageBorder.BottomBorder == null) {
-                    pageBorder.BottomBorder = new BottomBorder();
-                }
-
-                pageBorder.BottomBorder.Size = value;
+                var bottomBorder = pageBorder.BottomBorder ?? (pageBorder.BottomBorder = new BottomBorder());
+                bottomBorder.Size = value;
             }
         }
 
-        public string BottomColorHex {
+        /// <summary>
+        /// Gets or sets the bottom border color using a hexadecimal value.
+        /// </summary>
+        public string? BottomColorHex {
             get {
-                var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                if (pageBorder != null) {
-                    return (pageBorder.BottomBorder.Color).Value.Replace("#", "");
-                }
-
-                return null;
+                var color = _section._sectionProperties.GetFirstChild<PageBorders>()?.BottomBorder?.Color?.Value;
+                return Helpers.NormalizeOpenXmlColor(color);
             }
             set {
                 var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
                 if (pageBorder == null) {
-                    _section._sectionProperties.Append(Custom);
-                    pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
+                    pageBorder = Custom;
+                    _section._sectionProperties.Append(pageBorder);
                 }
 
-                if (pageBorder.BottomBorder == null) {
-                    pageBorder.BottomBorder = new BottomBorder();
-                }
-
-                pageBorder.BottomBorder.Color = value.Replace("#", "");
+                var bottomBorder = pageBorder.BottomBorder ?? (pageBorder.BottomBorder = new BottomBorder());
+                bottomBorder.Color = Helpers.NormalizeOpenXmlColor(value);
             }
         }
 
-        public SixLabors.ImageSharp.Color BottomColor {
-            get { return SixLabors.ImageSharp.Color.Parse("#" + BottomColorHex); }
-            set { this.BottomColorHex = value.ToHexColor(); }
-        }
-
-        public BorderValues? BottomStyle {
+        /// <summary>
+        /// Gets or sets the bottom border color using a <see cref="OfficeIMO.Drawing.OfficeColor"/> value.
+        /// </summary>
+        public OfficeIMO.Drawing.OfficeColor BottomColor {
             get {
-                var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                if (pageBorder != null) {
-                    return pageBorder.BottomBorder.Val;
-                }
-
-                return null;
+                var hex = BottomColorHex;
+                return Helpers.ParseColor(hex ?? throw new InvalidOperationException("BottomColorHex is null"));
             }
             set {
-                var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                if (pageBorder == null) {
-                    _section._sectionProperties.Append(Custom);
-                    pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                }
-
-                if (pageBorder.BottomBorder == null) {
-                    pageBorder.BottomBorder = new BottomBorder();
-                }
-
-                pageBorder.BottomBorder.Val = value;
+                BottomColorHex = value.ToRgbHex();
             }
         }
 
-        public UInt32Value BottomSpace {
+        /// <summary>
+        /// Gets or sets the style of the bottom border.
+        /// </summary>
+        public WordBorderStyle? BottomStyle {
             get {
-                var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                if (pageBorder != null) {
-                    return pageBorder.BottomBorder.Space;
-                }
-
-                return null;
+                return _section._sectionProperties.GetFirstChild<PageBorders>()?.BottomBorder?.Val?.Value.ToOfficeEnum();
             }
             set {
                 var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
                 if (pageBorder == null) {
-                    _section._sectionProperties.Append(Custom);
-                    pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
+                    pageBorder = Custom;
+                    _section._sectionProperties.Append(pageBorder);
                 }
 
-                if (pageBorder.BottomBorder == null) {
-                    pageBorder.BottomBorder = new BottomBorder();
+                var bottomBorder = pageBorder.BottomBorder ?? (pageBorder.BottomBorder = new BottomBorder());
+                if (value.HasValue) {
+                    bottomBorder.Val = value.Value.ToOpenXml();
+                } else {
+                    bottomBorder.Val = null;
                 }
-
-                pageBorder.BottomBorder.Space = value;
             }
         }
 
+        /// <summary>
+        /// Gets or sets the space between the bottom border and page text.
+        /// </summary>
+        public uint? BottomSpace {
+            get {
+                return _section._sectionProperties.GetFirstChild<PageBorders>()?.BottomBorder?.Space?.Value;
+            }
+            set {
+                var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
+                if (pageBorder == null) {
+                    pageBorder = Custom;
+                    _section._sectionProperties.Append(pageBorder);
+                }
+
+                var bottomBorder = pageBorder.BottomBorder ?? (pageBorder.BottomBorder = new BottomBorder());
+                bottomBorder.Space = value;
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether the bottom border has a shadow.
+        /// </summary>
         public bool? BottomShadow {
             get {
-                var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                if (pageBorder != null && pageBorder.BottomBorder.Shadow != null) {
-                    return pageBorder.BottomBorder.Shadow;
-                }
-
-                return null;
+                var shadow = _section._sectionProperties.GetFirstChild<PageBorders>()?.BottomBorder?.Shadow;
+                return shadow != null ? shadow.Value : (bool?)null;
             }
             set {
                 var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
                 if (pageBorder == null) {
-                    _section._sectionProperties.Append(Custom);
-                    pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
+                    pageBorder = Custom;
+                    _section._sectionProperties.Append(pageBorder);
                 }
 
-                if (pageBorder.BottomBorder == null) {
-                    pageBorder.BottomBorder = new BottomBorder();
-                }
-
-                pageBorder.BottomBorder.Shadow = value;
+                var bottomBorder = pageBorder.BottomBorder ?? (pageBorder.BottomBorder = new BottomBorder());
+                bottomBorder.Shadow = value;
             }
         }
 
+        /// <summary>
+        /// Gets or sets a value indicating whether the bottom border is part of a frame.
+        /// </summary>
         public bool? BottomFrame {
             get {
-                var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                if (pageBorder != null && pageBorder.BottomBorder.Frame != null) {
-                    return pageBorder.BottomBorder.Frame;
-                }
-
-                return null;
+                var frame = _section._sectionProperties.GetFirstChild<PageBorders>()?.BottomBorder?.Frame;
+                return frame != null ? frame.Value : (bool?)null;
             }
             set {
                 var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
                 if (pageBorder == null) {
-                    _section._sectionProperties.Append(Custom);
-                    pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
+                    pageBorder = Custom;
+                    _section._sectionProperties.Append(pageBorder);
                 }
 
-                if (pageBorder.BottomBorder == null) {
-                    pageBorder.BottomBorder = new BottomBorder();
-                }
-
-                pageBorder.BottomBorder.Frame = value;
+                var bottomBorder = pageBorder.BottomBorder ?? (pageBorder.BottomBorder = new BottomBorder());
+                bottomBorder.Frame = value;
             }
         }
 
@@ -623,9 +579,7 @@ namespace OfficeIMO.Word {
             var pageBorderSettings = GetDefault(wordBorder);
             if (pageBorderSettings == null) {
                 var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
-                if (pageBorder != null) {
-                    pageBorder.Remove();
-                }
+                pageBorder?.Remove();
             } else {
                 var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
                 if (pageBorder == null) {
@@ -637,16 +591,22 @@ namespace OfficeIMO.Word {
             }
         }
 
+        /// <summary>
+        /// Gets or sets the preset border configuration applied to the section.
+        /// </summary>
         public WordBorder Type {
             get {
                 var pageBorder = _section._sectionProperties.GetFirstChild<PageBorders>();
                 if (pageBorder != null) {
-                    foreach (WordBorder wordBorder in Enum.GetValues(typeof(WordBorder))) {
+                    foreach (WordBorder wordBorder in global::OfficeIMO.Internal.EnumCompat.GetValues<WordBorder>()) {
                         if (wordBorder == WordBorder.None) {
                             continue;
                         }
 
                         var pageBordersBuiltin = GetDefault(wordBorder);
+                        if (pageBordersBuiltin == null) {
+                            continue;
+                        }
 
                         if ((pageBordersBuiltin.LeftBorder == null && pageBorder.LeftBorder == null) &&
                             (pageBordersBuiltin.RightBorder == null && pageBorder.RightBorder == null) &&
@@ -687,7 +647,7 @@ namespace OfficeIMO.Word {
             set => SetBorder(value);
         }
 
-        private static PageBorders GetDefault(WordBorder border) {
+        private static PageBorders? GetDefault(WordBorder border) {
             switch (border) {
                 case WordBorder.Box: return Box;
                 case WordBorder.Shadow: return Shadow;

@@ -1,0 +1,682 @@
+using System;
+using System.IO;
+using System.Linq;
+using OfficeIMO.Drawing;
+using OfficeIMO.Visio;
+using OfficeIMO.Visio.Diagrams;
+using OfficeIMO.Visio.Stencils;
+using Xunit;
+using Color = OfficeIMO.Drawing.OfficeColor;
+
+namespace OfficeIMO.Tests {
+    public class VisioGraphDiagramBuilderTests {
+        [Fact]
+        public void GraphDiagramBuilderHandlesCyclesDisconnectedComponentsAndStencilNodes() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx");
+            VisioStencilShape serverStencil = VisioStencils.Network.Get("server");
+
+            VisioDocument document = VisioDocument.Create(filePath)
+                .GraphDiagram("Runtime Graph", graph => graph
+                    .Title()
+                    .Theme(VisioStyleTheme.Fluent())
+                    .Root("users", "Users", VisioGraphNodeKind.External)
+                    .StencilNode("web", "Web", serverStencil)
+                    .Node("api", "API", VisioGraphNodeKind.Process)
+                    .Node("policy", "Policy", VisioGraphNodeKind.Decision)
+                    .Node("db", "Database", VisioGraphNodeKind.Data)
+                    .Node("batch", "Batch", VisioGraphNodeKind.Emphasis)
+                    .Zone("online", "Online path", "users", "web", "api", "policy", "db")
+                    .Zone("offline", "Offline path", "batch", "db")
+                    .Edge("users", "web", "HTTPS")
+                    .Edge("web", "api")
+                    .ControlEdge("api", "policy", "authorize")
+                    .DataEdge("api", "db", "read/write")
+                    .DataEdge("db", "api", "cache")
+                    .Relationship("batch", "db", "nightly"));
+
+            VisioPage page = Assert.Single(document.Pages);
+            Assert.Equal("Runtime Graph", page.Name);
+            Assert.Contains(page.Shapes, shape => shape.Id == "online" && shape.IsBackgroundSurface);
+            Assert.Contains(page.Shapes, shape => shape.Id == "offline" && shape.IsBackgroundSurface);
+            Assert.Contains(page.Shapes, shape => shape.Id == "online-label" && shape.Text == "Online path");
+            Assert.Contains(page.Shapes, shape => shape.Id == "web-label" && shape.Text == "Web");
+            Assert.True(string.IsNullOrEmpty(page.Shapes.Single(shape => shape.Id == "web").Text));
+            Assert.Equal(serverStencil.MasterNameU, page.Shapes.Single(shape => shape.Id == "web").MasterNameU);
+            Assert.True(page.Shapes.Single(shape => shape.Id == "users").PinX < page.Shapes.Single(shape => shape.Id == "web").PinX);
+            Assert.True(page.Shapes.Single(shape => shape.Id == "web").PinX < page.Shapes.Single(shape => shape.Id == "api").PinX);
+            Assert.Equal(6, page.Connectors.Count);
+            Assert.Contains(page.Connectors, connector => connector.Label == "authorize" && connector.LinePattern == 2);
+            Assert.Contains(page.Connectors, connector => connector.Label == "nightly" && connector.EndArrow == EndArrow.None);
+            Assert.All(page.Connectors.Where(connector => !string.IsNullOrWhiteSpace(connector.Label)), connector => Assert.NotNull(connector.LabelPlacement));
+
+            document.Save();
+            Assert.Empty(VisioValidator.Validate(filePath));
+
+            VisioDocument loaded = VisioDocument.Load(filePath);
+            Assert.Equal(12, loaded.Pages[0].Shapes.Count);
+            Assert.Equal(6, loaded.Pages[0].Connectors.Count);
+        }
+
+        [Fact]
+        public void GraphDiagramBuilderSupportsRadialLayoutForCyclicGraphs() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx");
+
+            VisioDocument document = VisioDocument.Create(filePath)
+                .GraphDiagram("Cyclic Service Map", graph => graph
+                    .Layout(VisioGraphLayout.Radial)
+                    .Root("api", "API")
+                    .Node("auth", "Auth")
+                    .Node("queue", "Queue")
+                    .Node("worker", "Worker")
+                    .Node("store", "Store", VisioGraphNodeKind.Data)
+                    .Edge("api", "auth", "token")
+                    .Edge("api", "queue", "publish")
+                    .Edge("queue", "worker", "consume")
+                    .DataEdge("worker", "store", "write")
+                    .DataEdge("store", "api", "read"));
+
+            VisioPage page = Assert.Single(document.Pages);
+            VisioShape api = page.Shapes.Single(shape => shape.Id == "api");
+            Assert.Equal(5, page.Shapes.Count);
+            Assert.Equal(5, page.Connectors.Count);
+            Assert.All(page.Connectors, connector => Assert.Empty(connector.Waypoints));
+            Assert.Contains(page.Shapes.Where(shape => shape.Id != "api"), shape => Math.Abs(shape.PinX - api.PinX) > 0.1D || Math.Abs(shape.PinY - api.PinY) > 0.1D);
+
+            document.Save();
+            Assert.Empty(VisioValidator.Validate(filePath));
+        }
+
+        [Fact]
+        public void GraphDiagramBuilderRoutesSelfEdgesOutsideTheirNode() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx");
+            VisioDocument document = VisioDocument.Create(filePath)
+                .GraphDiagram("Retry Loop", graph => graph
+                    .Node("worker", "Worker")
+                    .Edge("retry", "worker", "worker", "retry"));
+
+            VisioPage page = Assert.Single(document.Pages);
+            VisioShape worker = Assert.Single(page.Shapes, shape => shape.Id == "worker");
+            VisioConnector retry = Assert.Single(page.Connectors, connector => connector.Id == "retry");
+            Assert.Same(worker, retry.From);
+            Assert.Same(worker, retry.To);
+            Assert.Contains(retry.Waypoints, point => point.X > worker.PinX + (worker.Width / 2D));
+            Assert.Contains(retry.Waypoints, point => point.Y > worker.PinY + (worker.Height / 2D));
+
+            document.Save();
+            Assert.Empty(VisioValidator.Validate(filePath));
+            VisioConnector loaded = Assert.Single(VisioDocument.Load(filePath).Pages[0].Connectors, connector => connector.Id == "retry");
+            Assert.Equal(3, loaded.Waypoints.Count);
+        }
+
+        [Fact]
+        public void GraphDiagramBuilderAvoidsGeneratedStencilCaptionIdCollisions() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx");
+            VisioStencilShape serverStencil = VisioStencils.Network.Get("server");
+
+            VisioDocument document = VisioDocument.Create(filePath)
+                .GraphDiagram("Collision Graph", graph => graph
+                    .StencilNode("web", "Web", serverStencil)
+                    .Node("web-label", "Existing label id", VisioGraphNodeKind.Process)
+                    .Edge("web", "web-label"));
+
+            VisioPage page = Assert.Single(document.Pages);
+            Assert.Contains(page.Shapes, shape => shape.Id == "web");
+            Assert.Contains(page.Shapes, shape => shape.Id == "web-label" && shape.Text == "Existing label id");
+            Assert.Contains(page.Shapes, shape => shape.Id == "web-label-2" && shape.Text == "Web");
+
+            document.Save();
+            Assert.Empty(VisioValidator.Validate(filePath));
+        }
+
+        [Fact]
+        public void GraphDiagramBuilderAvoidsNamedNumericEdgeIdCollisions() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx");
+
+            VisioDocument document = VisioDocument.Create(filePath)
+                .GraphDiagram("Numeric Edge Ids", graph => graph
+                    .Node("source", "Source")
+                    .Node("middle", "Middle")
+                    .Node("target", "Target")
+                    .Edge("source", "middle")
+                    .DataEdge("1", "middle", "target", "uses"));
+
+            VisioPage page = Assert.Single(document.Pages);
+            Assert.Equal(page.Connectors.Count, page.Connectors.Select(connector => connector.Id).Distinct().Count());
+            Assert.Contains(page.Connectors, connector => connector.Id == "1" && connector.Label == "uses");
+
+            document.Save();
+            Assert.Empty(VisioValidator.Validate(filePath));
+        }
+
+        [Fact]
+        public void GraphDiagramBuilderCanSelectStencilNodesFromCatalogQueries() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx");
+
+            VisioDocument document = VisioDocument.Create(filePath)
+                .GraphDiagram("Catalog Query Graph", graph => graph
+                    .StencilNode("client", "Client", VisioStencils.Network, "missing", "access-point")
+                    .StencilNode("service", "Service", VisioStencils.Flowchart, "process")
+                    .Edge("client", "service", "calls"));
+
+            VisioPage page = Assert.Single(document.Pages);
+            Assert.Equal("Circle", page.Shapes.Single(shape => shape.Id == "client").MasterNameU);
+            Assert.Equal("Process", page.Shapes.Single(shape => shape.Id == "service").MasterNameU);
+            Assert.Contains(page.Shapes, shape => shape.Id == "client-label" && shape.Text == "Client");
+            Assert.NotEqual(Color.White, page.Shapes.Single(shape => shape.Id == "service").FillColor);
+
+            VisioStencilProfile profile = document.CreateStencilProfile();
+            Assert.Contains("Network", profile.StencilCatalogs);
+            Assert.Contains("Flowchart", profile.StencilCatalogs);
+            Assert.Contains(profile.Usages, usage => usage.StencilId == "net.wireless" && usage.StencilCatalogName == "Network");
+            Assert.Contains(profile.Usages, usage => usage.StencilId == "flow.process" && usage.StencilCatalogName == "Flowchart");
+
+            document.Save();
+            Assert.Empty(VisioValidator.Validate(filePath));
+        }
+
+        [Fact]
+        public void GraphDiagramBuilderFitsStencilCaptionOverflow() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx");
+
+            VisioDocument document = VisioDocument.Create(filePath)
+                .GraphDiagram("Small Stencil Graph", graph => graph
+                    .PageSize(2.4, 1.6)
+                    .StencilNode("api", "API", VisioStencils.Flowchart, "process"));
+
+            VisioPage page = Assert.Single(document.Pages);
+            Assert.True(page.Height >= 2.94D);
+            Assert.Contains(page.Shapes, shape => shape.Id == "api-label" && shape.Text == "API");
+
+            document.Save();
+            Assert.Empty(VisioValidator.Validate(filePath));
+        }
+
+        [Fact]
+        public void GraphDiagramBuilderPreservesStencilDefaultSizeOnMetricPages() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx");
+            VisioStencilShape stencil = VisioStencils.Network.Get("server");
+
+            VisioDocument document = VisioDocument.Create(filePath)
+                .GraphDiagram("Metric Stencil Graph", graph => graph
+                    .PageSize(20, 12, VisioMeasurementUnit.Centimeters)
+                    .StencilNode("server", "Server", stencil));
+
+            VisioPage page = Assert.Single(document.Pages);
+            VisioShape shape = page.Shapes.Single(current => current.Id == "server");
+            Assert.Equal(ToInches(stencil.DefaultWidth, stencil.DefaultUnit ?? VisioMeasurementUnit.Inches), shape.Width, 3);
+            Assert.Equal(ToInches(stencil.DefaultHeight, stencil.DefaultUnit ?? VisioMeasurementUnit.Inches), shape.Height, 3);
+
+            document.Save();
+            Assert.Empty(VisioValidator.Validate(filePath));
+        }
+
+        [Fact]
+        public void GraphDiagramBuilderUsesPageUnitForNullUnitStencilDefaults() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx");
+            VisioStencilShape stencil = new("custom-device", "Custom Device", "Process", "Custom", 2, 1);
+
+            VisioDocument document = VisioDocument.Create(filePath)
+                .GraphDiagram("Metric Custom Stencil Graph", graph => graph
+                    .PageSize(20, 12, VisioMeasurementUnit.Centimeters)
+                    .StencilNode("device", "Device", stencil));
+
+            VisioPage page = Assert.Single(document.Pages);
+            VisioShape shape = page.Shapes.Single(current => current.Id == "device");
+            Assert.Equal(ToInches(2, VisioMeasurementUnit.Centimeters), shape.Width, 3);
+            Assert.Equal(ToInches(1, VisioMeasurementUnit.Centimeters), shape.Height, 3);
+
+            document.Save();
+            Assert.Empty(VisioValidator.Validate(filePath));
+        }
+
+        [Fact]
+        public void GraphDiagramBuilderKeepsNativeNodesZonesAndLegendInMetricPageUnits() {
+            VisioDocument document = VisioDocument.Create(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx"))
+                .GraphDiagram("Metric Graph", graph => graph
+                    .PageSize(20, 12, VisioMeasurementUnit.Centimeters)
+                    .Legend()
+                    .Root("client", "Client", VisioGraphNodeKind.External)
+                    .Node("api", "API")
+                    .Node("db", "Database", VisioGraphNodeKind.Data)
+                    .Zone("runtime", "Runtime", "api", "db")
+                    .Edge("client", "api")
+                    .DataEdge("api", "db"));
+
+            VisioPage page = Assert.Single(document.Pages);
+            VisioShape api = Assert.Single(page.Shapes, shape => shape.Id == "api");
+            VisioShape database = Assert.Single(page.Shapes, shape => shape.Id == "db");
+            VisioShape runtime = Assert.Single(page.Shapes, shape => shape.Id == "runtime");
+            VisioShape legendSample = Assert.Single(page.Shapes, shape => shape.Id == "legend-node-process-sample");
+
+            Assert.InRange(api.PinX, 0D, page.Width);
+            Assert.InRange(database.PinX, 0D, page.Width);
+            Assert.InRange(legendSample.PinX, 0D, page.Width);
+            Assert.True(Contains(runtime, api));
+            Assert.True(Contains(runtime, database));
+        }
+
+        [Fact]
+        public void GraphDiagramBuilderReservesExplicitImportedEdgeIdsBeforeGeneratedIds() {
+            VisioGraphEdgeRecord generated = new("source", "target") {
+                Label = "generated"
+            };
+            VisioGraphEdgeRecord explicitEdge = new("source-standard-target", "target", "middle") {
+                Label = "explicit"
+            };
+
+            VisioDocument document = VisioDocument.Create(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx"))
+                .GraphDiagram("Imported Edge Ids", graph => graph
+                    .Node("source", "Source")
+                    .Node("target", "Target")
+                    .Node("middle", "Middle")
+                    .Edges(new[] { generated, explicitEdge }));
+
+            VisioPage page = Assert.Single(document.Pages);
+
+            Assert.Contains(page.Connectors, connector => connector.Id == "source-standard-target-2" && connector.Label == "generated");
+            Assert.Contains(page.Connectors, connector => connector.Id == "source-standard-target" && connector.Label == "explicit");
+            Assert.Equal(page.Connectors.Count, page.Connectors.Select(connector => connector.Id).Distinct().Count());
+        }
+
+        [Fact]
+        public void GraphDiagramBuilderBudgetsLayoutFromActualStencilDimensions() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx");
+            VisioStencilShape largeStencil = new("large-device", "Large Device", "Process", "Custom", 4.2, 1.8);
+
+            VisioDocument document = VisioDocument.Create(filePath)
+                .GraphDiagram("Large Stencil Graph", graph => graph
+                    .PageSize(4.5, 3.2)
+                    .StencilNode("left", "Left", largeStencil)
+                    .StencilNode("right", "Right", largeStencil)
+                    .Edge("left", "right"));
+
+            VisioPage page = Assert.Single(document.Pages);
+            VisioShape left = page.Shapes.Single(shape => shape.Id == "left");
+            VisioShape right = page.Shapes.Single(shape => shape.Id == "right");
+            Assert.True(page.Width >= 10D);
+            Assert.True(right.PinX - left.PinX > largeStencil.DefaultWidth);
+
+            document.Save();
+            Assert.Empty(VisioValidator.Validate(filePath));
+        }
+
+        [Fact]
+        public void GraphDiagramBuilderCanAttachShapeDataAndHyperlinksToNodes() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx");
+
+            VisioDocument document = VisioDocument.Create(filePath)
+                .GraphDiagram("Metadata Graph", graph => graph
+                    .Node("api", "API", VisioGraphNodeKind.Emphasis)
+                    .Node("database", "Database", VisioGraphNodeKind.Data)
+                    .NodeShapeData("api", "Owner", "Platform", "Owner", VisioShapeDataType.String, "Owning team")
+                    .NodeShapeData("api", "owner", "Platform Team", "Owner", VisioShapeDataType.String, "Owning team")
+                    .NodeShapeData("api", "Tier", "Public", "Service tier", VisioShapeDataType.String)
+                    .NodeShapeData("database", "Classification", "Confidential", "Data classification", VisioShapeDataType.String)
+                    .NodeHyperlink("api", "https://example.org/runbook", "Runbook")
+                    .NodeHyperlink("database", new Uri("https://example.org/data-catalog"), "Data catalog")
+                    .NamedDataEdge("api-reads-database", "api", "database")
+                    .EdgeShapeData("api-reads-database", "Protocol", "HTTP", "Protocol", VisioShapeDataType.String)
+                    .EdgeShapeData("api-reads-database", "protocol", "HTTPS", "Protocol", VisioShapeDataType.String)
+                    .EdgeShapeData("api-reads-database", "Port", "443", "Port", VisioShapeDataType.Number)
+                    .EdgeHyperlink("api-reads-database", "https://example.org/openapi.json", "API contract"));
+
+            VisioPage page = Assert.Single(document.Pages);
+            VisioShape api = page.Shapes.Single(shape => shape.Id == "api");
+            VisioShape database = page.Shapes.Single(shape => shape.Id == "database");
+            VisioConnector connector = page.Connectors.Single(edge => edge.Id == "api-reads-database");
+            Assert.Equal("Platform Team", api.GetShapeDataValue("Owner"));
+            Assert.Equal("Public", api.GetShapeDataValue("Tier"));
+            Assert.Equal("Confidential", database.GetShapeDataValue("Classification"));
+            Assert.Single(api.ShapeData, row => string.Equals(row.Name, "owner", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(api.ShapeData, row => row.Name == "owner" && row.Label == "Owner" && row.Prompt == "Owning team");
+            Assert.Contains(api.Hyperlinks, hyperlink => hyperlink.Address == "https://example.org/runbook" && hyperlink.Description == "Runbook");
+            Assert.Contains(database.Hyperlinks, hyperlink => hyperlink.Address == "https://example.org/data-catalog" && hyperlink.Description == "Data catalog");
+            Assert.True(string.IsNullOrEmpty(connector.Label));
+            Assert.Equal("HTTPS", connector.GetShapeDataValue("Protocol"));
+            Assert.Equal("443", connector.GetShapeDataValue("Port"));
+            Assert.Single(connector.ShapeData, row => string.Equals(row.Name, "protocol", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(connector.ShapeData, row => row.Name == "protocol" && row.Label == "Protocol" && row.Type == VisioShapeDataType.String);
+            Assert.Contains(connector.Hyperlinks, hyperlink => hyperlink.Address == "https://example.org/openapi.json" && hyperlink.Description == "API contract");
+
+            document.Save();
+            Assert.Empty(VisioValidator.Validate(filePath));
+
+            VisioDocument loaded = VisioDocument.Load(filePath);
+            VisioShape loadedApi = loaded.Pages[0].Shapes.Single(shape => shape.Id == "api");
+            VisioConnector loadedConnector = loaded.Pages[0].Connectors.Single(edge => edge.Id == "api-reads-database");
+            Assert.Equal("Platform Team", loadedApi.GetShapeDataValue("Owner"));
+            Assert.Contains(loadedApi.Hyperlinks, hyperlink => hyperlink.Address == "https://example.org/runbook" && hyperlink.Description == "Runbook");
+            Assert.Equal("HTTPS", loadedConnector.GetShapeDataValue("Protocol"));
+            Assert.Equal("443", loadedConnector.GetShapeDataValue("Port"));
+            Assert.Contains(loadedConnector.Hyperlinks, hyperlink => hyperlink.Address == "https://example.org/openapi.json" && hyperlink.Description == "API contract");
+        }
+
+        [Fact]
+        public void GraphDiagramBuilderImportsSimpleNodeAndEdgeRecordsWithStableIds() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx");
+            VisioGraphNodeRecord idp = new("idp", "Entra ID") {
+                StencilCatalog = VisioStencils.SecurityIdentity,
+                IsRoot = true,
+                HyperlinkAddress = "https://example.org/identity",
+                HyperlinkDescription = "Identity runbook",
+                FillColor = Color.FromRgb(230, 240, 250),
+                LineColor = Color.FromRgb(25, 50, 75)
+            };
+            idp.StencilQueries.Add("idp");
+            idp.ShapeData.Add("Owner", "IAM");
+
+            VisioGraphNodeRecord cluster = new("cluster", "AKS Cluster") {
+                StencilCatalog = VisioStencils.ContainersKubernetes
+            };
+            cluster.StencilQueries.Add("kubernetes");
+            cluster.ShapeData.Add("Environment", "Production");
+
+            VisioGraphNodeRecord lake = new("lake", "Data Lake") {
+                StencilCatalog = VisioStencils.DataPlatform
+            };
+            lake.StencilQueries.Add("data.lake");
+            lake.ShapeData.Add("Classification", "Confidential");
+
+            VisioGraphNodeRecord team = new("ops-team", "Operations") {
+                StencilCatalog = VisioStencils.CollaborationBusiness
+            };
+            team.StencilQueries.Add("team");
+
+            VisioGraphEdgeRecord tokenFlow = new("idp", "cluster") {
+                Label = "tokens",
+                Kind = VisioGraphConnectorKind.Control,
+                LineStyle = OfficeStrokeDashStyle.Dot,
+                LineColor = Color.FromRgb(80, 100, 120)
+            };
+            tokenFlow.ShapeData.Add("Protocol", "OIDC");
+
+            VisioGraphEdgeRecord eventFlow = new("cluster", "lake") {
+                Label = "events",
+                Kind = VisioGraphConnectorKind.Data,
+                HyperlinkAddress = "https://example.org/pipeline",
+                HyperlinkDescription = "Pipeline"
+            };
+
+            VisioGraphEdgeRecord runbook = new("ops-team-owns-cluster", "ops-team", "cluster") {
+                Label = "owns",
+                Directed = false
+            };
+
+            VisioDocument document = VisioDocument.Create(filePath)
+                .GraphDiagram("Imported Inventory Graph", graph => graph
+                    .Title()
+                    .Import(
+                        new[] { idp, cluster, lake, team },
+                        new[] { tokenFlow, eventFlow, runbook })
+                    .Zone("runtime-zone", "Runtime", "cluster", "lake"));
+
+            VisioPage page = Assert.Single(document.Pages);
+            Assert.Contains(page.Shapes, shape => shape.Id == "runtime-zone" && shape.IsBackgroundSurface);
+            Assert.Equal("IAM", page.Shapes.Single(shape => shape.Id == "idp").GetShapeDataValue("Owner"));
+            Assert.Equal(Color.FromRgb(230, 240, 250), page.Shapes.Single(shape => shape.Id == "idp").FillColor);
+            Assert.Equal(Color.FromRgb(25, 50, 75), page.Shapes.Single(shape => shape.Id == "idp").LineColor);
+            Assert.Equal("Production", page.Shapes.Single(shape => shape.Id == "cluster").GetShapeDataValue("Environment"));
+            Assert.Equal("Confidential", page.Shapes.Single(shape => shape.Id == "lake").GetShapeDataValue("Classification"));
+            Assert.Contains(page.Shapes.Single(shape => shape.Id == "idp").Hyperlinks, hyperlink => hyperlink.Address == "https://example.org/identity");
+            Assert.Contains(page.Connectors, connector => connector.Id == "idp-control-cluster" && connector.Label == "tokens" && connector.LinePattern == 3 && connector.GetShapeDataValue("Protocol") == "OIDC");
+            Assert.Equal(Color.FromRgb(80, 100, 120), page.Connectors.Single(connector => connector.Id == "idp-control-cluster").LineColor);
+            Assert.Contains(page.Connectors, connector => connector.Id == "cluster-data-lake" && connector.Label == "events" && connector.Hyperlinks.Any(hyperlink => hyperlink.Description == "Pipeline"));
+            Assert.Contains(page.Connectors, connector => connector.Id == "ops-team-owns-cluster" && connector.EndArrow == EndArrow.None);
+
+            VisioStencilProfile profile = document.CreateStencilProfile();
+            Assert.Contains("Security and Identity", profile.StencilCatalogs);
+            Assert.Contains("Containers and Kubernetes", profile.StencilCatalogs);
+            Assert.Contains("Data and Platform", profile.StencilCatalogs);
+            Assert.Contains("Collaboration and Business Process", profile.StencilCatalogs);
+
+            document.Save();
+            Assert.Empty(VisioValidator.Validate(filePath));
+
+            VisioDocument loaded = VisioDocument.Load(filePath);
+            Assert.Contains(loaded.Pages[0].Connectors, connector => connector.Id == "idp-control-cluster" && connector.LinePattern == 3);
+            Assert.Contains(loaded.Pages[0].Connectors, connector => connector.Id == "cluster-data-lake");
+            Assert.Equal("IAM", loaded.Pages[0].Shapes.Single(shape => shape.Id == "idp").GetShapeDataValue("Owner"));
+        }
+
+        [Fact]
+        public void GraphDiagramBuilderNormalizesImportedNodeIdBeforeApplyingRecordState() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx");
+            var record = new VisioGraphNodeRecord("  service  ", "Service") {
+                FillColor = Color.FromRgb(230, 240, 250),
+                LineColor = Color.FromRgb(25, 50, 75),
+                HyperlinkAddress = "https://example.org/service",
+                HyperlinkDescription = "Service runbook",
+                IsRoot = true
+            };
+            record.ShapeData.Add("Owner", "Platform");
+
+            VisioDocument document = VisioDocument.Create(filePath)
+                .GraphDiagram("Normalized imported ids", graph => graph.Import(new[] { record }, Array.Empty<VisioGraphEdgeRecord>()));
+
+            VisioShape service = Assert.Single(document.Pages[0].Shapes, shape => shape.Id == "service");
+            Assert.Equal(Color.FromRgb(230, 240, 250), service.FillColor);
+            Assert.Equal(Color.FromRgb(25, 50, 75), service.LineColor);
+            Assert.Equal("Platform", service.GetShapeDataValue("Owner"));
+            Assert.Contains(service.Hyperlinks, hyperlink => hyperlink.Address == "https://example.org/service" && hyperlink.Description == "Service runbook");
+
+            document.Save();
+            Assert.Empty(VisioValidator.Validate(filePath));
+            VisioDocument loaded = VisioDocument.Load(filePath);
+            VisioShape loadedService = Assert.Single(loaded.Pages[0].Shapes, shape => shape.Id == "service");
+            Assert.Equal("Platform", loadedService.GetShapeDataValue("Owner"));
+            Assert.Contains(loadedService.Hyperlinks, hyperlink => hyperlink.Address == "https://example.org/service");
+        }
+
+        [Fact]
+        public void GraphDiagramBuilderImportsClustersWithMetadataAndHyperlinks() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx");
+            VisioGraphNodeRecord idp = new("idp", "Entra ID") {
+                StencilCatalog = VisioStencils.SecurityIdentity,
+                IsRoot = true
+            };
+            idp.StencilQueries.Add("idp");
+
+            VisioGraphNodeRecord api = new("api", "API Gateway") {
+                StencilCatalog = VisioStencils.Cloud
+            };
+            api.StencilQueries.Add("api");
+
+            VisioGraphNodeRecord worker = new("worker", "Processor") {
+                Kind = VisioGraphNodeKind.Process
+            };
+
+            VisioGraphNodeRecord database = new("db", "Customer Data") {
+                StencilCatalog = VisioStencils.DataPlatform
+            };
+            database.StencilQueries.Add("database");
+
+            VisioGraphEdgeRecord auth = new("idp", "api") {
+                Kind = VisioGraphConnectorKind.Control,
+                Label = "authorize"
+            };
+            VisioGraphEdgeRecord process = new("api", "worker") {
+                Label = "enqueue"
+            };
+            VisioGraphEdgeRecord persist = new("worker", "db") {
+                Kind = VisioGraphConnectorKind.Data,
+                Label = "write"
+            };
+
+            VisioGraphClusterRecord runtime = new("  runtime-cluster  ", "Runtime Tier", new[] { "api", "worker", "db", "api" }) {
+                HyperlinkAddress = "https://example.org/runtime",
+                HyperlinkDescription = "Runtime runbook",
+                FillColor = Color.FromRgb(245, 248, 252),
+                LineColor = Color.FromRgb(90, 110, 130)
+            };
+            runtime.ShapeData.Add("Owner", "Platform");
+            runtime.ShapeData.Add("Tier", "Production");
+
+            VisioDocument document = VisioDocument.Create(filePath)
+                .GraphDiagram("Clustered Inventory Graph", graph => graph
+                    .Title()
+                    .Import(
+                        new[] { idp, api, worker, database },
+                        new[] { auth, process, persist },
+                        new[] { runtime })
+                    .Cluster("identity-cluster", "Identity", "idp", "api")
+                    .ZoneShapeData("identity-cluster", "Owner", "IAM")
+                    .ZoneHyperlink("identity-cluster", "https://example.org/identity", "Identity runbook"));
+
+            VisioPage page = Assert.Single(document.Pages);
+            VisioShape runtimeShape = page.Shapes.Single(shape => shape.Id == "runtime-cluster");
+            VisioShape identityShape = page.Shapes.Single(shape => shape.Id == "identity-cluster");
+            Assert.True(runtimeShape.IsBackgroundSurface);
+            Assert.Equal(Color.FromRgb(245, 248, 252), runtimeShape.FillColor);
+            Assert.Equal(Color.FromRgb(90, 110, 130), runtimeShape.LineColor);
+            Assert.True(identityShape.IsBackgroundSurface);
+            Assert.Equal("Platform", runtimeShape.GetShapeDataValue("Owner"));
+            Assert.Equal("Production", runtimeShape.GetShapeDataValue("Tier"));
+            Assert.Contains(runtimeShape.Hyperlinks, hyperlink => hyperlink.Address == "https://example.org/runtime" && hyperlink.Description == "Runtime runbook");
+            Assert.Equal("IAM", identityShape.GetShapeDataValue("Owner"));
+            Assert.Contains(identityShape.Hyperlinks, hyperlink => hyperlink.Address == "https://example.org/identity" && hyperlink.Description == "Identity runbook");
+            Assert.Contains(page.Shapes, shape => shape.Id == "runtime-cluster-label" && shape.Text == "Runtime Tier");
+            Assert.Contains(page.Shapes, shape => shape.Id == "identity-cluster-label" && shape.Text == "Identity");
+
+            document.Save();
+            Assert.Empty(VisioValidator.Validate(filePath));
+
+            VisioDocument loaded = VisioDocument.Load(filePath);
+            VisioShape loadedRuntime = loaded.Pages[0].Shapes.Single(shape => shape.Id == "runtime-cluster");
+            VisioShape loadedIdentity = loaded.Pages[0].Shapes.Single(shape => shape.Id == "identity-cluster");
+            Assert.Equal("Platform", loadedRuntime.GetShapeDataValue("Owner"));
+            Assert.Contains(loadedRuntime.Hyperlinks, hyperlink => hyperlink.Address == "https://example.org/runtime");
+            Assert.Equal("IAM", loadedIdentity.GetShapeDataValue("Owner"));
+        }
+
+        [Fact]
+        public void GraphDiagramBuilderCreatesAutomaticLegendFromUsedNodeAndEdgeTypes() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx");
+
+            VisioDocument document = VisioDocument.Create(filePath)
+                .GraphDiagram("Legend Graph", graph => graph
+                    .Title()
+                    .Legend()
+                    .Root("client", "Client", VisioGraphNodeKind.External)
+                    .Node("api", "API")
+                    .Node("decision", "Policy", VisioGraphNodeKind.Decision)
+                    .Node("db", "Database", VisioGraphNodeKind.Data)
+                    .ControlEdge("client-api", "client", "api", "calls")
+                    .Edge("api-policy", "api", "decision", "checks")
+                    .DataEdge("api-db", "api", "db", "reads")
+                    .Relationship("decision-db", "decision", "db", "documents"));
+
+            VisioPage page = Assert.Single(document.Pages);
+            Assert.Contains(page.Shapes, shape => shape.Id == "legend-title" && shape.Text == "Legend");
+            Assert.Contains(page.Shapes, shape => shape.Text == "External");
+            Assert.Contains(page.Shapes, shape => shape.Text == "Process");
+            Assert.Contains(page.Shapes, shape => shape.Text == "Decision");
+            Assert.Contains(page.Shapes, shape => shape.Text == "Data store");
+            Assert.Contains(page.Shapes, shape => shape.Text == "Control flow");
+            Assert.Contains(page.Shapes, shape => shape.Text == "Data flow");
+            Assert.Contains(page.Shapes, shape => shape.Text == "Dependency");
+            Assert.Contains(page.Shapes, shape => shape.Text == "Relationship");
+            Assert.Contains(page.Shapes, shape => shape.Id == "legend-node-process-sample" && shape.GetUserCellValue(VisioSemanticUserCells.Kind) == VisioSemanticUserCells.DiagramAdornmentKind);
+            Assert.Contains(page.Shapes, shape => shape.Id == "legend-edge-control-directed-sample" && shape.LinePattern == 2 && shape.GetUserCellValue(VisioSemanticUserCells.Kind) == VisioSemanticUserCells.DiagramAdornmentKind);
+            Assert.Contains(page.Shapes, shape => shape.Id == "legend-edge-standard-relationship-sample" && shape.GetUserCellValue(VisioSemanticUserCells.Kind) == VisioSemanticUserCells.DiagramAdornmentKind);
+
+            document.Save();
+            Assert.Empty(VisioValidator.Validate(filePath));
+
+            VisioDocument loaded = VisioDocument.Load(filePath);
+            Assert.Contains(loaded.Pages[0].Shapes, shape => shape.Id == "legend-title" && shape.Text == "Legend");
+            Assert.Contains(loaded.Pages[0].Shapes, shape => shape.Id == "legend-edge-control-directed-sample" && shape.GetUserCellValue(VisioSemanticUserCells.Kind) == VisioSemanticUserCells.DiagramAdornmentKind);
+        }
+
+        [Fact]
+        public void GraphDiagramBuilderCanOverrideNodeAndNamedEdgeStyles() {
+            string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx");
+            Color nodeFill = Color.FromRgb(245, 104, 85);
+            Color nodeLine = Color.FromRgb(160, 44, 34);
+            Color edgeLine = Color.FromRgb(112, 48, 160);
+
+            VisioDocument document = VisioDocument.Create(filePath)
+                .GraphDiagram("Styled Graph", graph => graph
+                    .Theme(VisioStyleTheme.Technical())
+                    .Node("api", "API")
+                    .Node("database", "Database", VisioGraphNodeKind.Data)
+                    .NodeStyle("api", style => {
+                        style.FillColor = nodeFill;
+                        style.LineColor = nodeLine;
+                        style.LineWeight = 0.031D;
+                    })
+                    .DataEdge("api-reads-database", "api", "database", "reads")
+                    .EdgeStyle("api-reads-database", style => {
+                        style.LineColor = edgeLine;
+                        style.LineWeight = 0.033D;
+                        style.LinePattern = 2;
+                        style.EndArrow = EndArrow.Arrow;
+                    }));
+
+            VisioPage page = Assert.Single(document.Pages);
+            VisioShape api = page.Shapes.Single(shape => shape.Id == "api");
+            VisioConnector connector = page.Connectors.Single(edge => edge.Id == "api-reads-database");
+            Assert.Equal(nodeFill, api.FillColor);
+            Assert.Equal(nodeLine, api.LineColor);
+            Assert.Equal(0.031D, api.LineWeight, 3);
+            Assert.Equal(edgeLine, connector.LineColor);
+            Assert.Equal(0.033D, connector.LineWeight, 3);
+            Assert.Equal(2, connector.LinePattern);
+            Assert.Equal(EndArrow.Arrow, connector.EndArrow);
+
+            document.Save();
+            Assert.Empty(VisioValidator.Validate(filePath));
+        }
+
+        [Fact]
+        public void GraphDiagramBuilderRejectsUnknownEdgeEndpoints() {
+            VisioDocument document = VisioDocument.Create(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx"));
+
+            ArgumentException exception = Assert.Throws<ArgumentException>(() =>
+                document.GraphDiagram("Invalid", graph => graph
+                    .Node("known", "Known")
+                    .Edge("known", "missing")));
+
+            Assert.Contains("Unknown graph node id", exception.Message);
+        }
+
+        [Fact]
+        public void GraphDiagramBuilderRejectsUnknownNamedEdgesAndDuplicateEdgeIds() {
+            VisioDocument document = VisioDocument.Create(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx"));
+
+            ArgumentException unknown = Assert.Throws<ArgumentException>(() =>
+                document.GraphDiagram("Unknown Edge", graph => graph
+                    .Node("api", "API")
+                    .Node("database", "Database")
+                    .DataEdge("api-reads-database", "api", "database", "reads")
+                    .EdgeHyperlink("missing-edge", "https://example.org")));
+
+            Assert.Contains("Unknown graph edge id", unknown.Message);
+
+            ArgumentException duplicate = Assert.Throws<ArgumentException>(() =>
+                VisioDocument.Create(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vsdx"))
+                    .GraphDiagram("Duplicate Edge", graph => graph
+                        .Node("api", "API")
+                        .Node("database", "Database")
+                        .DataEdge("api", "api", "database", "reads")));
+
+            Assert.Contains("already exists", duplicate.Message);
+        }
+
+        private static double ToInches(double value, VisioMeasurementUnit unit) {
+            switch (unit) {
+                case VisioMeasurementUnit.Centimeters:
+                    return value / 2.54D;
+                case VisioMeasurementUnit.Millimeters:
+                    return value / 25.4D;
+                default:
+                    return value;
+            }
+        }
+
+        private static bool Contains(VisioShape outer, VisioShape inner) =>
+            inner.PinX - inner.Width / 2D >= outer.PinX - outer.Width / 2D &&
+            inner.PinX + inner.Width / 2D <= outer.PinX + outer.Width / 2D &&
+            inner.PinY - inner.Height / 2D >= outer.PinY - outer.Height / 2D &&
+            inner.PinY + inner.Height / 2D <= outer.PinY + outer.Height / 2D;
+    }
+}

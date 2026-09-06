@@ -1,4 +1,5 @@
 using System;
+using OfficeIMO.Examples.Utils;
 using OfficeIMO.Word;
 
 namespace OfficeIMO.Examples.Word {
@@ -9,7 +10,7 @@ namespace OfficeIMO.Examples.Word {
             using (WordDocument document = WordDocument.Create(filePath)) {
 
                 // add list and nest a list
-                WordList wordList1 = document.AddList(WordListStyle.Headings111);
+                WordList wordList1 = document.AddList(WordListStyle.Numbered);
                 Console.WriteLine("List (0) ElementsCount (0): " + wordList1.ListItems.Count);
                 Console.WriteLine("List (0) ElementsCount (1): " + document.Lists[0].ListItems.Count);
                 wordList1.AddItem("Text 1");
@@ -30,27 +31,27 @@ namespace OfficeIMO.Examples.Word {
                 wordListNested.AddItem("Nested 1", 1);
                 wordListNested.AddItem("Nested 2", 1);
 
-                WordList wordList2 = document.AddList(WordListStyle.Headings111);
+                WordList wordList2 = document.AddList(WordListStyle.Numbered);
 
                 wordList2.AddItem("Section 2");
                 wordList2.AddItem("Section 2.1", 1);
 
-                WordList wordList3 = document.AddList(WordListStyle.Headings111);
+                WordList wordList3 = document.AddList(WordListStyle.Numbered);
 
                 wordList3.AddItem("Section 1");
                 wordList3.AddItem("Section 1.1", 1);
 
-                WordList wordList4 = document.AddList(WordListStyle.Headings111);
+                WordList wordList4 = document.AddList(WordListStyle.Numbered);
                 //wordList4.RestartNumbering = true;
                 wordList4.AddItem("Section 2");
                 wordList4.AddItem("Section 2.1", 1);
 
-                WordList wordList5 = document.AddList(WordListStyle.Headings111);
+                WordList wordList5 = document.AddList(WordListStyle.Numbered);
                 //wordList5.RestartNumbering = true;
                 wordList5.AddItem("Section 3");
                 wordList5.AddItem("Section 3.1", 1);
 
-                WordList wordList6 = document.AddList(WordListStyle.Headings111);
+                WordList wordList6 = document.AddList(WordListStyle.Numbered);
                 wordList1.AddItem("Text 4");
                 wordList1.AddItem("Text 4.1", 1);
 
@@ -119,7 +120,7 @@ namespace OfficeIMO.Examples.Word {
 
                 Console.WriteLine("Lists count in a document (11): " + document.Lists.Count);
 
-                document.Save(false);
+                document.Save();
             }
 
 
@@ -128,26 +129,28 @@ namespace OfficeIMO.Examples.Word {
 
                 document.Lists[0].AddItem("More then enough");
 
-                document.AddHeadersAndFooters();
+                var defaultHeader = document.HeaderDefaultOrCreate;
+                var defaultFooter = document.FooterDefaultOrCreate;
 
-                var listInHeader = document.Header.Default.AddList(WordListStyle.Bulleted);
+                var listInHeader = defaultHeader.AddList(WordListStyle.Bulleted);
 
                 listInHeader.AddItem("Test Header 1");
 
-                document.Footer.Default.AddParagraph("Test Me Header");
+                defaultFooter.AddParagraph("Test Me Header");
 
                 listInHeader.AddItem("Test Header 2");
 
 
-                var listInFooter = document.Footer.Default.AddList(WordListStyle.Headings111);
+                var listInFooter = defaultFooter.AddList(WordListStyle.Numbered);
 
                 listInFooter.AddItem("Test Footer 1");
 
-                document.Footer.Default.AddParagraph("Test Me Footer");
+                defaultFooter.AddParagraph("Test Me Footer");
 
                 listInFooter.AddItem("Test Footer 2");
 
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
     }

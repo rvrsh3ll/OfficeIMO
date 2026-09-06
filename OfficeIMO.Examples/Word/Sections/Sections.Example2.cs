@@ -1,11 +1,11 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using DocumentFormat.OpenXml.Wordprocessing;
 using OfficeIMO.Word;
-using Color = SixLabors.ImageSharp.Color;
+using Color = OfficeIMO.Drawing.OfficeColor;
 
 namespace OfficeIMO.Examples.Word {
     internal partial class Sections {
@@ -15,12 +15,12 @@ namespace OfficeIMO.Examples.Word {
             string filePath = System.IO.Path.Combine(folderPath, "Basic Document with some sections 2.docx");
 
             using (WordDocument document = WordDocument.Create(filePath)) {
-                document.Sections[0].PageOrientation = PageOrientationValues.Landscape;
+                document.Sections[0].PageOrientation = OfficePageOrientation.Landscape;
                 document.AddParagraph("Test 1 - Should be before 1st section").SetColor(Color.LightPink);
 
                 var section1 = document.AddSection();
                 section1.AddParagraph("This is a text in 2nd section");
-                section1.PageOrientation = PageOrientationValues.Portrait;
+                section1.PageOrientation = OfficePageOrientation.Portrait;
                 section1.ColumnCount = 2;
                 for (int i = 0; i < 10; i++) {
                     section1.AddParagraph("Test 3 - Should be in 2nd section");
@@ -32,7 +32,7 @@ namespace OfficeIMO.Examples.Word {
 
                 section2.AddParagraph("Test 2 - Should be after 2nd section").SetFontFamily("Tahoma").SetFontSize(20);
 
-                section2.PageOrientation = PageOrientationValues.Landscape;
+                section2.PageOrientation = OfficePageOrientation.Landscape;
 
                 //// primary section (for the whole document)
                 Console.WriteLine("+ Paragraphs section 0: " + document.Sections[0].Paragraphs.Count);
@@ -46,7 +46,7 @@ namespace OfficeIMO.Examples.Word {
                 Console.WriteLine("+ ColumnCount section 0: " + document.Sections[0].ColumnCount);
                 Console.WriteLine("+ ColumnCount section 1: " + document.Sections[1].ColumnCount);
 
-                document.Save(false);
+                document.Save();
             }
 
             using (WordDocument document = WordDocument.Load(filePath)) {
@@ -57,7 +57,7 @@ namespace OfficeIMO.Examples.Word {
 
                 var section1 = document.AddSection();
                 section1.AddParagraph("This is a text in 2nd section");
-                section1.PageOrientation = PageOrientationValues.Portrait;
+                section1.PageOrientation = OfficePageOrientation.Portrait;
                 section1.ColumnCount = 2;
                 for (int i = 0; i < 10; i++) {
                     section1.AddParagraph("Test 3 - Should be in 2nd section");
@@ -69,7 +69,8 @@ namespace OfficeIMO.Examples.Word {
 
                 Console.WriteLine("+ Paragraphs section 3: " + document.Sections[3].Paragraphs.Count);
 
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
 

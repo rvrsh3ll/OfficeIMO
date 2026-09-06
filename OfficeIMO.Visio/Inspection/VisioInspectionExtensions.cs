@@ -1,0 +1,388 @@
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Linq;
+using OfficeIMO.Drawing;
+
+namespace OfficeIMO.Visio {
+/// <summary>
+    /// Creates deterministic inspection snapshots for generated or loaded Visio documents.
+    /// </summary>
+    public static class VisioInspectionExtensions {
+        /// <summary>
+        /// Creates a stable, data-oriented snapshot of the document structure.
+        /// </summary>
+        public static VisioInspectionSnapshot CreateInspectionSnapshot(this VisioDocument document) =>
+            CreateInspectionSnapshot(document, int.MaxValue);
+
+        internal static VisioInspectionSnapshot CreateInspectionSnapshot(
+            this VisioDocument document,
+            int maxShapeDataRowsPerPage) {
+            if (document == null) {
+                throw new ArgumentNullException(nameof(document));
+            }
+            if (maxShapeDataRowsPerPage <= 0) {
+                throw new ArgumentOutOfRangeException(nameof(maxShapeDataRowsPerPage));
+            }
+
+            IReadOnlyList<VisioInspectionMasterSnapshot> masters = document.Masters
+                .OrderBy(master => master.NameU, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(master => master.Id, StringComparer.OrdinalIgnoreCase)
+                .Select(master => new VisioInspectionMasterSnapshot(
+                    master.Id,
+                    master.NameU,
+                    master.Shape.NameU,
+                    master.Shape.Text,
+                    master.Shape.Width,
+                    master.Shape.Height,
+                    master.IsPackageBacked,
+                    master.StencilId,
+                    master.StencilName,
+                    master.StencilCategory,
+                    master.StencilCatalogName,
+                    master.StencilSourcePackagePath,
+                    master.StencilKeywords,
+                    master.StencilAliases,
+                    master.StencilTags,
+                    master.StencilIconNameU,
+                    master.StencilDefaultWidth,
+                    master.StencilDefaultHeight,
+                    master.StencilDefaultUnit?.ToString(),
+                    master.StencilPreviewImageRelationshipId,
+                    master.StencilPreviewImageTarget,
+                    master.StencilPreviewImageContentType,
+                    master.StencilPreviewImageExtension,
+                    master.StencilPreviewImageByteLength))
+                .ToList()
+                .AsReadOnly();
+
+            IReadOnlyList<VisioInspectionPageSnapshot> pages = document.Pages
+                .OrderBy(page => page.Id)
+                .ThenBy(page => page.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(page => CreatePageSnapshot(page, maxShapeDataRowsPerPage))
+                .ToList()
+                .AsReadOnly();
+
+            return new VisioInspectionSnapshot(
+                document.Title,
+                document.Author,
+                document.PackageTheme != null
+                    ? string.IsNullOrWhiteSpace(document.PackageTheme.Name) ? document.PackageTheme.GetType().Name : document.PackageTheme.Name
+                    : null,
+                document.UseMastersByDefault,
+                document.WriteMasterDeltasOnly,
+                masters,
+                pages);
+        }
+
+        private static VisioInspectionPageSnapshot CreatePageSnapshot(
+            VisioPage page,
+            int maxShapeDataRows) {
+            int remainingShapeDataRows = maxShapeDataRows;
+            int totalShapeDataRows = 0;
+            bool includeFullDataMirror = maxShapeDataRows == int.MaxValue;
+            var shapeSnapshots = new List<VisioInspectionShapeSnapshot>();
+            foreach (VisioShape shape in page.AllShapes()
+                         .OrderBy(shape => shape.Id, StringComparer.OrdinalIgnoreCase)) {
+                totalShapeDataRows = AddSaturating(totalShapeDataRows, shape.ShapeData.Count);
+                shapeSnapshots.Add(CreateShapeSnapshot(
+                    shape, ref remainingShapeDataRows, includeFullDataMirror));
+            }
+            IReadOnlyList<VisioInspectionShapeSnapshot> shapes = shapeSnapshots.AsReadOnly();
+
+            var connectorSnapshots = new List<VisioInspectionConnectorSnapshot>();
+            foreach (VisioConnector connector in page.Connectors
+                         .OrderBy(connector => connector.Id, StringComparer.OrdinalIgnoreCase)) {
+                totalShapeDataRows = AddSaturating(totalShapeDataRows, connector.ShapeData.Count);
+                connectorSnapshots.Add(CreateConnectorSnapshot(
+                    connector, ref remainingShapeDataRows, includeFullDataMirror));
+            }
+            IReadOnlyList<VisioInspectionConnectorSnapshot> connectors = connectorSnapshots.AsReadOnly();
+
+            IReadOnlyList<string> layers = page.Layers
+                .Select(layer => layer.Name)
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .ToList()
+                .AsReadOnly();
+
+            return new VisioInspectionPageSnapshot(
+                page.Id,
+                page.Name,
+                page.NameU,
+                page.Width,
+                page.Height,
+                totalShapeDataRows,
+                layers,
+                shapes,
+                connectors);
+        }
+
+        private static VisioInspectionShapeSnapshot CreateShapeSnapshot(
+            VisioShape shape,
+            ref int remainingShapeDataRows,
+            bool includeFullDataMirror) {
+            return new VisioInspectionShapeSnapshot(
+                shape.Id,
+                shape.Name,
+                shape.NameU,
+                shape.Type,
+                shape.Master?.Id,
+                shape.MasterNameU,
+                shape.MasterShapeId,
+                shape.Parent?.Id,
+                shape.Text,
+                shape.PinX,
+                shape.PinY,
+                shape.Width,
+                shape.Height,
+                shape.Angle,
+                shape.LineColor.ToString(),
+                shape.FillColor.ToString(),
+                shape.LinePattern,
+                shape.FillPattern,
+                shape.LineWeight,
+                shape.IsContainer,
+                shape.IsCallout,
+                shape.IsBackgroundSurface,
+                shape.IsDiagramAdornment,
+                shape.CalloutTargetId,
+                SortStrings(shape.LayerNames),
+                CreateShapeDataSnapshot(shape.ShapeData, ref remainingShapeDataRows),
+                CreateUserCellSnapshot(shape.UserCells),
+                CreateDataSnapshot(shape.Data, includeFullDataMirror),
+                CreateConnectionPointSnapshot(shape.ConnectionPoints),
+                shape.Children.Select(child => child.Id).OrderBy(id => id, StringComparer.OrdinalIgnoreCase).ToList().AsReadOnly());
+        }
+
+        private static VisioInspectionConnectorSnapshot CreateConnectorSnapshot(
+            VisioConnector connector,
+            ref int remainingShapeDataRows,
+            bool includeFullDataMirror) {
+            VisioConnectorLabelPlacement? placement = connector.LabelPlacement;
+            ResolveConnectorLabelPin(connector, placement, out double? labelResolvedPinX, out double? labelResolvedPinY);
+
+            return new VisioInspectionConnectorSnapshot(
+                connector.Id,
+                connector.From.Id,
+                connector.To.Id,
+                connector.Kind.ToString(),
+                connector.Label,
+                placement != null,
+                placement?.Position,
+                placement?.OffsetX,
+                placement?.OffsetY,
+                placement?.PinX,
+                placement?.PinY,
+                labelResolvedPinX,
+                labelResolvedPinY,
+                placement?.GetLocPinX(),
+                placement?.GetLocPinY(),
+                placement?.Width,
+                placement?.Height,
+                connector.Waypoints
+                    .Select(waypoint => new VisioInspectionWaypointSnapshot(waypoint.X, waypoint.Y))
+                    .ToList()
+                    .AsReadOnly(),
+                connector.LineColor.ToString(),
+                connector.LinePattern,
+                connector.LineWeight,
+                connector.BeginArrow?.ToString(),
+                connector.EndArrow?.ToString(),
+                SortStrings(connector.LayerNames),
+                CreateShapeDataSnapshot(connector.ShapeData, ref remainingShapeDataRows),
+                CreateDataSnapshot(connector.Data, includeFullDataMirror));
+        }
+
+        private static void ResolveConnectorLabelPin(VisioConnector connector, VisioConnectorLabelPlacement? placement, out double? pinX, out double? pinY) {
+            pinX = null;
+            pinY = null;
+            if (placement == null) {
+                return;
+            }
+
+            if (placement.PinX.HasValue && placement.PinY.HasValue) {
+                pinX = placement.PinX.Value;
+                pinY = placement.PinY.Value;
+                return;
+            }
+
+            List<(double X, double Y)> path = BuildConnectorPath(connector);
+            if (path.Count == 0) {
+                return;
+            }
+
+            (double x, double y) = OfficeGeometry.InterpolatePolyline(path, placement.Position);
+            pinX = x + placement.OffsetX;
+            pinY = y + placement.OffsetY;
+        }
+
+        private static List<(double X, double Y)> BuildConnectorPath(VisioConnector connector) {
+            ResolveEndpoint(connector.From, connector.To, connector.FromConnectionPoint, out double startX, out double startY);
+            ResolveEndpoint(connector.To, connector.From, connector.ToConnectionPoint, out double endX, out double endY);
+            List<(double X, double Y)> waypoints = connector.Waypoints
+                .Select(waypoint => (X: waypoint.X, Y: waypoint.Y))
+                .ToList();
+
+            return OfficeGeometry.BuildConnectorPolyline(
+                (startX, startY),
+                (endX, endY),
+                waypoints,
+                connector.Kind == ConnectorKind.RightAngle);
+        }
+
+        private static void ResolveEndpoint(VisioShape shape, VisioShape other, VisioConnectionPoint? connectionPoint, out double x, out double y) {
+            if (connectionPoint != null) {
+                (x, y) = GetPagePoint(shape, connectionPoint.X, connectionPoint.Y);
+                return;
+            }
+
+            (double left, double bottom, double right, double top) = GetPageBounds(shape);
+            (double otherLeft, double otherBottom, double otherRight, double otherTop) = GetPageBounds(other);
+            double centerX = (left + right) / 2D;
+            double centerY = (bottom + top) / 2D;
+            double otherCenterX = (otherLeft + otherRight) / 2D;
+            double otherCenterY = (otherBottom + otherTop) / 2D;
+            double dx = otherCenterX - centerX;
+            double dy = otherCenterY - centerY;
+
+            if (Math.Abs(dx) >= Math.Abs(dy)) {
+                x = dx >= 0 ? right : left;
+                y = centerY;
+            } else {
+                x = centerX;
+                y = dy >= 0 ? top : bottom;
+            }
+        }
+
+        private static (double Left, double Bottom, double Right, double Top) GetPageBounds(VisioShape shape) {
+            (double x1, double y1) = GetPagePoint(shape, 0, 0);
+            (double x2, double y2) = GetPagePoint(shape, shape.Width, 0);
+            (double x3, double y3) = GetPagePoint(shape, 0, shape.Height);
+            (double x4, double y4) = GetPagePoint(shape, shape.Width, shape.Height);
+            double left = Math.Min(Math.Min(x1, x2), Math.Min(x3, x4));
+            double right = Math.Max(Math.Max(x1, x2), Math.Max(x3, x4));
+            double bottom = Math.Min(Math.Min(y1, y2), Math.Min(y3, y4));
+            double top = Math.Max(Math.Max(y1, y2), Math.Max(y3, y4));
+            return (left, bottom, right, top);
+        }
+
+        private static (double X, double Y) GetPagePoint(VisioShape shape, double x, double y) {
+            (double absX, double absY) = shape.GetAbsolutePoint(x, y);
+            return shape.Parent != null
+                ? GetPagePoint(shape.Parent, absX, absY)
+                : (absX, absY);
+        }
+
+        private static IReadOnlyList<VisioInspectionShapeDataSnapshot> CreateShapeDataSnapshot(
+            IEnumerable<VisioShapeDataRow> rows,
+            ref int remainingRows) {
+            if (remainingRows == 0) return Array.Empty<VisioInspectionShapeDataSnapshot>();
+            List<VisioShapeDataRow> retained = remainingRows == int.MaxValue
+                ? rows.OrderBy(row => row.Name, StringComparer.OrdinalIgnoreCase).ToList()
+                : TakeOrderedShapeDataRows(rows, remainingRows);
+            if (remainingRows != int.MaxValue) remainingRows -= retained.Count;
+            return retained
+                .Select(row => new VisioInspectionShapeDataSnapshot(row.Name, row.Label, row.Value, row.Type?.ToString(), row.Format, row.Prompt))
+                .ToList()
+                .AsReadOnly();
+        }
+
+        private static List<VisioShapeDataRow> TakeOrderedShapeDataRows(
+            IEnumerable<VisioShapeDataRow> rows,
+            int maximumRows) {
+            var retained = new List<IndexedShapeDataRow>(Math.Min(maximumRows, 4096));
+            long sequence = 0;
+            foreach (VisioShapeDataRow row in rows) {
+                var candidate = new IndexedShapeDataRow(row, sequence++);
+                if (retained.Count < maximumRows) {
+                    retained.Add(candidate);
+                    SiftShapeDataRowUp(retained, retained.Count - 1);
+                } else if (CompareShapeDataRows(candidate, retained[0]) < 0) {
+                    retained[0] = candidate;
+                    SiftShapeDataRowDown(retained, 0);
+                }
+            }
+
+            return retained
+                .OrderBy(item => item.Row.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(item => item.Sequence)
+                .Select(item => item.Row)
+                .ToList();
+        }
+
+        private static void SiftShapeDataRowUp(List<IndexedShapeDataRow> rows, int index) {
+            while (index > 0) {
+                int parent = (index - 1) / 2;
+                if (CompareShapeDataRows(rows[parent], rows[index]) >= 0) return;
+                (rows[parent], rows[index]) = (rows[index], rows[parent]);
+                index = parent;
+            }
+        }
+
+        private static void SiftShapeDataRowDown(List<IndexedShapeDataRow> rows, int index) {
+            while (true) {
+                int left = index * 2 + 1;
+                if (left >= rows.Count) return;
+                int right = left + 1;
+                int larger = right < rows.Count && CompareShapeDataRows(rows[right], rows[left]) > 0
+                    ? right
+                    : left;
+                if (CompareShapeDataRows(rows[index], rows[larger]) >= 0) return;
+                (rows[index], rows[larger]) = (rows[larger], rows[index]);
+                index = larger;
+            }
+        }
+
+        private static int CompareShapeDataRows(IndexedShapeDataRow left, IndexedShapeDataRow right) {
+            int nameComparison = StringComparer.OrdinalIgnoreCase.Compare(left.Row.Name, right.Row.Name);
+            return nameComparison != 0 ? nameComparison : left.Sequence.CompareTo(right.Sequence);
+        }
+
+        private readonly struct IndexedShapeDataRow {
+            internal IndexedShapeDataRow(VisioShapeDataRow row, long sequence) {
+                Row = row;
+                Sequence = sequence;
+            }
+
+            internal VisioShapeDataRow Row { get; }
+            internal long Sequence { get; }
+        }
+
+        private static int AddSaturating(int left, int right) =>
+            left > int.MaxValue - right ? int.MaxValue : left + right;
+
+        private static IReadOnlyList<VisioInspectionUserCellSnapshot> CreateUserCellSnapshot(IEnumerable<VisioUserCell> rows) {
+            return rows
+                .OrderBy(row => row.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(row => new VisioInspectionUserCellSnapshot(row.Name, row.Value, row.Formula, row.Prompt))
+                .ToList()
+                .AsReadOnly();
+        }
+
+        private static IReadOnlyList<VisioInspectionConnectionPointSnapshot> CreateConnectionPointSnapshot(IEnumerable<VisioConnectionPoint> points) {
+            return points
+                .Select((point, index) => new VisioInspectionConnectionPointSnapshot(index, point.SectionIndex, point.X, point.Y, point.DirX, point.DirY))
+                .ToList()
+                .AsReadOnly();
+        }
+
+        private static IReadOnlyDictionary<string, string> CreateDataSnapshot(
+            IDictionary<string, string> data,
+            bool includeData) {
+            if (!includeData) {
+                return new ReadOnlyDictionary<string, string>(
+                    new Dictionary<string, string>(StringComparer.Ordinal));
+            }
+            return new ReadOnlyDictionary<string, string>(
+                data.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal));
+        }
+
+        private static IReadOnlyList<string> SortStrings(IEnumerable<string> values) {
+            return values
+                .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+                .ToList()
+                .AsReadOnly();
+        }
+    }
+}

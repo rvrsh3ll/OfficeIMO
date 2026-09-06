@@ -8,9 +8,9 @@ using OfficeIMO.Word;
 
 namespace OfficeIMO.Examples.Word {
     internal static partial class Tables {
-        internal static void Example_BasicTablesLoad3(string folderPath, bool openWord) {
+        internal static void Example_BasicTablesLoad3(string templatesPath, bool openWord) {
             Console.WriteLine("[*] Loading standard document with multiple tables");
-            string filePath = System.IO.Path.Combine(folderPath, "TableExamples.docx");
+            string filePath = System.IO.Path.Combine(templatesPath, "TableExamples.docx");
             using (WordDocument document = WordDocument.Load(filePath)) {
 
 
@@ -24,7 +24,7 @@ namespace OfficeIMO.Examples.Word {
                     Console.WriteLine("Tables " + i + " width: " + document.Tables[i].Width);
                 }
                 //var paragraph = document.AddParagraph("Basic paragraph - Page 4");
-                //paragraph.ParagraphAlignment = JustificationValues.Center;
+                //paragraph.ParagraphAlignment = WordParagraphAlignment.Center;
 
                 //WordTable wordTable = document.AddTable(3, 4, WordTableStyle.GridTable1LightAccent5);
                 //wordTable.Rows[0].Cells[0].Paragraphs[0].Text = "Test 1";
@@ -44,7 +44,7 @@ namespace OfficeIMO.Examples.Word {
                 //WordTable wordTableFromEarlier = document.Tables[0];
                 //wordTableFromEarlier.Rows[1].Cells[1].Paragraphs[0].Text = "Middle table";
 
-                document.Save(false);
+                document.Save();
             }
         }
 

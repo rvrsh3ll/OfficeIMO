@@ -1,0 +1,880 @@
+using System.Text.Json.Serialization;
+
+namespace OfficeIMO.Word.GoogleDocs {
+    internal sealed class GoogleDocsApiCreateDocumentPayload {
+        [JsonPropertyName("title")]
+        public string? Title { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiBatchUpdatePayload {
+        [JsonPropertyName("requests")]
+        public List<GoogleDocsApiRequestPayload> Requests { get; } = new List<GoogleDocsApiRequestPayload>();
+
+        [JsonPropertyName("writeControl")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiWriteControlPayload? WriteControl { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiRequestPayload {
+        [JsonPropertyName("insertText")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiInsertTextRequestPayload? InsertText { get; set; }
+
+        [JsonPropertyName("createHeader")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiCreateHeaderRequestPayload? CreateHeader { get; set; }
+
+        [JsonPropertyName("createFooter")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiCreateFooterRequestPayload? CreateFooter { get; set; }
+
+        [JsonPropertyName("createFootnote")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiCreateFootnoteRequestPayload? CreateFootnote { get; set; }
+
+        [JsonPropertyName("createNamedRange")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiCreateNamedRangeRequestPayload? CreateNamedRange { get; set; }
+
+        [JsonPropertyName("insertInlineImage")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiInsertInlineImageRequestPayload? InsertInlineImage { get; set; }
+
+        [JsonPropertyName("updateTextStyle")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiUpdateTextStyleRequestPayload? UpdateTextStyle { get; set; }
+
+        [JsonPropertyName("updateParagraphStyle")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiUpdateParagraphStyleRequestPayload? UpdateParagraphStyle { get; set; }
+
+        [JsonPropertyName("updateSectionStyle")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiUpdateSectionStyleRequestPayload? UpdateSectionStyle { get; set; }
+
+        [JsonPropertyName("updateDocumentStyle")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiUpdateDocumentStyleRequestPayload? UpdateDocumentStyle { get; set; }
+
+        [JsonPropertyName("createParagraphBullets")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiCreateParagraphBulletsRequestPayload? CreateParagraphBullets { get; set; }
+
+        [JsonPropertyName("insertTable")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiInsertTableRequestPayload? InsertTable { get; set; }
+
+        [JsonPropertyName("mergeTableCells")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiMergeTableCellsRequestPayload? MergeTableCells { get; set; }
+
+        [JsonPropertyName("pinTableHeaderRows")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiPinTableHeaderRowsRequestPayload? PinTableHeaderRows { get; set; }
+
+        [JsonPropertyName("updateTableCellStyle")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiUpdateTableCellStyleRequestPayload? UpdateTableCellStyle { get; set; }
+
+        [JsonPropertyName("updateTableColumnProperties")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiUpdateTableColumnPropertiesRequestPayload? UpdateTableColumnProperties { get; set; }
+
+        [JsonPropertyName("insertPageBreak")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiInsertPageBreakRequestPayload? InsertPageBreak { get; set; }
+
+        [JsonPropertyName("insertSectionBreak")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiInsertSectionBreakRequestPayload? InsertSectionBreak { get; set; }
+
+        [JsonPropertyName("deleteContentRange")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiDeleteContentRangeRequestPayload? DeleteContentRange { get; set; }
+
+        [JsonPropertyName("deleteHeader")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiDeleteHeaderRequestPayload? DeleteHeader { get; set; }
+
+        [JsonPropertyName("deleteFooter")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiDeleteFooterRequestPayload? DeleteFooter { get; set; }
+
+        [JsonPropertyName("deleteNamedRange")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiDeleteNamedRangeRequestPayload? DeleteNamedRange { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiInsertTextRequestPayload {
+        [JsonPropertyName("location")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiLocationPayload? Location { get; set; }
+
+        [JsonPropertyName("endOfSegmentLocation")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiEndOfSegmentLocationPayload? EndOfSegmentLocation { get; set; }
+
+        [JsonPropertyName("text")]
+        public string Text { get; set; } = string.Empty;
+    }
+
+    internal sealed class GoogleDocsApiCreateHeaderRequestPayload {
+        [JsonPropertyName("type")]
+        public string Type { get; set; } = "DEFAULT";
+
+        [JsonPropertyName("sectionBreakLocation")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiLocationPayload? SectionBreakLocation { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiCreateFooterRequestPayload {
+        [JsonPropertyName("type")]
+        public string Type { get; set; } = "DEFAULT";
+
+        [JsonPropertyName("sectionBreakLocation")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiLocationPayload? SectionBreakLocation { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiCreateFootnoteRequestPayload {
+        [JsonPropertyName("location")]
+        public GoogleDocsApiLocationPayload Location { get; set; } = new GoogleDocsApiLocationPayload();
+    }
+
+    internal sealed class GoogleDocsApiCreateNamedRangeRequestPayload {
+        [JsonPropertyName("name")]
+        public string Name { get; set; } = string.Empty;
+
+        [JsonPropertyName("range")]
+        public GoogleDocsApiRangePayload Range { get; set; } = new GoogleDocsApiRangePayload();
+    }
+
+    internal sealed class GoogleDocsApiInsertInlineImageRequestPayload {
+        [JsonPropertyName("uri")]
+        public string Uri { get; set; } = string.Empty;
+
+        [JsonPropertyName("objectSize")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiSizePayload? ObjectSize { get; set; }
+
+        [JsonPropertyName("location")]
+        public GoogleDocsApiLocationPayload Location { get; set; } = new GoogleDocsApiLocationPayload();
+    }
+
+    internal sealed class GoogleDocsApiUpdateTextStyleRequestPayload {
+        [JsonPropertyName("range")]
+        public GoogleDocsApiRangePayload Range { get; set; } = new GoogleDocsApiRangePayload();
+
+        [JsonPropertyName("textStyle")]
+        public GoogleDocsApiTextStylePayload TextStyle { get; set; } = new GoogleDocsApiTextStylePayload();
+
+        [JsonPropertyName("fields")]
+        public string Fields { get; set; } = string.Empty;
+    }
+
+    internal sealed class GoogleDocsApiUpdateParagraphStyleRequestPayload {
+        [JsonPropertyName("range")]
+        public GoogleDocsApiRangePayload Range { get; set; } = new GoogleDocsApiRangePayload();
+
+        [JsonPropertyName("paragraphStyle")]
+        public GoogleDocsApiParagraphStylePayload ParagraphStyle { get; set; } = new GoogleDocsApiParagraphStylePayload();
+
+        [JsonPropertyName("fields")]
+        public string Fields { get; set; } = string.Empty;
+    }
+
+    internal sealed class GoogleDocsApiCreateParagraphBulletsRequestPayload {
+        [JsonPropertyName("range")]
+        public GoogleDocsApiRangePayload Range { get; set; } = new GoogleDocsApiRangePayload();
+
+        [JsonPropertyName("bulletPreset")]
+        public string BulletPreset { get; set; } = "BULLET_DISC_CIRCLE_SQUARE";
+    }
+
+    internal sealed class GoogleDocsApiInsertTableRequestPayload {
+        [JsonPropertyName("rows")]
+        public int Rows { get; set; }
+
+        [JsonPropertyName("columns")]
+        public int Columns { get; set; }
+
+        [JsonPropertyName("location")]
+        public GoogleDocsApiLocationPayload Location { get; set; } = new GoogleDocsApiLocationPayload();
+    }
+
+    internal sealed class GoogleDocsApiMergeTableCellsRequestPayload {
+        [JsonPropertyName("tableRange")]
+        public GoogleDocsApiTableRangePayload TableRange { get; set; } = new GoogleDocsApiTableRangePayload();
+    }
+
+    internal sealed class GoogleDocsApiPinTableHeaderRowsRequestPayload {
+        [JsonPropertyName("tableStartLocation")]
+        public GoogleDocsApiLocationPayload TableStartLocation { get; set; } = new GoogleDocsApiLocationPayload();
+
+        [JsonPropertyName("pinnedHeaderRowsCount")]
+        public int PinnedHeaderRowsCount { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiUpdateTableCellStyleRequestPayload {
+        [JsonPropertyName("tableRange")]
+        public GoogleDocsApiTableRangePayload TableRange { get; set; } = new GoogleDocsApiTableRangePayload();
+
+        [JsonPropertyName("tableCellStyle")]
+        public GoogleDocsApiTableCellStylePayload TableCellStyle { get; set; } = new GoogleDocsApiTableCellStylePayload();
+
+        [JsonPropertyName("fields")]
+        public string Fields { get; set; } = string.Empty;
+    }
+
+    internal sealed class GoogleDocsApiUpdateTableColumnPropertiesRequestPayload {
+        [JsonPropertyName("tableStartLocation")]
+        public GoogleDocsApiLocationPayload TableStartLocation { get; set; } = new GoogleDocsApiLocationPayload();
+
+        [JsonPropertyName("columnIndices")]
+        public List<int> ColumnIndices { get; set; } = new List<int>();
+
+        [JsonPropertyName("tableColumnProperties")]
+        public GoogleDocsApiTableColumnPropertiesPayload TableColumnProperties { get; set; } = new GoogleDocsApiTableColumnPropertiesPayload();
+
+        [JsonPropertyName("fields")]
+        public string Fields { get; set; } = string.Empty;
+    }
+
+    internal sealed class GoogleDocsApiUpdateSectionStyleRequestPayload {
+        [JsonPropertyName("range")]
+        public GoogleDocsApiRangePayload Range { get; set; } = new GoogleDocsApiRangePayload();
+
+        [JsonPropertyName("sectionStyle")]
+        public GoogleDocsApiSectionStylePayload SectionStyle { get; set; } = new GoogleDocsApiSectionStylePayload();
+
+        [JsonPropertyName("fields")]
+        public string Fields { get; set; } = string.Empty;
+    }
+
+    internal sealed class GoogleDocsApiUpdateDocumentStyleRequestPayload {
+        [JsonPropertyName("documentStyle")]
+        public GoogleDocsApiDocumentStylePayload DocumentStyle { get; set; } = new GoogleDocsApiDocumentStylePayload();
+
+        [JsonPropertyName("fields")]
+        public string Fields { get; set; } = string.Empty;
+    }
+
+    internal sealed class GoogleDocsApiInsertPageBreakRequestPayload {
+        [JsonPropertyName("location")]
+        public GoogleDocsApiLocationPayload Location { get; set; } = new GoogleDocsApiLocationPayload();
+    }
+
+    internal sealed class GoogleDocsApiInsertSectionBreakRequestPayload {
+        [JsonPropertyName("sectionType")]
+        public string SectionType { get; set; } = "NEXT_PAGE";
+
+        [JsonPropertyName("location")]
+        public GoogleDocsApiLocationPayload Location { get; set; } = new GoogleDocsApiLocationPayload();
+    }
+
+    internal sealed class GoogleDocsApiDeleteContentRangeRequestPayload {
+        [JsonPropertyName("range")]
+        public GoogleDocsApiRangePayload Range { get; set; } = new GoogleDocsApiRangePayload();
+    }
+
+    internal sealed class GoogleDocsApiDeleteHeaderRequestPayload {
+        [JsonPropertyName("headerId")]
+        public string HeaderId { get; set; } = string.Empty;
+        [JsonPropertyName("tabId")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? TabId { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiDeleteFooterRequestPayload {
+        [JsonPropertyName("footerId")]
+        public string FooterId { get; set; } = string.Empty;
+        [JsonPropertyName("tabId")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? TabId { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiDeleteNamedRangeRequestPayload {
+        [JsonPropertyName("name")]
+        public string Name { get; set; } = string.Empty;
+        [JsonPropertyName("tabsCriteria")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiTabsCriteriaPayload? TabsCriteria { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiTabsCriteriaPayload {
+        [JsonPropertyName("tabIds")]
+        public List<string> TabIds { get; set; } = new List<string>();
+    }
+
+    internal sealed class GoogleDocsApiLocationPayload {
+        [JsonPropertyName("index")]
+        public int Index { get; set; }
+
+        [JsonPropertyName("segmentId")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? SegmentId { get; set; }
+
+        [JsonPropertyName("tabId")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? TabId { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiRangePayload {
+        [JsonPropertyName("startIndex")]
+        public int StartIndex { get; set; }
+
+        [JsonPropertyName("endIndex")]
+        public int EndIndex { get; set; }
+
+        [JsonPropertyName("segmentId")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? SegmentId { get; set; }
+
+        [JsonPropertyName("tabId")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? TabId { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiEndOfSegmentLocationPayload {
+        [JsonPropertyName("segmentId")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? SegmentId { get; set; }
+
+        [JsonPropertyName("tabId")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? TabId { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiTableRangePayload {
+        [JsonPropertyName("tableCellLocation")]
+        public GoogleDocsApiTableCellLocationPayload TableCellLocation { get; set; } = new GoogleDocsApiTableCellLocationPayload();
+
+        [JsonPropertyName("rowSpan")]
+        public int RowSpan { get; set; }
+
+        [JsonPropertyName("columnSpan")]
+        public int ColumnSpan { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiTableCellLocationPayload {
+        [JsonPropertyName("tableStartLocation")]
+        public GoogleDocsApiLocationPayload TableStartLocation { get; set; } = new GoogleDocsApiLocationPayload();
+
+        [JsonPropertyName("rowIndex")]
+        public int RowIndex { get; set; }
+
+        [JsonPropertyName("columnIndex")]
+        public int ColumnIndex { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiTableCellStylePayload {
+        [JsonPropertyName("backgroundColor")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiOptionalColorPayload? BackgroundColor { get; set; }
+
+        [JsonPropertyName("borderLeft")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiTableCellBorderPayload? BorderLeft { get; set; }
+
+        [JsonPropertyName("borderRight")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiTableCellBorderPayload? BorderRight { get; set; }
+
+        [JsonPropertyName("borderTop")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiTableCellBorderPayload? BorderTop { get; set; }
+
+        [JsonPropertyName("borderBottom")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiTableCellBorderPayload? BorderBottom { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiTableColumnPropertiesPayload {
+        [JsonPropertyName("widthType")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? WidthType { get; set; }
+
+        [JsonPropertyName("width")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiDimensionPayload? Width { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiTableCellBorderPayload {
+        [JsonPropertyName("color")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiOptionalColorPayload? Color { get; set; }
+
+        [JsonPropertyName("width")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiDimensionPayload? Width { get; set; }
+
+        [JsonPropertyName("dashStyle")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? DashStyle { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiTextStylePayload {
+        [JsonPropertyName("bold")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? Bold { get; set; }
+
+        [JsonPropertyName("italic")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? Italic { get; set; }
+
+        [JsonPropertyName("underline")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? Underline { get; set; }
+
+        [JsonPropertyName("strikethrough")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? Strikethrough { get; set; }
+
+        [JsonPropertyName("fontSize")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiDimensionPayload? FontSize { get; set; }
+
+        [JsonPropertyName("weightedFontFamily")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiWeightedFontFamilyPayload? WeightedFontFamily { get; set; }
+
+        [JsonPropertyName("foregroundColor")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiOptionalColorPayload? ForegroundColor { get; set; }
+
+        [JsonPropertyName("backgroundColor")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiOptionalColorPayload? BackgroundColor { get; set; }
+
+        [JsonPropertyName("baselineOffset")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? BaselineOffset { get; set; }
+
+        [JsonPropertyName("smallCaps")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? SmallCaps { get; set; }
+
+        [JsonPropertyName("link")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiLinkPayload? Link { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiWeightedFontFamilyPayload {
+        [JsonPropertyName("fontFamily")]
+        public string FontFamily { get; set; } = string.Empty;
+
+        [JsonPropertyName("weight")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? Weight { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiParagraphStylePayload {
+        [JsonPropertyName("namedStyleType")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? NamedStyleType { get; set; }
+
+        [JsonPropertyName("alignment")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Alignment { get; set; }
+
+        [JsonPropertyName("direction")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Direction { get; set; }
+
+        [JsonPropertyName("indentStart")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiDimensionPayload? IndentStart { get; set; }
+
+        [JsonPropertyName("indentEnd")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiDimensionPayload? IndentEnd { get; set; }
+
+        [JsonPropertyName("indentFirstLine")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiDimensionPayload? IndentFirstLine { get; set; }
+
+        [JsonPropertyName("spaceAbove")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiDimensionPayload? SpaceAbove { get; set; }
+
+        [JsonPropertyName("spaceBelow")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiDimensionPayload? SpaceBelow { get; set; }
+
+        [JsonPropertyName("lineSpacing")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public double? LineSpacing { get; set; }
+
+        [JsonPropertyName("shading")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiParagraphShadingPayload? Shading { get; set; }
+
+        [JsonPropertyName("borderLeft")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiParagraphBorderPayload? BorderLeft { get; set; }
+
+        [JsonPropertyName("borderRight")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiParagraphBorderPayload? BorderRight { get; set; }
+
+        [JsonPropertyName("borderTop")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiParagraphBorderPayload? BorderTop { get; set; }
+
+        [JsonPropertyName("borderBottom")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiParagraphBorderPayload? BorderBottom { get; set; }
+
+        [JsonPropertyName("keepWithNext")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? KeepWithNext { get; set; }
+
+        [JsonPropertyName("keepLinesTogether")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? KeepLinesTogether { get; set; }
+
+        [JsonPropertyName("avoidWidowAndOrphan")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? AvoidWidowAndOrphan { get; set; }
+
+        [JsonPropertyName("tabStops")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public List<GoogleDocsApiTabStopPayload>? TabStops { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiSectionStylePayload {
+        [JsonPropertyName("marginTop")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiDimensionPayload? MarginTop { get; set; }
+
+        [JsonPropertyName("marginBottom")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiDimensionPayload? MarginBottom { get; set; }
+
+        [JsonPropertyName("marginLeft")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiDimensionPayload? MarginLeft { get; set; }
+
+        [JsonPropertyName("marginRight")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiDimensionPayload? MarginRight { get; set; }
+
+        [JsonPropertyName("marginHeader")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiDimensionPayload? MarginHeader { get; set; }
+
+        [JsonPropertyName("marginFooter")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiDimensionPayload? MarginFooter { get; set; }
+
+        [JsonPropertyName("columnProperties")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public List<GoogleDocsApiSectionColumnPropertiesPayload>? ColumnProperties { get; set; }
+
+        [JsonPropertyName("columnSeparatorStyle")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? ColumnSeparatorStyle { get; set; }
+
+        [JsonPropertyName("useFirstPageHeaderFooter")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? UseFirstPageHeaderFooter { get; set; }
+
+        [JsonPropertyName("pageNumberStart")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? PageNumberStart { get; set; }
+
+        [JsonPropertyName("flipPageOrientation")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? FlipPageOrientation { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiDocumentStylePayload {
+        [JsonPropertyName("pageSize")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiSizePayload? PageSize { get; set; }
+
+        [JsonPropertyName("useEvenPageHeaderFooter")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? UseEvenPageHeaderFooter { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiSectionColumnPropertiesPayload {
+        [JsonPropertyName("paddingEnd")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiDimensionPayload? PaddingEnd { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiParagraphShadingPayload {
+        [JsonPropertyName("backgroundColor")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiOptionalColorPayload? BackgroundColor { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiParagraphBorderPayload {
+        [JsonPropertyName("color")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiOptionalColorPayload? Color { get; set; }
+
+        [JsonPropertyName("width")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiDimensionPayload? Width { get; set; }
+
+        [JsonPropertyName("padding")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiDimensionPayload? Padding { get; set; }
+
+        [JsonPropertyName("dashStyle")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? DashStyle { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiTabStopPayload {
+        [JsonPropertyName("alignment")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Alignment { get; set; }
+
+        [JsonPropertyName("offset")]
+        public GoogleDocsApiDimensionPayload Offset { get; set; } = new GoogleDocsApiDimensionPayload();
+    }
+
+    internal sealed class GoogleDocsApiDimensionPayload {
+        [JsonPropertyName("magnitude")]
+        public double Magnitude { get; set; }
+
+        [JsonPropertyName("unit")]
+        public string Unit { get; set; } = "PT";
+    }
+
+    internal sealed class GoogleDocsApiSizePayload {
+        [JsonPropertyName("height")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiDimensionPayload? Height { get; set; }
+
+        [JsonPropertyName("width")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiDimensionPayload? Width { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiOptionalColorPayload {
+        [JsonPropertyName("color")]
+        public GoogleDocsApiColorPayload Color { get; set; } = new GoogleDocsApiColorPayload();
+    }
+
+    internal sealed class GoogleDocsApiColorPayload {
+        [JsonPropertyName("rgbColor")]
+        public GoogleDocsApiRgbColorPayload RgbColor { get; set; } = new GoogleDocsApiRgbColorPayload();
+    }
+
+    internal sealed class GoogleDocsApiRgbColorPayload {
+        [JsonPropertyName("red")]
+        public double Red { get; set; }
+
+        [JsonPropertyName("green")]
+        public double Green { get; set; }
+
+        [JsonPropertyName("blue")]
+        public double Blue { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiLinkPayload {
+        [JsonPropertyName("url")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Url { get; set; }
+
+        [JsonPropertyName("bookmark")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiBookmarkLinkPayload? Bookmark { get; set; }
+
+        [JsonPropertyName("heading")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiHeadingLinkPayload? Heading { get; set; }
+
+        [JsonPropertyName("tabId")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? TabId { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiCreateDocumentResponse {
+        [JsonPropertyName("documentId")]
+        public string? DocumentId { get; set; }
+
+        [JsonPropertyName("title")]
+        public string? Title { get; set; }
+
+        [JsonPropertyName("revisionId")]
+        public string? RevisionId { get; set; }
+
+        [JsonPropertyName("tabs")]
+        public List<GoogleDocsApiTabResponse> Tabs { get; set; } = new List<GoogleDocsApiTabResponse>();
+    }
+
+    internal sealed class GoogleDocsApiDocumentResponse {
+        [JsonPropertyName("documentId")]
+        public string? DocumentId { get; set; }
+
+        [JsonPropertyName("title")]
+        public string? Title { get; set; }
+
+        [JsonPropertyName("revisionId")]
+        public string? RevisionId { get; set; }
+
+        [JsonPropertyName("tabs")]
+        public List<GoogleDocsApiTabResponse> Tabs { get; set; } = new List<GoogleDocsApiTabResponse>();
+
+        [JsonPropertyName("body")]
+        public GoogleDocsApiBodyResponse? Body { get; set; }
+
+        [JsonPropertyName("headers")]
+        public Dictionary<string, GoogleDocsApiHeaderFooterResponse>? Headers { get; set; }
+
+        [JsonPropertyName("footers")]
+        public Dictionary<string, GoogleDocsApiHeaderFooterResponse>? Footers { get; set; }
+
+        [JsonPropertyName("footnotes")]
+        public Dictionary<string, GoogleDocsApiHeaderFooterResponse>? Footnotes { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiBatchUpdateResponse {
+        [JsonPropertyName("replies")]
+        public List<GoogleDocsApiBatchUpdateReplyPayload> Replies { get; set; } = new List<GoogleDocsApiBatchUpdateReplyPayload>();
+
+        [JsonPropertyName("writeControl")]
+        public GoogleDocsApiWriteControlPayload? WriteControl { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiBatchUpdateReplyPayload {
+        [JsonPropertyName("createHeader")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiCreateHeaderResponsePayload? CreateHeader { get; set; }
+
+        [JsonPropertyName("createFooter")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiCreateFooterResponsePayload? CreateFooter { get; set; }
+
+        [JsonPropertyName("createFootnote")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiCreateFootnoteResponsePayload? CreateFootnote { get; set; }
+
+        [JsonPropertyName("createNamedRange")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiCreateNamedRangeResponsePayload? CreateNamedRange { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiCreateHeaderResponsePayload {
+        [JsonPropertyName("headerId")]
+        public string? HeaderId { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiCreateFooterResponsePayload {
+        [JsonPropertyName("footerId")]
+        public string? FooterId { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiCreateFootnoteResponsePayload {
+        [JsonPropertyName("footnoteId")]
+        public string? FootnoteId { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiCreateNamedRangeResponsePayload {
+        [JsonPropertyName("namedRangeId")]
+        public string? NamedRangeId { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiBodyResponse {
+        [JsonPropertyName("content")]
+        public List<GoogleDocsApiStructuralElementResponse>? Content { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiHeaderFooterResponse {
+        [JsonPropertyName("content")]
+        public List<GoogleDocsApiStructuralElementResponse>? Content { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiStructuralElementResponse {
+        [JsonPropertyName("startIndex")]
+        public int? StartIndex { get; set; }
+
+        [JsonPropertyName("endIndex")]
+        public int? EndIndex { get; set; }
+
+        [JsonPropertyName("paragraph")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiParagraphElementResponse? Paragraph { get; set; }
+
+        [JsonPropertyName("table")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiTableResponse? Table { get; set; }
+
+        [JsonPropertyName("sectionBreak")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public GoogleDocsApiSectionBreakResponse? SectionBreak { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiParagraphElementResponse {
+        [JsonPropertyName("elements")]
+        public List<GoogleDocsApiParagraphInlineElementResponse> Elements { get; set; } = new List<GoogleDocsApiParagraphInlineElementResponse>();
+
+        [JsonPropertyName("paragraphStyle")]
+        public GoogleDocsApiParagraphStylePayload? ParagraphStyle { get; set; }
+
+        [JsonPropertyName("bullet")]
+        public GoogleDocsApiBulletResponse? Bullet { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiParagraphInlineElementResponse {
+        [JsonPropertyName("startIndex")]
+        public int? StartIndex { get; set; }
+        [JsonPropertyName("endIndex")]
+        public int? EndIndex { get; set; }
+        [JsonPropertyName("textRun")]
+        public GoogleDocsApiTextRunResponse? TextRun { get; set; }
+        [JsonPropertyName("inlineObjectElement")]
+        public GoogleDocsApiInlineObjectElementResponse? InlineObjectElement { get; set; }
+        [JsonPropertyName("footnoteReference")]
+        public GoogleDocsApiFootnoteReferenceResponse? FootnoteReference { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiTextRunResponse {
+        [JsonPropertyName("content")]
+        public string? Content { get; set; }
+        [JsonPropertyName("textStyle")]
+        public GoogleDocsApiTextStylePayload? TextStyle { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiInlineObjectElementResponse {
+        [JsonPropertyName("inlineObjectId")]
+        public string? InlineObjectId { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiFootnoteReferenceResponse {
+        [JsonPropertyName("footnoteId")]
+        public string? FootnoteId { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiBulletResponse {
+        [JsonPropertyName("listId")]
+        public string? ListId { get; set; }
+        [JsonPropertyName("nestingLevel")]
+        public int NestingLevel { get; set; }
+        [JsonPropertyName("textStyle")]
+        public GoogleDocsApiTextStylePayload? TextStyle { get; set; }
+    }
+
+    internal sealed class GoogleDocsApiSectionBreakResponse {
+    }
+
+    internal sealed class GoogleDocsApiTableResponse {
+        [JsonPropertyName("tableRows")]
+        public List<GoogleDocsApiTableRowResponse> Rows { get; set; } = new List<GoogleDocsApiTableRowResponse>();
+    }
+
+    internal sealed class GoogleDocsApiTableRowResponse {
+        [JsonPropertyName("tableCells")]
+        public List<GoogleDocsApiTableCellResponse> Cells { get; set; } = new List<GoogleDocsApiTableCellResponse>();
+    }
+
+    internal sealed class GoogleDocsApiTableCellResponse {
+        [JsonPropertyName("content")]
+        public List<GoogleDocsApiStructuralElementResponse>? Content { get; set; }
+    }
+}

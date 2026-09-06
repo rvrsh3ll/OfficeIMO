@@ -19,8 +19,8 @@ namespace OfficeIMO.Examples.Word {
 
                 Console.WriteLine(document.Sections[0].Margins.Bottom);
                 Console.WriteLine(document.Sections[0].Margins.Top);
-                Console.WriteLine(document.Sections[0].Margins.Left.Value);
-                Console.WriteLine(document.Sections[0].Margins.Right.Value);
+                Console.WriteLine(document.Sections[0].Margins.Left);
+                Console.WriteLine(document.Sections[0].Margins.Right);
 
                 //document.Sections[0].Margins.Bottom = 10;
                 //document.Sections[0].Margins.Top = 10;
@@ -36,7 +36,8 @@ namespace OfficeIMO.Examples.Word {
                 par.FontFamily = "Tahoma";
                 par.FontSize = 20;
 
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
     }

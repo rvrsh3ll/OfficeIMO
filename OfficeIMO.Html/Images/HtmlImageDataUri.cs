@@ -1,0 +1,83 @@
+namespace OfficeIMO.Html;
+
+/// <summary>
+/// Represents an image data URI split into media type, encoding metadata, and payload.
+/// </summary>
+public sealed class HtmlImageDataUri {
+    private readonly HtmlDataUri _dataUri;
+
+    private HtmlImageDataUri(HtmlDataUri dataUri, string fragment) {
+        _dataUri = dataUri;
+        Fragment = fragment;
+    }
+
+    /// <summary>Data URI metadata without the leading <c>data:</c> prefix.</summary>
+    public string Metadata => _dataUri.Metadata;
+
+    /// <summary>Declared image media type, for example <c>image/png</c>.</summary>
+    public string MediaType => _dataUri.MediaType;
+
+    /// <summary>Raw payload after the comma separator.</summary>
+    public string Data => _dataUri.Data;
+
+    /// <summary>Indicates whether the payload is base64 encoded.</summary>
+    public bool IsBase64 => _dataUri.IsBase64;
+
+    /// <summary>URL fragment suffix, including the leading hash when present.</summary>
+    public string Fragment { get; }
+
+    /// <summary>Suggested file extension for the media type, including the leading dot.</summary>
+    public string FileExtension => GetImageExtension(MediaType);
+
+    /// <summary>Gets the suggested file extension for an image media type.</summary>
+    public static string GetFileExtension(string mediaType) => GetImageExtension(mediaType);
+
+    /// <summary>Tries to parse an image data URI.</summary>
+    public static bool TryParse(string? source, out HtmlImageDataUri dataUri) {
+        dataUri = null!;
+        string candidate = source ?? string.Empty;
+        int commaIndex = candidate.IndexOf(',');
+        int fragmentIndex = commaIndex >= 0 ? candidate.IndexOf('#', commaIndex + 1) : -1;
+        string fragment = fragmentIndex >= 0 ? candidate.Substring(fragmentIndex) : string.Empty;
+        string dataSource = fragmentIndex >= 0 ? candidate.Substring(0, fragmentIndex) : candidate;
+        if (!HtmlDataUri.TryParse(dataSource, out HtmlDataUri parsed)
+            || !parsed.MediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)) {
+            return false;
+        }
+
+        dataUri = new HtmlImageDataUri(parsed, fragment);
+        return true;
+    }
+
+    /// <summary>Decodes the image payload as bytes.</summary>
+    public byte[] DecodeBytes() => _dataUri.DecodeBytes();
+
+    /// <summary>Attempts to decode the image payload as bytes.</summary>
+    public bool TryDecodeBytes(out byte[] bytes) => _dataUri.TryDecodeBytes(out bytes);
+
+    /// <summary>Decodes the payload using its declared charset, or UTF-8 when none is declared.</summary>
+    public string DecodeText() => _dataUri.DecodeText();
+
+    /// <summary>Attempts to decode the payload using its declared charset, or UTF-8 when none is declared.</summary>
+    public bool TryDecodeText(out string text) => _dataUri.TryDecodeText(out text);
+
+    /// <summary>Estimates decoded byte count without allocating decoded content when possible.</summary>
+    public long EstimateDecodedByteCount() => _dataUri.EstimateDecodedByteCount();
+
+    /// <summary>Attempts to estimate decoded byte count without throwing for malformed payloads.</summary>
+    public bool TryEstimateDecodedByteCount(out long byteCount) => _dataUri.TryEstimateDecodedByteCount(out byteCount);
+
+    private static string GetImageExtension(string mediaType) {
+        return mediaType.ToLowerInvariant() switch {
+            "image/jpeg" => ".jpg",
+            "image/jpg" => ".jpg",
+            "image/png" => ".png",
+            "image/gif" => ".gif",
+            "image/bmp" => ".bmp",
+            "image/tiff" => ".tiff",
+            "image/webp" => ".webp",
+            "image/svg+xml" => ".svg",
+            _ => ".bin"
+        };
+    }
+}

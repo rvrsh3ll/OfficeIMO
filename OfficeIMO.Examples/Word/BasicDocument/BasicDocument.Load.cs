@@ -13,7 +13,17 @@ namespace OfficeIMO.Examples.Word {
             string filePath = System.IO.Path.Combine(templatesPath, "Hamlet.docx");
 
             using (WordDocument document = WordDocument.Load(filePath)) {
-                // TODO: add reading/writing FootnoteProperties/EndnoteProperties 
+                Console.WriteLine($"Footnotes position: {document.FootnoteSettings.Position}");
+                Console.WriteLine($"Endnotes position: {document.EndnoteSettings.Position}");
+                Console.WriteLine($"Footnotes start: {document.FootnoteSettings.StartNumber}");
+                Console.WriteLine($"Endnotes restart: {document.EndnoteSettings.NumberingRestart}");
+
+                document.AddFootnoteProperties(position: WordFootnotePosition.PageBottom,
+                                            restartNumbering: WordNoteNumberRestart.EachSection,
+                                            startNumber: 1);
+                document.AddEndnoteProperties(position: WordEndnotePosition.SectionEnd,
+                                            restartNumbering: WordNoteNumberRestart.EachSection,
+                                            startNumber: 1);
 
                 Console.WriteLine("----");
                 Console.WriteLine(document.Sections.Count);
@@ -25,7 +35,8 @@ namespace OfficeIMO.Examples.Word {
                 Console.WriteLine(document.Sections[0].HyperLinks.Count);
                 Console.WriteLine(document.HyperLinks.Count);
                 Console.WriteLine(document.Fields.Count);
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
     }

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -13,7 +13,7 @@ namespace OfficeIMO.Examples.Word {
             string filePath = System.IO.Path.Combine(folderPath, "Document with Tables1.docx");
             using (WordDocument document = WordDocument.Load(filePath)) {
                 var paragraph = document.AddParagraph("Basic paragraph - Page 4");
-                paragraph.ParagraphAlignment = JustificationValues.Center;
+                paragraph.ParagraphAlignment = WordParagraphAlignment.Center;
 
                 WordTable wordTable = document.AddTable(3, 4, WordTableStyle.GridTable1LightAccent5);
                 wordTable.Rows[0].Cells[0].Paragraphs[0].Text = "Test 1";
@@ -33,7 +33,8 @@ namespace OfficeIMO.Examples.Word {
                 WordTable wordTableFromEarlier = document.Tables[0];
                 wordTableFromEarlier.Rows[1].Cells[1].Paragraphs[0].Text = "Middle table";
 
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
     }

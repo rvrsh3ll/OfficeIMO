@@ -1,14 +1,16 @@
-﻿using System.Threading.Tasks;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using OfficeIMO.Word;
+using System.Threading.Tasks;
 using VerifyXunit;
 using Xunit;
-
-using Color = SixLabors.ImageSharp.Color;
+using Color = OfficeIMO.Drawing.OfficeColor;
 
 namespace OfficeIMO.VerifyTests.Word;
 
+/// <summary>
+/// Verifies border and margin related functionality.
+/// </summary>
 public class BordersAndMarginsTests : VerifyTestBase {
 
     private static async Task DoTest(WordprocessingDocument document) {
@@ -21,24 +23,24 @@ public class BordersAndMarginsTests : VerifyTestBase {
         using var document = WordDocument.Create();
         document.AddParagraph("Section 0");
 
-        document.Sections[0].Borders.LeftStyle = BorderValues.PalmsColor;
+        document.Sections[0].Borders.LeftStyle = WordBorderStyle.PalmsColor;
         document.Sections[0].Borders.LeftColor = Color.Aqua;
         document.Sections[0].Borders.LeftSpace = 24;
         document.Sections[0].Borders.LeftSize = 24;
 
-        document.Sections[0].Borders.RightStyle = BorderValues.BabyPacifier;
+        document.Sections[0].Borders.RightStyle = WordBorderStyle.BabyPacifier;
         document.Sections[0].Borders.RightColor = Color.Red;
         document.Sections[0].Borders.RightSize = 12;
 
-        document.Sections[0].Borders.TopStyle = BorderValues.SharksTeeth;
+        document.Sections[0].Borders.TopStyle = WordBorderStyle.SharksTeeth;
         document.Sections[0].Borders.TopColor = Color.GreenYellow;
         document.Sections[0].Borders.TopSize = 10;
 
-        document.Sections[0].Borders.BottomStyle = BorderValues.Thick;
+        document.Sections[0].Borders.BottomStyle = WordBorderStyle.Thick;
         document.Sections[0].Borders.BottomColor = Color.Blue;
         document.Sections[0].Borders.BottomSize = 15;
 
-        document.Save();
+        _ = document.ToBytes();
 
         await DoTest(document._wordprocessingDocument);
     }
@@ -55,7 +57,7 @@ public class BordersAndMarginsTests : VerifyTestBase {
         document.AddSection();
         document.Sections[1].SetBorders(WordBorder.Shadow);
 
-        document.Save();
+        _ = document.ToBytes();
 
         await DoTest(document._wordprocessingDocument);
     }
@@ -82,7 +84,7 @@ public class BordersAndMarginsTests : VerifyTestBase {
         document.Sections[4].SetMargins(WordMargin.Wide);
         document.AddParagraph("Section 4");
 
-        document.Save();
+        _ = document.ToBytes();
 
         await DoTest(document._wordprocessingDocument);
     }

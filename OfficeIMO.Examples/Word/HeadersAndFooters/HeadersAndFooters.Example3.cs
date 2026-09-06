@@ -12,39 +12,65 @@ namespace OfficeIMO.Examples.Word {
         internal static void Example_BasicWordWithHeaderAndFooter(string folderPath, bool openWord) {
             Console.WriteLine("[*] Creating standard document with Headers and Footers including Sections");
             string filePath = System.IO.Path.Combine(folderPath, "Basic Document with Headers and Footers.docx");
+
+            WordHeaders RequireHeaders(WordHeaders? headers, string description) {
+                if (headers == null) {
+                    throw new InvalidOperationException($"{description} are not available.");
+                }
+
+                return headers;
+            }
+
+            WordHeader RequireHeader(WordHeader? header, string description) {
+                if (header == null) {
+                    throw new InvalidOperationException($"{description} is not available.");
+                }
+
+                return header;
+            }
+
             using (WordDocument document = WordDocument.Create(filePath)) {
                 document.AddHeadersAndFooters();
 
-                document.Sections[0].PageOrientation = PageOrientationValues.Landscape;
+                document.Sections[0].PageOrientation = OfficePageOrientation.Landscape;
 
-                var paragraphInHeader = document.Header.Default.AddParagraph();
+                var headers = RequireHeaders(document.Header, "Document headers");
+                var defaultHeader = RequireHeader(headers.Default, "Default header");
+
+                var paragraphInHeader = defaultHeader.AddParagraph();
                 paragraphInHeader.Text = "Default Header / Section 0";
 
                 document.AddPageBreak();
 
                 var paragraph = document.AddParagraph("Basic paragraph - Page 1");
-                paragraph.ParagraphAlignment = JustificationValues.Center;
-                paragraph.Color = SixLabors.ImageSharp.Color.Red;
+                paragraph.ParagraphAlignment = WordParagraphAlignment.Center;
+                paragraph.Color = OfficeIMO.Drawing.OfficeColor.Red;
 
                 var section2 = document.AddSection();
                 section2.AddHeadersAndFooters();
 
-                var paragraghInHeaderSection1 = section2.Header.Default.AddParagraph();
+                var section2Headers = RequireHeaders(section2.Header, "Section 2 headers");
+                var section2DefaultHeader = RequireHeader(section2Headers.Default, "Section 2 default header");
+
+                var paragraghInHeaderSection1 = section2DefaultHeader.AddParagraph();
                 paragraghInHeaderSection1.Text = "Weird shit? 1";
 
                 paragraph = document.AddParagraph("Basic paragraph - Page 2");
-                paragraph.ParagraphAlignment = JustificationValues.Center;
-                paragraph.Color = SixLabors.ImageSharp.Color.Red;
+                paragraph.ParagraphAlignment = WordParagraphAlignment.Center;
+                paragraph.Color = OfficeIMO.Drawing.OfficeColor.Red;
 
                 var section3 = document.AddSection();
                 section3.AddHeadersAndFooters();
 
-                var paragraghInHeaderSection3 = section3.Header.Default.AddParagraph();
+                var section3Headers = RequireHeaders(section3.Header, "Section 3 headers");
+                var section3DefaultHeader = RequireHeader(section3Headers.Default, "Section 3 default header");
+
+                var paragraghInHeaderSection3 = section3DefaultHeader.AddParagraph();
                 paragraghInHeaderSection3.Text = "Weird shit? 2";
 
                 paragraph = document.AddParagraph("Basic paragraph - Page 3");
-                paragraph.ParagraphAlignment = JustificationValues.Center;
-                paragraph.Color = SixLabors.ImageSharp.Color.Red;
+                paragraph.ParagraphAlignment = WordParagraphAlignment.Center;
+                paragraph.Color = OfficeIMO.Drawing.OfficeColor.Red;
 
                 // 2 section, 9 paragraphs + 7 pagebreaks = 15 paragraphs, 7 pagebreaks
                 Console.WriteLine("+ Paragraphs: " + document.Paragraphs.Count);
@@ -57,7 +83,8 @@ namespace OfficeIMO.Examples.Word {
                 Console.WriteLine("+ Paragraphs section 1: " + document.Sections[1].Paragraphs.Count);
                 //Console.WriteLine("+ Paragraphs section 2: " + document.Sections[0].Paragraphs.Count);
                 //Console.WriteLine("+ Paragraphs section 3: " + document.Sections[0].Paragraphs.Count);
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
 

@@ -1,0 +1,40 @@
+---
+title: "PSWriteOffice Documentation"
+description: "Workflow guides for the manifest-derived PowerShell command surface across Office, PDF, Reader, Confluence Cloud, Visio, and open formats."
+layout: docs
+---
+
+PSWriteOffice is the PowerShell surface for OfficeIMO. Use these guides to choose a workflow, compose or inspect a document, and then move into generated command reference for exact parameters and examples.
+
+## Start here
+
+- [What PSWriteOffice covers](/docs/pswriteoffice/overview/)
+- [Install and verify](/docs/pswriteoffice/install/)
+- [Choose a workflow](/docs/pswriteoffice/choosing-a-workflow/)
+- [Command families](/docs/pswriteoffice/command-families/)
+- [PSWriteOffice vs ImportExcel vs ExcelFast](/docs/pswriteoffice/compare-importexcel-excelfast/)
+- [PSWriteOffice vs Office Interop, Graph, and LibreOffice](/docs/pswriteoffice/compare-office-automation-options/)
+- [Migrate from PSWriteWord, PSWriteExcel, or PSWritePDF](/docs/pswriteoffice/migrate-from-legacy-modules/)
+
+## Document workflows
+
+- [Word automation](/docs/pswriteoffice/word/)
+- [Excel automation](/docs/pswriteoffice/excel/)
+- [PowerPoint automation](/docs/pswriteoffice/powerpoint/)
+- [PDF automation](/docs/pswriteoffice/pdf/)
+- [Reader and extraction](/docs/pswriteoffice/reader/)
+- [Confluence Cloud publishing](/docs/pswriteoffice/confluence/)
+- [Visio diagrams](/docs/pswriteoffice/visio/)
+- [Markdown, RTF, CSV, OpenDocument, email, AsciiDoc, and LaTeX](/docs/pswriteoffice/open-text-formats/)
+- [Automation patterns](/docs/pswriteoffice/automation-patterns/)
+- [Troubleshooting and diagnostics](/docs/pswriteoffice/troubleshooting/)
+- [Migrate from PSWriteWord](/docs/pswriteoffice/migrate-from-pswriteword/)
+- [Migrate from PSWriteExcel](/docs/pswriteoffice/migrate-from-pswriteexcel/)
+- [Migrate from PSWritePDF](/docs/pswriteoffice/migrate-from-pswritepdf/)
+- [PSWriteOffice product overview](/products/pswriteoffice/)
+
+## Notes
+
+- The [command reference](/api/powershell/) is generated from the module manifest and external help.
+- The [curated example gallery](https://github.com/EvotecIT/PSWriteOffice/tree/main/Examples) uses runnable patterns from the repository.
+- The family totals shown on the site come from `PSWriteOffice.psd1`; documentation validation fails if an exported command is left uncategorized.

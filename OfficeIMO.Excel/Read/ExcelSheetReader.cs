@@ -1,0 +1,1218 @@
+using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Spreadsheet;
+using System.Data;
+using System.Globalization;
+using System.IO;
+using System.Threading;
+using System.Xml;
+
+namespace OfficeIMO.Excel {
+    /// <summary>
+    /// Reader for a single worksheet. Offers enumeration and conversion helpers.
+    /// </summary>
+    internal sealed partial class ExcelSheetReader {
+        private const string SpreadsheetNamespace =
+            "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        private const string StrictSpreadsheetNamespace =
+            "http://purl.oclc.org/ooxml/spreadsheetml/main";
+        private readonly string _sheetName;
+        private readonly WorksheetPart _wsPart;
+        private readonly string _worksheetPartName;
+        private readonly bool _hasSdkWorksheetPart;
+        private readonly SharedStringCache _sst;
+        private readonly StylesCacheProvider _styles;
+        private readonly ExcelReadOptions _opt;
+        private readonly ExcelDateSystem _dateSystem;
+        private readonly bool _canStreamWorksheetPart;
+        private readonly OpenXmlPackagePartBufferReader? _partBufferReader;
+        private StylesCache? _stylesCache;
+        private List<string>? _sharedStringItems;
+        private bool? _hasWorksheetPartStreamContent;
+        private string? _usedRangeA1;
+        private string? _lastDateStyleAttribute;
+        private char[]? _xmlValueTextBuffer;
+        private bool _lastDateStyleAttributeResult;
+        private static readonly XmlReaderSettings WorksheetXmlReaderSettings = CreateWorksheetXmlReaderSettings();
+        private static readonly object BoxedTrue = true;
+        private static readonly object BoxedFalse = false;
+
+        internal ExcelSheetReader(
+            string sheetName,
+            WorksheetPart wsPart,
+            SharedStringCache sst,
+            StylesCacheProvider styles,
+            ExcelReadOptions opt,
+            ExcelDateSystem dateSystem,
+            bool canStreamWorksheetPart,
+            OpenXmlPackagePartBufferReader? partBufferReader = null) {
+            _sheetName = sheetName;
+            _wsPart = wsPart;
+            _worksheetPartName = wsPart.Uri.OriginalString;
+            _hasSdkWorksheetPart = true;
+            _sst = sst;
+            _styles = styles;
+            _opt = opt;
+            _dateSystem = dateSystem;
+            _canStreamWorksheetPart = canStreamWorksheetPart;
+            _partBufferReader = partBufferReader;
+        }
+
+        internal ExcelSheetReader(
+            string sheetName,
+            string worksheetPartName,
+            SharedStringCache sst,
+            StylesCacheProvider styles,
+            ExcelReadOptions opt,
+            ExcelDateSystem dateSystem,
+            OpenXmlPackagePartBufferReader partBufferReader) {
+            _sheetName = sheetName;
+            _wsPart = null!;
+            _worksheetPartName = worksheetPartName;
+            _hasSdkWorksheetPart = false;
+            _sst = sst;
+            _styles = styles;
+            _opt = opt;
+            _dateSystem = dateSystem;
+            _canStreamWorksheetPart = true;
+            _partBufferReader = partBufferReader;
+            _hasWorksheetPartStreamContent = true;
+        }
+
+        private bool TryReadWorksheetPartBuffer(
+            int maximumBytes,
+            CancellationToken cancellationToken,
+            out byte[]? buffer,
+            out int length) {
+            buffer = null;
+            length = 0;
+            return _partBufferReader != null
+                && _partBufferReader.TryRead(
+                _worksheetPartName,
+                maximumBytes,
+                cancellationToken,
+                out buffer,
+                out length);
+        }
+
+        private void RequireSdkWorksheetPart() {
+            if (!_hasSdkWorksheetPart) {
+                throw new XlsxTabularFastPathNotSupportedException(
+                    $"Worksheet '{_sheetName}' requires the Open XML SDK fallback path.");
+            }
+        }
+
+        private DateTime FromExcelSerialDate(double serial) => ExcelDateSystemConverter.FromSerial(serial, _dateSystem);
+
+        private StylesCache Styles => _stylesCache ??= _styles.Value;
+
+        private static object BoxBoolean(bool value) => value ? BoxedTrue : BoxedFalse;
+
+        private string? GetSharedString(int index) {
+            var items = _sharedStringItems ??= _sst.GetItems();
+            return GetSharedString(index, items);
+        }
+
+        private bool TryGetSharedStringUtf8(int index, out ArraySegment<byte> value) =>
+            _sst.TryGetUtf8(index, out value);
+
+        private static string? GetSharedString(int index, List<string> items) {
+            return (uint)index < (uint)items.Count ? items[index] : null;
+        }
+
+        /// <summary>
+        /// Worksheet name.
+        /// </summary>
+        public string Name => _sheetName;
+
+        internal void ValidateDataReaderProjection(CancellationToken ct) {
+            if (_canStreamWorksheetPart) {
+                try {
+                    using var stream = _wsPart.GetStream(FileMode.Open, FileAccess.Read);
+                    if (TryPrepareWorksheetStream(stream)) {
+                        ValidateDataReaderProjectionXml(stream, ct);
+                        return;
+                    }
+                } catch (XmlException) {
+                } catch (IOException) {
+                } catch (UnauthorizedAccessException) {
+                } catch (ObjectDisposedException) {
+                }
+            }
+
+            ct.ThrowIfCancellationRequested();
+            Worksheet worksheet = _wsPart.Worksheet
+                ?? throw new InvalidDataException($"Worksheet '{_sheetName}' has no worksheet root.");
+            foreach (Cell cell in worksheet.Descendants<Cell>()) {
+                ct.ThrowIfCancellationRequested();
+                string reference = cell.CellReference?.Value ?? "(unknown cell)";
+                if (cell.StyleIndex?.Value is uint styleIndex) {
+                    ValidateCellStyleReference(styleIndex, reference);
+                }
+                if (cell.DataType?.Value == CellValues.SharedString) {
+                    ValidateSharedStringReference(cell.CellValue?.Text, reference);
+                }
+
+                CellFormula? formula = cell.CellFormula;
+                if (formula?.FormulaType?.Value != CellFormulaValues.Shared
+                    || !string.IsNullOrWhiteSpace(formula?.Text)) {
+                    continue;
+                }
+                if (_opt.UseCachedFormulaResult && cell.CellValue is not null) {
+                    continue;
+                }
+
+                throw new NotSupportedException(
+                    $"Data-reader projection cannot safely expand the shared-formula follower " +
+                    $"'{_sheetName}'!{reference}. Read the workbook through ExcelDocument when resolved " +
+                    "shared-formula text is required.");
+            }
+        }
+
+        private void ValidateDataReaderProjectionXml(
+            Stream stream,
+            CancellationToken ct) {
+            using var reader = OpenWorksheetXmlReader(stream);
+            while (reader.Read()) {
+                ct.ThrowIfCancellationRequested();
+                if (reader.NodeType != XmlNodeType.Element || reader.LocalName != "c") {
+                    continue;
+                }
+
+                string reference = reader.GetAttribute("r") ?? "(unknown cell)";
+                string? styleIndex = reader.GetAttribute("s");
+                if (styleIndex != null) {
+                    ValidateCellStyleReference(styleIndex, reference);
+                }
+                bool sharedStringCell = string.Equals(
+                    reader.GetAttribute("t"),
+                    "s",
+                    StringComparison.Ordinal);
+                bool sharedFollower = false;
+                bool hasCachedValue = false;
+                string? sharedStringReference = null;
+                if (reader.IsEmptyElement) {
+                    if (sharedStringCell) {
+                        ValidateSharedStringReference(null, reference);
+                    }
+                    continue;
+                }
+
+                int cellDepth = reader.Depth;
+                while (reader.Read()) {
+                    ct.ThrowIfCancellationRequested();
+                    if (reader.NodeType == XmlNodeType.EndElement
+                        && reader.Depth == cellDepth
+                        && reader.LocalName == "c") {
+                        break;
+                    }
+                    if (reader.NodeType != XmlNodeType.Element
+                        || reader.Depth != cellDepth + 1
+                        || (!string.Equals(
+                                reader.NamespaceURI,
+                                SpreadsheetNamespace,
+                                StringComparison.Ordinal)
+                            && !string.Equals(
+                                reader.NamespaceURI,
+                                StrictSpreadsheetNamespace,
+                                StringComparison.Ordinal))) {
+                        continue;
+                    }
+
+                    if (reader.LocalName == "v") {
+                        hasCachedValue = true;
+                        if (sharedStringCell) {
+                            sharedStringReference = reader.IsEmptyElement
+                                ? string.Empty
+                                : ReadSimpleElementText(reader, ct, reference);
+                        }
+                        continue;
+                    }
+
+                    if (reader.LocalName != "f"
+                        || !string.Equals(
+                            reader.GetAttribute("t"),
+                            "shared",
+                            StringComparison.OrdinalIgnoreCase)) {
+                        continue;
+                    }
+
+                    bool isFollower = reader.IsEmptyElement;
+                    if (!isFollower) {
+                        isFollower = string.IsNullOrWhiteSpace(
+                            ReadSimpleElementText(reader, ct, reference));
+                    }
+                    sharedFollower |= isFollower;
+                }
+
+                if (sharedStringCell) {
+                    ValidateSharedStringReference(sharedStringReference, reference);
+                }
+
+                if (!sharedFollower
+                    || (_opt.UseCachedFormulaResult && hasCachedValue)) {
+                    continue;
+                }
+
+                throw new NotSupportedException(
+                    $"Data-reader projection cannot safely expand the shared-formula follower " +
+                    $"'{_sheetName}'!{reference}. Read the workbook through ExcelDocument when resolved " +
+                    "shared-formula text is required.");
+            }
+        }
+
+        private static string ReadSimpleElementText(
+            XmlReader reader,
+            CancellationToken ct,
+            string cellReference) {
+            int elementDepth = reader.Depth;
+            string elementName = reader.LocalName;
+            string elementNamespace = reader.NamespaceURI;
+            string value = reader.ReadString();
+            ct.ThrowIfCancellationRequested();
+            if (reader.NodeType != XmlNodeType.EndElement
+                || reader.Depth != elementDepth
+                || !string.Equals(reader.LocalName, elementName, StringComparison.Ordinal)
+                || !string.Equals(reader.NamespaceURI, elementNamespace, StringComparison.Ordinal)) {
+                throw new InvalidDataException(
+                    $"Worksheet cell {cellReference} element '{elementName}' must contain only text.");
+            }
+
+            return value;
+        }
+
+        private void ValidateCellStyleReference(string rawIndex, string reference) {
+            if (TryParseUInt(rawIndex, out uint styleIndex)) {
+                ValidateCellStyleReference(styleIndex, reference);
+                return;
+            }
+
+            throw new InvalidDataException(
+                $"Worksheet '{_sheetName}' cell {reference} contains an invalid cell style index.");
+        }
+
+        private void ValidateCellStyleReference(uint styleIndex, string reference) {
+            if (styleIndex < (uint)Styles.CellFormatCount) {
+                return;
+            }
+
+            throw new InvalidDataException(
+                $"Worksheet '{_sheetName}' cell {reference} references a missing cell style.");
+        }
+
+        private void ValidateSharedStringReference(string? rawIndex, string reference) {
+            var items = _sharedStringItems ??= _sst.GetItems();
+            if (TryParseSharedStringIndex(rawIndex, out int index)
+                && (uint)index < (uint)items.Count) {
+                return;
+            }
+
+            throw new InvalidDataException(
+                $"Worksheet '{_sheetName}' cell {reference} references a missing shared string.");
+        }
+
+        /// <summary>
+        /// Enumerates non-empty cells as (Row, Column, Value). Values are typed when possible.
+        /// </summary>
+        public IEnumerable<ExcelCellValueInfo> EnumerateCells(CancellationToken ct = default) {
+            return CanUseEnumerateCellsXmlReader()
+                ? EnumerateCellsXmlFast(ct)
+                : EnumerateCellsDom(ct);
+        }
+
+        private IEnumerable<ExcelCellValueInfo> EnumerateCellsDom(CancellationToken ct) {
+            bool canCancel = ct.CanBeCanceled;
+            foreach (var row in EnumerateWorksheetRows(ct)) {
+                if (canCancel) {
+                    ct.ThrowIfCancellationRequested();
+                }
+
+                var rIndex = checked((int)row.RowIndex!.Value);
+                foreach (var cell in row.Elements<Cell>()) {
+                    if (canCancel) {
+                        ct.ThrowIfCancellationRequested();
+                    }
+
+                    int cIndex = A1.ParseColumnIndexFromCellReferenceFast(cell.CellReference?.Value);
+                    var value = ConvertCell(cell);
+                    if (value is not null || CellHasExplicitBlank(cell))
+                        yield return new ExcelCellValueInfo(rIndex, cIndex, value);
+                }
+            }
+        }
+
+        private IEnumerable<ExcelCellValueInfo> EnumerateCellsXmlFast(CancellationToken ct) {
+            using var stream = _wsPart.GetStream(FileMode.Open, FileAccess.Read);
+            RewindWorksheetStream(stream);
+            using var reader = OpenWorksheetXmlReader(stream);
+            bool canCancel = ct.CanBeCanceled;
+            bool hasCustomConverter = _opt.CellValueConverter != null;
+            int nextRowIndex = 1;
+
+            while (reader.Read()) {
+                if (canCancel) {
+                    ct.ThrowIfCancellationRequested();
+                }
+
+                if (reader.NodeType != XmlNodeType.Element || reader.LocalName != "row") {
+                    continue;
+                }
+
+                int rowIndex = ParsePositiveIntAttribute(reader.GetAttribute("r"));
+                if (rowIndex <= 0) {
+                    rowIndex = nextRowIndex;
+                }
+
+                nextRowIndex = rowIndex + 1;
+                if (reader.IsEmptyElement) {
+                    continue;
+                }
+
+                int depth = reader.Depth;
+                int nextColumnIndex = 1;
+                while (reader.Read()) {
+                    if (canCancel) {
+                        ct.ThrowIfCancellationRequested();
+                    }
+
+                    if (reader.NodeType == XmlNodeType.EndElement && reader.Depth == depth && reader.LocalName == "row") {
+                        break;
+                    }
+
+                    if (reader.NodeType != XmlNodeType.Element || reader.LocalName != "c") {
+                        continue;
+                    }
+
+                    int columnIndex = GetXmlCellColumnIndex(reader, ref nextColumnIndex);
+                    if (columnIndex <= 0) {
+                        SkipXmlElement(reader, "c");
+                        continue;
+                    }
+
+                    if (hasCustomConverter) {
+                        if (TryReadXmlCellValueForCellEnumeration(reader, rowIndex, columnIndex, out object? customValue, out bool explicitBlank)) {
+                            if (customValue != null || explicitBlank) {
+                                yield return new ExcelCellValueInfo(rowIndex, columnIndex, customValue);
+                            }
+                        }
+
+                        continue;
+                    }
+
+                    if (reader.IsEmptyElement) {
+                        continue;
+                    }
+
+                    object? cellValue = ReadXmlCellValue(reader);
+                    if (cellValue != null) {
+                        yield return new ExcelCellValueInfo(rowIndex, columnIndex, cellValue);
+                    }
+                }
+            }
+        }
+
+        private bool TryReadXmlCellValueForCellEnumeration(XmlReader cellReader, int rowIndex, int columnIndex, out object? value, out bool explicitBlank) {
+            XmlCellKind cellKind = ParseXmlCellKind(cellReader.GetAttribute("t"));
+            bool readStyleIndex = true;
+
+            CellRaw raw = ReadXmlCellRaw(cellReader, rowIndex, columnIndex, cellKind, readStyleIndex);
+            explicitBlank = raw.RawText != null && raw.RawText.Length == 0 && raw.InlineText == null && raw.FormulaText == null;
+            if (raw.RawText == null && raw.InlineText == null && raw.FormulaText == null) {
+                value = null;
+                return false;
+            }
+
+            value = ConvertRaw(raw).TypedValue;
+            return true;
+        }
+
+        private bool CanUseEnumerateCellsXmlReader() {
+            return (_opt.CellValueConverter != null || _opt.Culture == CultureInfo.InvariantCulture)
+                && CanStreamWorksheetPart();
+        }
+
+        // ---------- Internals ----------
+
+        private static bool CellHasExplicitBlank(Cell cell) {
+            return cell.CellValue is not null && string.IsNullOrEmpty(cell.CellValue.InnerText);
+        }
+
+        private static string? ExtractRawText(Cell cell) {
+            return cell.CellValue?.InnerText;
+        }
+
+        private IEnumerable<Row> EnumerateWorksheetRows(CancellationToken ct = default) {
+            if (CanStreamWorksheetPart()) {
+                foreach (var row in EnumerateWorksheetRowsFromPart(ct)) {
+                    yield return row;
+                }
+
+                yield break;
+            }
+
+            var sheetData = WorksheetRoot.GetFirstChild<SheetData>();
+            if (sheetData == null) {
+                yield break;
+            }
+
+            bool canCancel = ct.CanBeCanceled;
+            foreach (var row in sheetData.Elements<Row>()) {
+                if (canCancel) {
+                    ct.ThrowIfCancellationRequested();
+                }
+
+                yield return row;
+            }
+        }
+
+        private IEnumerable<Row> EnumerateWorksheetRowsFromPart(CancellationToken ct) {
+            bool canCancel = ct.CanBeCanceled;
+            using var reader = OpenXmlReader.Create(_wsPart);
+            while (reader.Read()) {
+                if (canCancel) {
+                    ct.ThrowIfCancellationRequested();
+                }
+
+                if (reader.IsStartElement && reader.ElementType == typeof(Row)) {
+                    if (reader.LoadCurrentElement() is Row row) {
+                        yield return row;
+                    }
+                }
+            }
+        }
+
+        private bool CanStreamWorksheetPart() {
+            if (!_canStreamWorksheetPart) {
+                return false;
+            }
+
+            if (_hasWorksheetPartStreamContent is bool hasContent) {
+                return hasContent;
+            }
+
+            bool result = HasWorksheetPartStreamContent();
+            _hasWorksheetPartStreamContent = result;
+            return result;
+        }
+
+        private bool HasWorksheetPartStreamContent() {
+            try {
+                using var stream = _wsPart.GetStream(FileMode.Open, FileAccess.Read);
+                RewindWorksheetStream(stream);
+                return !stream.CanSeek || stream.Length > 0;
+            } catch (IOException) {
+                return false;
+            } catch (UnauthorizedAccessException) {
+                return false;
+            } catch (ObjectDisposedException) {
+                return false;
+            }
+        }
+
+        private static void RewindWorksheetStream(Stream stream) {
+            if (stream.CanSeek) {
+                stream.Position = 0;
+            }
+        }
+
+        private static bool TryPrepareWorksheetStream(Stream stream) {
+            if (!stream.CanSeek) {
+                return true;
+            }
+
+            if (stream.Length == 0) {
+                return false;
+            }
+
+            stream.Position = 0;
+            return true;
+        }
+
+        private static XmlReader OpenWorksheetXmlReader(Stream stream) {
+            return XmlReader.Create(stream, WorksheetXmlReaderSettings);
+        }
+
+        private static XmlReaderSettings CreateWorksheetXmlReaderSettings() {
+            return new XmlReaderSettings {
+                DtdProcessing = DtdProcessing.Prohibit,
+                IgnoreComments = true,
+                IgnoreProcessingInstructions = true,
+                IgnoreWhitespace = true,
+                CloseInput = false
+            };
+        }
+
+        private static string? ExtractFormulaText(Cell cell) {
+            return cell.CellFormula?.Text;
+        }
+
+        private static string? ExtractInlineString(Cell cell, CellValues? typeHint) {
+            if (typeHint != CellValues.InlineString && cell.InlineString is null) return null;
+
+            var inline = cell.InlineString;
+            if (inline?.Text?.Text != null) return inline.Text.Text;
+            if (inline?.HasChildren == true) {
+                return SharedStringCache.GetRunText(inline);
+            }
+            return null;
+        }
+
+        private object? ConvertCell(Cell cell) {
+            TryConvertCell(cell, out var value);
+            return value;
+        }
+
+        private bool TryConvertCell(Cell cell, out object? value) {
+            value = null;
+            CellValues? typeHint = cell.DataType?.Value;
+            bool hasFormula = cell.CellFormula is not null;
+            string? formulaText = null;
+            if (hasFormula) {
+                formulaText = ExtractFormulaText(cell);
+                if (!_opt.UseCachedFormulaResult && formulaText != null) {
+                    value = formulaText;
+                    return true;
+                }
+            }
+
+            string? rawText = ExtractRawText(cell);
+            string? inlineText = ExtractInlineString(cell, typeHint);
+            if (hasFormula && _opt.UseCachedFormulaResult && rawText == null && formulaText != null) {
+                value = formulaText;
+                return true;
+            }
+
+            if (rawText == null && inlineText == null && formulaText == null) {
+                if (!CellHasExplicitBlank(cell) && !_opt.FillBlanksInRanges) {
+                    return false;
+                }
+            }
+
+            if (hasFormula && !_opt.UseCachedFormulaResult) {
+                value = formulaText ?? rawText ?? inlineText;
+                return true;
+            }
+
+            uint? styleIndex = cell.StyleIndex?.Value;
+            if (!NeedsStyleForConversion(typeHint, rawText, styleIndex)) {
+                styleIndex = null;
+            }
+
+            value = TryConvertWithoutCustomHook(typeHint, styleIndex, rawText, inlineText, out object? converted)
+                ? converted
+                : ConvertByHints(typeHint, styleIndex ?? cell.StyleIndex?.Value, rawText, inlineText);
+            return true;
+        }
+
+        private bool NeedsStyleForConversion(CellValues? typeHint, string? rawText, uint? styleIndex) {
+            return rawText != null
+                && styleIndex is not null
+                && _opt.TreatDatesUsingNumberFormat
+                && typeHint != CellValues.SharedString
+                && typeHint != CellValues.Boolean
+                && typeHint != CellValues.String
+                && typeHint != CellValues.InlineString
+                && typeHint != CellValues.Date
+                && Styles.HasDateStyles;
+        }
+
+        private bool IsDateStyleAttribute(string? styleAttribute) {
+            if (string.IsNullOrEmpty(styleAttribute)) {
+                return false;
+            }
+
+            if (string.Equals(styleAttribute, _lastDateStyleAttribute, StringComparison.Ordinal)) {
+                return _lastDateStyleAttributeResult;
+            }
+
+            if (!Styles.HasDateStyles) {
+                _lastDateStyleAttribute = styleAttribute;
+                _lastDateStyleAttributeResult = false;
+                return false;
+            }
+
+            bool result = TryParseUInt(styleAttribute, out uint styleIndex) && Styles.IsDateLike(styleIndex);
+            _lastDateStyleAttribute = styleAttribute;
+            _lastDateStyleAttributeResult = result;
+            return result;
+        }
+
+        private static XmlCellKind ParseXmlCellKind(string? type) {
+            if (string.IsNullOrEmpty(type)) {
+                return XmlCellKind.Default;
+            }
+
+            string text = type!;
+            switch (text.Length) {
+                case 1:
+                    return text[0] switch {
+                        'b' => XmlCellKind.Boolean,
+                        'd' => XmlCellKind.Date,
+                        'n' => XmlCellKind.Number,
+                        's' => XmlCellKind.SharedString,
+                        _ => XmlCellKind.Unknown
+                    };
+                case 3:
+                    return text == "str" ? XmlCellKind.String : XmlCellKind.Unknown;
+                case 9:
+                    return text == "inlineStr" ? XmlCellKind.InlineString : XmlCellKind.Unknown;
+                default:
+                    return XmlCellKind.Unknown;
+            }
+        }
+
+        private static bool CellKindCanUseDateStyle(XmlCellKind kind) {
+            return kind == XmlCellKind.Default
+                || kind == XmlCellKind.Number
+                || kind == XmlCellKind.Unknown;
+        }
+
+        private static CellValues? ToCellValueType(XmlCellKind kind) {
+            return kind switch {
+                XmlCellKind.Boolean => CellValues.Boolean,
+                XmlCellKind.Date => CellValues.Date,
+                XmlCellKind.InlineString => CellValues.InlineString,
+                XmlCellKind.Number => CellValues.Number,
+                XmlCellKind.SharedString => CellValues.SharedString,
+                XmlCellKind.String => CellValues.String,
+                _ => null
+            };
+        }
+
+        private CellRaw SnapshotCell(Cell cell, int row = 0, int col = 0) {
+            var hasFormula = cell.CellFormula is not null;
+            var formulaText = hasFormula ? ExtractFormulaText(cell) : null;
+            var preferFormulaText = hasFormula && !_opt.UseCachedFormulaResult && formulaText != null;
+            var typeHint = cell.DataType?.Value;
+
+            return new CellRaw {
+                Row = row,
+                Col = col,
+                TypeHint = typeHint,
+                StyleIndex = cell.StyleIndex?.Value,
+                HasFormula = hasFormula,
+                FormulaText = formulaText,
+                RawText = preferFormulaText ? null : ExtractRawText(cell),
+                InlineText = preferFormulaText ? null : ExtractInlineString(cell, typeHint)
+            };
+        }
+
+        private CellRaw ConvertRaw(CellRaw raw) {
+            if (raw.HasFormula) {
+                if (_opt.UseCachedFormulaResult && raw.RawText != null) {
+                    raw.TypedValue = TryConvertWithoutCustomHook(raw.TypeHint, raw.StyleIndex, raw.RawText, raw.InlineText, out var cachedValue)
+                        ? cachedValue
+                        : ConvertByHints(raw.TypeHint, raw.StyleIndex, raw.RawText, raw.InlineText);
+                } else {
+                    raw.TypedValue = raw.FormulaText ?? raw.RawText ?? raw.InlineText;
+                }
+                return raw;
+            }
+
+            raw.TypedValue = TryConvertWithoutCustomHook(raw.TypeHint, raw.StyleIndex, raw.RawText, raw.InlineText, out var value)
+                ? value
+                : ConvertByHints(raw.TypeHint, raw.StyleIndex, raw.RawText, raw.InlineText);
+            return raw;
+        }
+
+        private bool TryConvertWithoutCustomHook(CellValues? type, uint? styleIndex, string? rawText, string? inlineText, out object? value) {
+            value = null;
+            if (_opt.CellValueConverter != null) {
+                return false;
+            }
+
+            if (!string.IsNullOrEmpty(inlineText)) {
+                value = inlineText;
+                return true;
+            }
+
+            if (type == CellValues.SharedString) {
+                if (TryParseSharedStringIndex(rawText, out var sstIndex)) {
+                    value = GetSharedString(sstIndex);
+                    return true;
+                }
+
+                value = rawText;
+                return rawText != null;
+            }
+
+            if (type == CellValues.Boolean && rawText != null) {
+                value = BoxBoolean(rawText == "1");
+                return true;
+            }
+
+            if (type == CellValues.String || type == CellValues.InlineString) {
+                value = rawText ?? inlineText;
+                return value != null;
+            }
+
+            if (type == CellValues.Date && rawText != null) {
+                if (DateTime.TryParse(rawText, _opt.Culture, DateTimeStyles.AssumeLocal, out var dt)) {
+                    value = dt;
+                } else {
+                    value = rawText;
+                }
+
+                return true;
+            }
+
+            if (rawText == null) {
+                return false;
+            }
+
+            if (_opt.TreatDatesUsingNumberFormat && styleIndex is not null && Styles.IsDateLike(styleIndex.Value)) {
+                if (TryParseInvariantDoubleFast(rawText, out var oa)
+                    || double.TryParse(rawText, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out oa)) {
+                    value = FromExcelSerialDate(oa);
+                } else {
+                    value = rawText;
+                }
+
+                return true;
+            }
+
+            if (_opt.NumericAsDecimal) {
+                if (TryParseExcelNumberAsDecimal(rawText, _opt.Culture, out var dec)) {
+                    value = dec;
+                    return true;
+                }
+
+                if (TryParseRawDouble(rawText, out var dbl)) {
+                    value = dbl;
+                    return true;
+                }
+
+                value = rawText;
+                return true;
+            }
+
+            if (TryParseRawDouble(rawText, out var num)) {
+                value = num;
+            } else {
+                value = rawText;
+            }
+
+            return true;
+        }
+
+        private static bool TryParseSharedStringIndex(string? rawText, out int index) {
+            index = 0;
+            if (string.IsNullOrEmpty(rawText)) {
+                return false;
+            }
+
+            return TryParseSharedStringIndex(rawText.AsSpan(), out index)
+                || int.TryParse(rawText, NumberStyles.Integer, CultureInfo.InvariantCulture, out index);
+        }
+
+        private static bool TryParseSharedStringIndex(ReadOnlySpan<char> text, out int index) {
+            index = 0;
+            if (text.Length == 0) {
+                return false;
+            }
+
+            int parsed = 0;
+            for (int i = 0; i < text.Length; i++) {
+                int digit = text[i] - '0';
+                if ((uint)digit > 9U) {
+                    return false;
+                }
+
+                if (parsed > (int.MaxValue - digit) / 10) {
+                    return false;
+                }
+
+                parsed = (parsed * 10) + digit;
+            }
+
+            index = parsed;
+            return true;
+        }
+
+        private static bool TryParseInvariantDoubleFast(string? rawText, out double value) {
+            value = 0;
+            if (string.IsNullOrEmpty(rawText)) {
+                return false;
+            }
+
+            return TryParseInvariantDoubleFast(rawText.AsSpan(), out value);
+        }
+
+        private static bool TryParseInvariantDoubleFast(ReadOnlySpan<char> text, out double value) {
+            value = 0;
+            if (text.Length == 0) {
+                return false;
+            }
+
+            int length = text.Length;
+            int index = 0;
+            bool negative = false;
+            if (text[0] == '-') {
+                negative = true;
+                index = 1;
+                if (index == length) {
+                    return false;
+                }
+            } else if (text[0] == '+') {
+                index = 1;
+                if (index == length) {
+                    return false;
+                }
+            }
+
+            long whole = 0;
+            bool hasDigit = false;
+            for (; index < length; index++) {
+                char ch = text[index];
+                int digit = ch - '0';
+                if ((uint)digit > 9U) {
+                    break;
+                }
+
+                if (whole > (long.MaxValue - digit) / 10) {
+                    return false;
+                }
+
+                whole = (whole * 10) + digit;
+                hasDigit = true;
+            }
+
+            double parsed = whole;
+            if (index < length && text[index] == '.') {
+                index++;
+                double scale = 0.1D;
+                for (; index < length; index++) {
+                    char ch = text[index];
+                    int digit = ch - '0';
+                    if ((uint)digit > 9U) {
+                        break;
+                    }
+
+                    parsed += digit * scale;
+                    scale *= 0.1D;
+                    hasDigit = true;
+                }
+            }
+
+            if (!hasDigit || index != length) {
+                return false;
+            }
+
+            value = negative ? -parsed : parsed;
+            return true;
+        }
+
+        private bool TryParseRawDouble(string rawText, out double value) {
+            if (_opt.Culture != CultureInfo.InvariantCulture
+                && double.TryParse(rawText, NumberStyles.Float | NumberStyles.AllowThousands, _opt.Culture, out value)) {
+                return true;
+            }
+
+            return TryParseInvariantDoubleFast(rawText, out value)
+                || double.TryParse(rawText, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out value);
+        }
+
+        private bool TryParseRawInt32(string rawText, out int value) {
+            if (_opt.Culture == CultureInfo.InvariantCulture && TryParseInvariantInt32Fast(rawText, out value)) {
+                return true;
+            }
+
+            return int.TryParse(rawText, NumberStyles.Integer, _opt.Culture, out value);
+        }
+
+        private static bool TryParseInvariantInt32Fast(string rawText, out int value) {
+            value = 0;
+            if (string.IsNullOrEmpty(rawText)) {
+                return false;
+            }
+
+            int index = 0;
+            bool negative = false;
+            if (rawText[0] == '-') {
+                negative = true;
+                index = 1;
+                if (index == rawText.Length) {
+                    return false;
+                }
+            } else if (rawText[0] == '+') {
+                index = 1;
+                if (index == rawText.Length) {
+                    return false;
+                }
+            }
+
+            uint limit = negative ? 2147483648U : int.MaxValue;
+            uint parsed = 0U;
+            for (; index < rawText.Length; index++) {
+                int digit = rawText[index] - '0';
+                if ((uint)digit > 9U) {
+                    return false;
+                }
+
+                if (parsed > (limit - (uint)digit) / 10U) {
+                    return false;
+                }
+
+                parsed = (parsed * 10U) + (uint)digit;
+            }
+
+            if (negative) {
+                value = parsed == 2147483648U ? int.MinValue : -(int)parsed;
+            } else {
+                value = (int)parsed;
+            }
+
+            return true;
+        }
+
+        private bool TryParseRawInt64(string rawText, out long value) {
+            if (_opt.Culture == CultureInfo.InvariantCulture && TryParseInvariantInt64Fast(rawText, out value)) {
+                return true;
+            }
+
+            return long.TryParse(rawText, NumberStyles.Integer, _opt.Culture, out value);
+        }
+
+        private static bool TryParseInvariantInt64Fast(string rawText, out long value) {
+            value = 0;
+            if (string.IsNullOrEmpty(rawText)) {
+                return false;
+            }
+
+            int index = 0;
+            bool negative = false;
+            if (rawText[0] == '-') {
+                negative = true;
+                index = 1;
+                if (index == rawText.Length) {
+                    return false;
+                }
+            } else if (rawText[0] == '+') {
+                index = 1;
+                if (index == rawText.Length) {
+                    return false;
+                }
+            }
+
+            ulong limit = negative ? 9223372036854775808UL : long.MaxValue;
+            ulong parsed = 0UL;
+            for (; index < rawText.Length; index++) {
+                int digit = rawText[index] - '0';
+                if ((uint)digit > 9U) {
+                    return false;
+                }
+
+                if (parsed > (limit - (uint)digit) / 10UL) {
+                    return false;
+                }
+
+                parsed = (parsed * 10UL) + (uint)digit;
+            }
+
+            if (negative) {
+                value = parsed == 9223372036854775808UL ? long.MinValue : -(long)parsed;
+            } else {
+                value = (long)parsed;
+            }
+
+            return true;
+        }
+
+        private bool TryParseRawDecimal(string rawText, out decimal value) {
+            return TryParseRawDecimal(rawText, _opt.Culture, out value);
+        }
+
+        private static bool TryParseRawDecimal(string rawText, CultureInfo culture, out decimal value) {
+            if (culture == CultureInfo.InvariantCulture) {
+                return TryParseInvariantDecimalFast(rawText, out value)
+                    || decimal.TryParse(rawText, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out value);
+            }
+
+            if (decimal.TryParse(rawText, NumberStyles.Float | NumberStyles.AllowThousands, culture, out value)) {
+                return true;
+            }
+
+            return TryParseInvariantDecimalFast(rawText, out value)
+                || decimal.TryParse(rawText, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out value);
+        }
+
+        private static bool TryParseExcelNumberAsDecimal(string rawText, CultureInfo culture, out decimal value) {
+            value = 0m;
+            bool parsed = TryParseInvariantDoubleFast(rawText, out double number)
+                || double.TryParse(rawText, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out number)
+                || (culture != CultureInfo.InvariantCulture
+                    && double.TryParse(rawText, NumberStyles.Float | NumberStyles.AllowThousands, culture, out number));
+            return parsed && TryConvertExcelNumberToDecimal(number, out value);
+        }
+
+        private static bool TryConvertExcelNumberToDecimal(double number, out decimal value) {
+            value = 0m;
+            if (double.IsNaN(number) || double.IsInfinity(number)) {
+                return false;
+            }
+
+            try {
+                value = (decimal)number;
+                return true;
+            } catch (OverflowException) {
+                return false;
+            }
+        }
+
+        private static bool TryParseInvariantDecimalFast(string rawText, out decimal value) {
+            value = 0m;
+            if (string.IsNullOrEmpty(rawText)) {
+                return false;
+            }
+
+            int index = 0;
+            bool negative = false;
+            if (rawText[0] == '-') {
+                negative = true;
+                index = 1;
+                if (index == rawText.Length) {
+                    return false;
+                }
+            } else if (rawText[0] == '+') {
+                index = 1;
+                if (index == rawText.Length) {
+                    return false;
+                }
+            }
+
+            ulong parsed = 0UL;
+            int scale = 0;
+            bool hasDigit = false;
+            bool hasDecimalPoint = false;
+            for (; index < rawText.Length; index++) {
+                char ch = rawText[index];
+                int digit = ch - '0';
+                if ((uint)digit <= 9U) {
+                    if (parsed > (ulong.MaxValue - (uint)digit) / 10UL) {
+                        return false;
+                    }
+
+                    parsed = (parsed * 10UL) + (uint)digit;
+                    hasDigit = true;
+                    if (hasDecimalPoint && ++scale > 28) {
+                        return false;
+                    }
+
+                    continue;
+                }
+
+                if (ch == '.' && !hasDecimalPoint) {
+                    hasDecimalPoint = true;
+                    continue;
+                }
+
+                return false;
+            }
+
+            if (!hasDigit) {
+                return false;
+            }
+
+            value = new decimal(
+                (int)(parsed & 0xFFFFFFFF),
+                (int)((parsed >> 32) & 0xFFFFFFFF),
+                0,
+                negative,
+                (byte)scale);
+            return true;
+        }
+
+        private object? ConvertByHints(CellValues? type, uint? styleIndex, string? rawText, string? inlineText) {
+            // Custom converter hook (cell-level). If provided and handled, honor it.
+            var hook = _opt.CellValueConverter;
+            if (hook != null) {
+                var ctx = new ExcelCellContext(type.ToOfficeEnum(), styleIndex, rawText, inlineText, _opt.Culture);
+                var res = hook(ctx);
+                if (res.Handled) return res.Value;
+            }
+            if (!string.IsNullOrEmpty(inlineText)) return inlineText;
+
+            if (type == CellValues.SharedString && TryParseSharedStringIndex(rawText, out var sstIndex))
+                return GetSharedString(sstIndex);
+
+            if (type == CellValues.Boolean && rawText != null)
+                return BoxBoolean(rawText == "1");
+
+            if (type == CellValues.Number && rawText != null) {
+                if (_opt.TreatDatesUsingNumberFormat && styleIndex is not null && Styles.IsDateLike(styleIndex.Value)) {
+                    if (TryParseInvariantDoubleFast(rawText, out var oa)
+                        || double.TryParse(rawText, System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out oa))
+                        return FromExcelSerialDate(oa);
+                }
+                if (_opt.NumericAsDecimal) {
+                    if (TryParseExcelNumberAsDecimal(rawText, _opt.Culture, out var dec))
+                        return dec;
+                    if (TryParseRawDouble(rawText, out var dbl))
+                        return dbl;
+                    return rawText;
+                } else {
+                    if (TryParseRawDouble(rawText, out var num))
+                        return num;
+                }
+                return rawText;
+            }
+
+            if (type == CellValues.Date && rawText != null) {
+                if (System.DateTime.TryParse(rawText, _opt.Culture, System.Globalization.DateTimeStyles.AssumeLocal, out var dt))
+                    return dt;
+                return rawText;
+            }
+
+            if (type == CellValues.String || type == CellValues.InlineString || type == CellValues.SharedString) {
+                if (type == CellValues.SharedString && TryParseSharedStringIndex(rawText, out var idx))
+                    return GetSharedString(idx);
+                return rawText ?? inlineText;
+            }
+
+            if (rawText != null) {
+                if (_opt.TreatDatesUsingNumberFormat && styleIndex is not null && Styles.IsDateLike(styleIndex.Value)) {
+                    if (TryParseInvariantDoubleFast(rawText, out var oa)
+                        || double.TryParse(rawText, System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out oa))
+                        return FromExcelSerialDate(oa);
+                    return rawText;
+                }
+
+                if (_opt.NumericAsDecimal) {
+                    if (TryParseExcelNumberAsDecimal(rawText, _opt.Culture, out var dec2))
+                        return dec2;
+                    if (TryParseRawDouble(rawText, out var dbl2))
+                        return dbl2;
+                } else {
+                    if (TryParseRawDouble(rawText, out var num))
+                        return num;
+                }
+                return rawText;
+            }
+
+            return null;
+        }
+
+        private struct CellRaw {
+            public int Row;
+            public int Col;
+            public CellValues? TypeHint;
+            public uint? StyleIndex;
+            public bool HasFormula;
+            public string? FormulaText;
+            public string? RawText;
+            public string? InlineText;
+            public object? TypedValue;
+        }
+
+        private enum XmlCellKind {
+            Default,
+            Boolean,
+            Date,
+            InlineString,
+            Number,
+            SharedString,
+            String,
+            Unknown
+        }
+    }
+}

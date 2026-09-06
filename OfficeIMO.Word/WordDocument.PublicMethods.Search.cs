@@ -1,0 +1,478 @@
+using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Wordprocessing;
+using System.Net.Http;
+
+namespace OfficeIMO.Word {
+    public partial class WordDocument {
+        private int CombineRuns(WordHeaderFooter wordHeaderFooter) {
+            int count = 0;
+            if (wordHeaderFooter != null) {
+                var defaultHeader = this.Header?.Default;
+                if (defaultHeader != null) {
+                    foreach (var p in defaultHeader.Paragraphs) count += CombineIdenticalRuns(p._paragraph);
+                    foreach (var table in defaultHeader.Tables) {
+                        table.Paragraphs.ForEach(p => count += CombineIdenticalRuns(p._paragraph));
+                    }
+                }
+            }
+
+            return count;
+        }
+
+
+        /// <summary>
+        /// This method will combine identical runs in a paragraph.
+        /// This is useful when you have a paragraph with multiple runs of the same style, that Microsoft Word creates.
+        /// This feature is *EXPERIMENTAL* and may not work in all cases.
+        /// It may impact on how your document looks like, please do extensive testing before using this feature.
+        /// </summary>
+        /// <returns></returns>
+        public int CleanupDocument(WordDocumentCleanupOptions options = WordDocumentCleanupOptions.All) {
+            int count = 0;
+
+            if (_wordprocessingDocument?.MainDocumentPart?.Document?.Body != null) {
+                foreach (var paragraph in _wordprocessingDocument.MainDocumentPart.Document.Body.Descendants<Paragraph>().ToList()) {
+                    count += CleanupParagraph(paragraph, options);
+                }
+            }
+
+            foreach (var header in _wordprocessingDocument?.MainDocumentPart?.HeaderParts ?? Enumerable.Empty<HeaderPart>()) {
+                foreach (var paragraph in (header.Header?.Descendants<Paragraph>() ?? Enumerable.Empty<Paragraph>()).ToList()) {
+                    count += CleanupParagraph(paragraph, options);
+                }
+            }
+
+            foreach (var footer in _wordprocessingDocument?.MainDocumentPart?.FooterParts ?? Enumerable.Empty<FooterPart>()) {
+                foreach (var paragraph in (footer.Footer?.Descendants<Paragraph>() ?? Enumerable.Empty<Paragraph>()).ToList()) {
+                    count += CleanupParagraph(paragraph, options);
+                }
+            }
+
+            return count;
+        }
+
+        /// <summary>
+        /// Searches the document for paragraphs containing the specified text.
+        /// </summary>
+        /// <param name="text">Text to search for.</param>
+        /// <param name="stringComparison">Comparison rules for the search.</param>
+        /// <returns>A list of found <see cref="WordParagraph"/> instances.</returns>
+        public List<WordParagraph> Find(string text, StringComparison stringComparison = StringComparison.OrdinalIgnoreCase) {
+            int count = 0;
+            List<WordParagraph> list = FindAndReplaceInternal(text, "", ref count, false, stringComparison);
+            return list;
+        }
+
+        /// <summary>
+        /// FindAdnReplace from the whole doc
+        /// </summary>
+        /// <param name="textToFind"></param>
+        /// <param name="textToReplace"></param>
+        /// <param name="stringComparison"></param>
+        /// <returns></returns>
+        public int FindAndReplace(string textToFind, string textToReplace, StringComparison stringComparison = StringComparison.OrdinalIgnoreCase) {
+            if (TryFindAndReplaceInSimpleTextNodes(textToFind, textToReplace, stringComparison, out int fastCount)) {
+                return fastCount;
+            }
+            int countFind = 0;
+            FindAndReplaceInternal(textToFind, textToReplace, ref countFind, true, stringComparison);
+            return countFind;
+        }
+
+        private bool TryFindAndReplaceInSimpleTextNodes(
+            string textToFind,
+            string textToReplace,
+            StringComparison stringComparison,
+            out int count) {
+            count = 0;
+            string replacement = textToReplace ?? string.Empty;
+            if (string.IsNullOrEmpty(textToFind) ||
+                replacement.IndexOf('\r') >= 0 ||
+                replacement.IndexOf('\n') >= 0 ||
+                replacement.IndexOf('\t') >= 0) {
+                return false;
+            }
+
+            MainDocumentPart? mainPart = _wordprocessingDocument?.MainDocumentPart;
+            Body? body = mainPart?.Document?.Body;
+            if (body == null || mainPart!.HeaderParts.Any() || mainPart.FooterParts.Any()) {
+                return false;
+            }
+
+            var nodes = new List<Text>();
+            OpenXmlElement? bodyChild = body.FirstChild;
+            while (bodyChild != null) {
+                if (bodyChild is Paragraph paragraph) {
+                    if (!TryCollectSimpleTextNodes(paragraph, nodes)) return false;
+                } else if (bodyChild is not SectionProperties) {
+                    return false;
+                }
+                bodyChild = bodyChild.NextSibling();
+            }
+            string[] values = new string[nodes.Count];
+            for (int index = 0; index < nodes.Count; index++) values[index] = nodes[index].Text;
+            if (HasCrossParagraphMatch(values, textToFind, stringComparison)) return false;
+
+            for (int index = 0; index < nodes.Count; index++) {
+                string value = values[index];
+                if (value.IndexOf(textToFind, stringComparison) < 0) continue;
+                int localCount = 0;
+                string updated = value.FindAndReplace(
+                    textToFind,
+                    replacement,
+                    stringComparison,
+                    ref localCount);
+                nodes[index].Text = updated;
+                if (updated.Length > 0 &&
+                    (char.IsWhiteSpace(updated[0]) || char.IsWhiteSpace(updated[updated.Length - 1]))) {
+                    nodes[index].Space = SpaceProcessingModeValues.Preserve;
+                }
+                count += localCount;
+            }
+            return true;
+        }
+
+        private static bool TryCollectSimpleTextNodes(OpenXmlElement parent, List<Text> nodes) {
+            OpenXmlElement? child = parent.FirstChild;
+            while (child != null) {
+                if (child is Text text) {
+                    nodes.Add(text);
+                } else if (child is OpenXmlLeafTextElement ||
+                           child is Break ||
+                           child is TabChar ||
+                           child is CarriageReturn) {
+                    return false;
+                } else if (child.HasChildren && !TryCollectSimpleTextNodes(child, nodes)) {
+                    return false;
+                }
+                child = child.NextSibling();
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// FindAdnReplace from the range parparagraphs
+        /// </summary>
+        /// <param name="paragraphs"></param>
+        /// <param name="textToFind"></param>
+        /// <param name="textToReplace"></param>
+        /// <param name="stringComparison"></param>
+        /// <returns></returns>
+        public static int FindAndReplace(List<WordParagraph> paragraphs, string textToFind, string textToReplace, StringComparison stringComparison = StringComparison.OrdinalIgnoreCase) {
+            int countFind = 0;
+            FindAndReplaceNested(paragraphs, textToFind, textToReplace, ref countFind, true, stringComparison);
+            return countFind;
+        }
+
+
+        private static List<WordParagraph> FindAndReplaceNested(List<WordParagraph> paragraphs, string textToFind, string textToReplace, ref int count, bool replace, StringComparison stringComparison = StringComparison.OrdinalIgnoreCase) {
+            List<WordParagraph> foundParagraphs = ReplaceText(paragraphs, textToFind, textToReplace, ref count, replace, stringComparison);
+            return foundParagraphs;
+        }
+
+
+        /// <summary>
+        /// Replace text inside each paragraph
+        /// </summary>
+        /// <param name="paragraphs"></param>
+        /// <param name="oldText"></param>
+        /// <param name="newText"></param>
+        /// <param name="count"></param>
+        /// <param name="replace"></param>
+        /// <param name="stringComparison"></param>
+        /// <returns></returns>
+        /// <exception cref="ArgumentNullException"></exception>
+        private static List<WordParagraph> ReplaceText(List<WordParagraph> paragraphs, string oldText, string newText, ref int count, bool replace, StringComparison stringComparison = StringComparison.OrdinalIgnoreCase) {
+            if (string.IsNullOrEmpty(oldText)) {
+                throw new ArgumentNullException("oldText should not be null");
+            }
+            List<WordParagraph> foundParagraphs = new List<WordParagraph>();
+            string[] paragraphTexts = new string[paragraphs.Count];
+            for (int index = 0; index < paragraphs.Count; index++) {
+                paragraphTexts[index] = paragraphs[index]?.Text ?? string.Empty;
+            }
+            if (!HasCrossParagraphMatch(paragraphTexts, oldText, stringComparison)) {
+                for (int index = 0; index < paragraphs.Count; index++) {
+                    WordParagraph? paragraph = paragraphs[index];
+                    if (paragraph == null) continue;
+                    int localCount = 0;
+                    string updated = paragraphTexts[index].FindAndReplace(
+                        oldText,
+                        newText,
+                        stringComparison,
+                        ref localCount);
+                    if (localCount == 0) continue;
+
+                    count += localCount;
+                    if (replace) paragraph.Text = updated;
+                    foundParagraphs.Add(paragraph);
+                }
+                return foundParagraphs;
+            }
+
+            var removeParas = new List<int>();
+            var foundList = SearchText(paragraphs, oldText, new WordPositionInParagraph() { Paragraph = 0 }, stringComparison);
+
+            if (foundList?.Count > 0) {
+                count += foundList.Count;
+                foreach (var ts in foundList) {
+                    if (!IsSegmentValid(paragraphs, ts))
+                        continue;
+                    if (ts.BeginIndex == ts.EndIndex) {
+                        var p = paragraphs[ts.BeginIndex];
+                        if (p is not null) {
+                            if (replace) {
+                                int replaceCount = 0;
+                                p.Text = p.Text.FindAndReplace(oldText, newText, stringComparison, ref replaceCount);
+                            }
+                            if (!foundParagraphs.Any(fp => ReferenceEquals(fp._paragraph, p._paragraph))) {
+                                foundParagraphs.Add(p);
+                            }
+                        }
+                    } else {
+                        if (replace) {
+                            var beginPara = paragraphs[ts.BeginIndex];
+                            var endPara = paragraphs[ts.EndIndex];
+                            if (beginPara is not null && endPara is not null) {
+                                beginPara.Text = beginPara.Text.Replace(beginPara.Text.Substring(ts.BeginChar), newText);
+                                endPara.Text = endPara.Text.Replace(endPara.Text.Substring(0, ts.EndChar + 1), "");
+                                if (!foundParagraphs.Any(fp => ReferenceEquals(fp._paragraph, beginPara._paragraph))) {
+                                    foundParagraphs.Add(beginPara);
+                                }
+                            }
+                            for (int i = ts.EndIndex - 1; i > ts.BeginIndex; i--) {
+                                removeParas.Add(i);
+                            }
+                        }
+
+                    }
+                }
+            }
+
+            if (replace) {
+                if (removeParas.Count > 0) {
+                    removeParas = removeParas.Distinct().OrderByDescending(i => i).ToList();// Need remove by descending
+                    foreach (var index in removeParas) {
+                        paragraphs[index].Remove();//Remove blank paragraph
+                    }
+                }
+            }
+            return foundParagraphs;
+        }
+
+        private static bool HasCrossParagraphMatch(
+            IReadOnlyList<string> paragraphTexts,
+            string searched,
+            StringComparison stringComparison) {
+            if (searched.Length < 2 || paragraphTexts.Count < 2) return false;
+            if (stringComparison == StringComparison.Ordinal) {
+                return HasCrossParagraphOrdinalMatch(paragraphTexts, searched);
+            }
+
+            int tailLength = searched.Length - 1;
+            string tail = paragraphTexts[0].Length <= tailLength
+                ? paragraphTexts[0]
+                : paragraphTexts[0].Substring(paragraphTexts[0].Length - tailLength);
+            for (int index = 1; index < paragraphTexts.Count; index++) {
+                string current = paragraphTexts[index];
+                int prefixLength = Math.Min(tailLength, current.Length);
+                string boundary = tail + current.Substring(0, prefixLength);
+                int searchIndex = 0;
+                while (searchIndex < tail.Length) {
+                    int matchIndex = boundary.IndexOf(searched, searchIndex, stringComparison);
+                    if (matchIndex < 0 || matchIndex >= tail.Length) break;
+                    if (matchIndex + searched.Length > tail.Length) return true;
+                    searchIndex = matchIndex + 1;
+                }
+
+                string combined = tail + current;
+                tail = combined.Length <= tailLength
+                    ? combined
+                    : combined.Substring(combined.Length - tailLength);
+            }
+            return false;
+        }
+
+        private static bool HasCrossParagraphOrdinalMatch(
+            IReadOnlyList<string> paragraphTexts,
+            string searched) {
+            int maximumTailLength = searched.Length - 1;
+            var tail = new char[maximumTailLength];
+            int tailCount = 0;
+            for (int index = 0; index < paragraphTexts.Count; index++) {
+                string current = paragraphTexts[index];
+                if (index > 0 && ContainsOrdinalMatchAcrossBoundary(tail, tailCount, current, searched)) {
+                    return true;
+                }
+
+                if (current.Length >= maximumTailLength) {
+                    current.CopyTo(current.Length - maximumTailLength, tail, 0, maximumTailLength);
+                    tailCount = maximumTailLength;
+                    continue;
+                }
+
+                int retained = Math.Min(tailCount, maximumTailLength - current.Length);
+                if (retained > 0) Array.Copy(tail, tailCount - retained, tail, 0, retained);
+                current.CopyTo(0, tail, retained, current.Length);
+                tailCount = retained + current.Length;
+            }
+            return false;
+        }
+
+        private static bool ContainsOrdinalMatchAcrossBoundary(
+            char[] tail,
+            int tailCount,
+            string current,
+            string searched) {
+            int combinedLength = tailCount + current.Length;
+            int firstStart = Math.Max(0, tailCount - searched.Length + 1);
+            for (int start = firstStart; start < tailCount && start + searched.Length <= combinedLength; start++) {
+                int matchIndex = 0;
+                while (matchIndex < searched.Length) {
+                    int combinedIndex = start + matchIndex;
+                    char value = combinedIndex < tailCount
+                        ? tail[combinedIndex]
+                        : current[combinedIndex - tailCount];
+                    if (value != searched[matchIndex]) break;
+                    matchIndex++;
+                }
+                if (matchIndex == searched.Length) return true;
+            }
+            return false;
+        }
+
+        private static List<WordTextSegment> SearchText(List<WordParagraph> paragraphs, String searched, WordPositionInParagraph startPos, StringComparison stringComparison = StringComparison.OrdinalIgnoreCase) {
+
+            var segList = new List<WordTextSegment>();
+            int startRun = startPos.Paragraph,
+            startText = startPos.Text,
+            startChar = startPos.Char;
+            int beginRunPos = 0, beginCharPos = 0, candCharPos = 0;
+            bool newList = false;
+            for (int runPos = startRun; runPos < paragraphs.Count; runPos++) {
+                int textPos = 0, charPos = 0;
+                var p = paragraphs[runPos];
+
+                if (!string.IsNullOrEmpty(p.Text)) {
+                    if (textPos >= startText) {
+                        string candidate = p.Text;
+                        if (runPos == startRun)
+                            charPos = startChar;
+                        else
+                            charPos = 0;
+                        for (; charPos < candidate.Length; charPos++) {
+                            if (string.Compare(candidate[charPos].ToString(), searched[0].ToString(), stringComparison) == 0 && (candCharPos == 0)) {
+                                beginCharPos = charPos;
+                                beginRunPos = runPos;
+                                newList = true;
+                            }
+                            if (string.Compare(candidate[charPos].ToString(), searched[candCharPos].ToString(), stringComparison) == 0) {
+                                if (candCharPos + 1 < searched.Length) {
+                                    candCharPos++;
+                                } else if (newList) {
+                                    WordTextSegment segement = new WordTextSegment();
+                                    segement.BeginIndex = (beginRunPos);
+                                    segement.BeginChar = (beginCharPos);
+                                    segement.EndIndex = (runPos);
+                                    segement.EndChar = (charPos);
+                                    segList.Add(segement);
+                                    //Reset
+                                    startChar = charPos;
+                                    startText = textPos;
+                                    startRun = runPos;
+                                    newList = false;
+                                    candCharPos = 0;
+                                }
+                            } else
+                                candCharPos = 0;
+                        }
+                    }
+                }
+
+
+            }
+            return segList;
+        }
+
+        private List<WordParagraph> FindAndReplaceInternal(string textToFind, string textToReplace, ref int count, bool replace, StringComparison stringComparison = StringComparison.OrdinalIgnoreCase) {
+            List<WordParagraph> list = new List<WordParagraph>();
+            list.AddRange(FindAndReplaceNested(this.Paragraphs, textToFind, textToReplace, ref count, replace, stringComparison));
+
+            foreach (var table in this.Tables) {
+                list.AddRange(FindAndReplaceNested(table.Paragraphs, textToFind, textToReplace, ref count, replace, stringComparison));
+            }
+
+            if (this.Header?.Default != null) {
+                list.AddRange(FindAndReplaceNested(this.Header.Default.Paragraphs, textToFind, textToReplace, ref count, replace, stringComparison));
+                foreach (var table in this.Header.Default.Tables) {
+                    list.AddRange(FindAndReplaceNested(table.Paragraphs, textToFind, textToReplace, ref count, replace, stringComparison));
+                }
+            }
+
+            if (this.Header?.Even != null) {
+                list.AddRange(FindAndReplaceNested(this.Header.Even.Paragraphs, textToFind, textToReplace, ref count, replace, stringComparison));
+                foreach (var table in this.Header.Even.Tables) {
+                    list.AddRange(FindAndReplaceNested(table.Paragraphs, textToFind, textToReplace, ref count, replace, stringComparison));
+                }
+            }
+
+            if (this.Header?.First != null) {
+                list.AddRange(FindAndReplaceNested(this.Header.First.Paragraphs, textToFind, textToReplace, ref count, replace, stringComparison));
+                foreach (var table in this.Header.First.Tables) {
+                    list.AddRange(FindAndReplaceNested(table.Paragraphs, textToFind, textToReplace, ref count, replace, stringComparison));
+                }
+            }
+
+            if (this.Footer?.Default != null) {
+                list.AddRange(FindAndReplaceNested(this.Footer.Default.Paragraphs, textToFind, textToReplace, ref count, replace, stringComparison));
+                foreach (var table in this.Footer.Default.Tables) {
+                    list.AddRange(FindAndReplaceNested(table.Paragraphs, textToFind, textToReplace, ref count, replace, stringComparison));
+                }
+            }
+
+            if (this.Footer?.Even != null) {
+                list.AddRange(FindAndReplaceNested(this.Footer.Even.Paragraphs, textToFind, textToReplace, ref count, replace, stringComparison));
+                foreach (var table in this.Footer.Even.Tables) {
+                    list.AddRange(FindAndReplaceNested(table.Paragraphs, textToFind, textToReplace, ref count, replace, stringComparison));
+                }
+            }
+
+            if (this.Footer?.First != null) {
+                list.AddRange(FindAndReplaceNested(this.Footer.First.Paragraphs, textToFind, textToReplace, ref count, replace, stringComparison));
+                foreach (var table in this.Footer.First.Tables) {
+                    list.AddRange(FindAndReplaceNested(table.Paragraphs, textToFind, textToReplace, ref count, replace, stringComparison));
+                }
+            }
+
+            return list;
+        }
+
+        private static bool IsSegmentValid(List<WordParagraph> paragraphs, WordTextSegment ts) {
+            if (paragraphs is null || ts is null) {
+                return false;
+            }
+
+            if (ts.BeginIndex < 0 || ts.EndIndex < ts.BeginIndex || ts.EndIndex >= paragraphs.Count) {
+                return false;
+            }
+
+            var beginPara = paragraphs[ts.BeginIndex];
+            var endPara = paragraphs[ts.EndIndex];
+
+            if (beginPara is null || endPara is null) {
+                return false;
+            }
+
+            if (ts.BeginChar < 0 || ts.BeginChar >= beginPara.Text.Length) {
+                return false;
+            }
+
+            if (ts.EndChar < 0 || ts.EndChar >= endPara.Text.Length) {
+                return false;
+            }
+
+            return true;
+        }
+    }
+}

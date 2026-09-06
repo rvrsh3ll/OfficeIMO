@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -15,7 +15,8 @@ namespace OfficeIMO.Examples.Word {
                 document.BuiltinDocumentProperties.Title = "This is my title";
                 document.BuiltinDocumentProperties.Creator = "Przemysław Kłys";
                 document.BuiltinDocumentProperties.Keywords = "word, docx, test";
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
 
@@ -24,21 +25,22 @@ namespace OfficeIMO.Examples.Word {
             string filePath = System.IO.Path.Combine(folderPath, "BasicDocumentWithParagraphs.docx");
             using (WordDocument document = WordDocument.Create(filePath)) {
                 var paragraph = document.AddParagraph("Adding paragraph with some text");
-                paragraph.ParagraphAlignment = JustificationValues.Center;
-                Console.WriteLine(SixLabors.ImageSharp.Color.Blue.ToHexColor());
-                Console.WriteLine(SixLabors.ImageSharp.Color.Crimson.ToHexColor());
-                Console.WriteLine(SixLabors.ImageSharp.Color.Aquamarine.ToHexColor());
+                paragraph.ParagraphAlignment = WordParagraphAlignment.Center;
+                Console.WriteLine(OfficeIMO.Drawing.OfficeColor.Blue.ToRgbHex());
+                Console.WriteLine(OfficeIMO.Drawing.OfficeColor.Crimson.ToRgbHex());
+                Console.WriteLine(OfficeIMO.Drawing.OfficeColor.Aquamarine.ToRgbHex());
 
-                paragraph.Color = SixLabors.ImageSharp.Color.Red;
+                paragraph.Color = OfficeIMO.Drawing.OfficeColor.Red;
 
                 paragraph = document.AddParagraph("Adding another paragraph with some more text");
                 paragraph.Bold = true;
                 paragraph = paragraph.AddText(" , but now we also decided to add more text to this paragraph using different style");
-                paragraph.Underline = UnderlineValues.DashLong;
+                paragraph.Underline = WordUnderlineStyle.DashLong;
                 paragraph = paragraph.AddText(" , and we still continue adding more text to existing paragraph.");
-                paragraph.Color = SixLabors.ImageSharp.Color.CornflowerBlue;
+                paragraph.Color = OfficeIMO.Drawing.OfficeColor.CornflowerBlue;
 
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
     }

@@ -1,0 +1,139 @@
+namespace OfficeIMO.Markdown;
+
+/// <summary>
+/// Hyperlink inline.
+/// </summary>
+public sealed class LinkInline : MarkdownInline, IRenderableMarkdownInline, IPlainTextMarkdownInline, IInlineContainerMarkdownInline, IMarkdownInlineAuxiliarySyntaxMetadataOwner {
+    MarkdownInlineAuxiliarySyntaxMetadata? IMarkdownInlineAuxiliarySyntaxMetadataOwner.AuxiliarySyntaxMetadata { get; set; }
+    /// <summary>Link text.</summary>
+    public string Text { get; }
+    /// <summary>Destination URL.</summary>
+    public string Url { get; }
+    /// <summary>Optional title shown as a tooltip in HTML.</summary>
+    public string? Title { get; }
+    /// <summary>Optional HTML target attribute preserved from richer sources.</summary>
+    public string? LinkTarget { get; }
+    /// <summary>Optional HTML rel attribute preserved from richer sources.</summary>
+    public string? LinkRel { get; }
+    /// <summary>Source span for the link URL token when parsed from markdown.</summary>
+    public MarkdownSourceSpan? UrlSourceSpan { get; internal set; }
+    /// <summary>Source span for the optional link title token when parsed from markdown.</summary>
+    public MarkdownSourceSpan? TitleSourceSpan { get; internal set; }
+    /// <summary>Source span for the optional HTML target attribute when imported from richer sources.</summary>
+    public MarkdownSourceSpan? HtmlTargetSourceSpan { get; internal set; }
+    /// <summary>Source span for the optional HTML rel attribute when imported from richer sources.</summary>
+    public MarkdownSourceSpan? HtmlRelSourceSpan { get; internal set; }
+
+    // Optional richer label representation (produced by the reader). When present, RenderHtml/RenderMarkdown
+    // uses it instead of the plain Text property.
+    /// <summary>
+    /// Optional richer inline representation of the link label when the reader parsed nested formatting.
+    /// When present, renderers and converters can preserve label formatting instead of flattening to plain text.
+    /// </summary>
+    public InlineSequence? LabelInlines { get; }
+    /// <summary>Creates a hyperlink inline.</summary>
+    public LinkInline(string text, string url, string? title, string? linkTarget = null, string? linkRel = null) {
+        Text = text ?? string.Empty;
+        Url = url ?? string.Empty;
+        Title = title;
+        LinkTarget = linkTarget;
+        LinkRel = linkRel;
+    }
+
+    internal LinkInline(InlineSequence label, string url, string? title, string? linkTarget = null, string? linkRel = null)
+        : this(InlinePlainText.Extract(label), url, title, linkTarget, linkRel) {
+        LabelInlines = label;
+    }
+
+    internal void SetMarkdownSyntaxMetadataSpans(
+        MarkdownSourceSpan? urlSourceSpan,
+        MarkdownSourceSpan? titleSourceSpan,
+        MarkdownSourceSpan? htmlTargetSourceSpan = null,
+        MarkdownSourceSpan? htmlRelSourceSpan = null) {
+        UrlSourceSpan = urlSourceSpan;
+        TitleSourceSpan = titleSourceSpan;
+        HtmlTargetSourceSpan = htmlTargetSourceSpan;
+        HtmlRelSourceSpan = htmlRelSourceSpan;
+    }
+
+    internal string RenderMarkdown() {
+        string? autolinkMarkdown = TryRenderAutolinkMarkdown();
+        if (autolinkMarkdown != null) {
+            return autolinkMarkdown;
+        }
+
+        string title = MarkdownEscaper.FormatOptionalTitle(Title);
+        if (LabelInlines != null) {
+            return $"[{LabelInlines.RenderMarkdown()}]({MarkdownEscaper.EscapeLinkUrl(Url)}{title})";
+        }
+        return $"[{MarkdownEscaper.EscapeLinkText(Text)}]({MarkdownEscaper.EscapeLinkUrl(Url)}{title})";
+    }
+
+    private string? TryRenderAutolinkMarkdown() {
+        if (!string.IsNullOrEmpty(Title) || LabelInlines != null) {
+            return null;
+        }
+
+        if (!MarkdownInlineMetadataSourceSpans.GetLinkTargetSpan(this).HasValue) {
+            return null;
+        }
+
+        string? openingMarker = MarkdownInlineMetadataSourceSpans.GetOpeningMarker(this);
+        string? closingMarker = MarkdownInlineMetadataSourceSpans.GetClosingMarker(this);
+        string? separatorMarker = MarkdownInlineMetadataSourceSpans.GetSeparatorMarker(this);
+        if (string.Equals(openingMarker, "<", StringComparison.Ordinal) &&
+            string.Equals(closingMarker, ">", StringComparison.Ordinal) &&
+            string.IsNullOrEmpty(separatorMarker)) {
+            return "<" + Text + ">";
+        }
+
+        if (!string.IsNullOrEmpty(openingMarker) ||
+            !string.IsNullOrEmpty(closingMarker) ||
+            !string.IsNullOrEmpty(separatorMarker)) {
+            return null;
+        }
+
+        string? autolinkLiteral = MarkdownInlineMetadataSourceSpans.GetAutolinkLiteral(this);
+        if (!string.IsNullOrEmpty(autolinkLiteral)) {
+            return autolinkLiteral;
+        }
+
+        if (string.Equals(Text, Url, StringComparison.Ordinal) ||
+            (Url.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase) &&
+             string.Equals(Text, Url.Substring("mailto:".Length), StringComparison.Ordinal)) ||
+            (Url.StartsWith("tel:", StringComparison.OrdinalIgnoreCase) &&
+             string.Equals(Text, Url.Substring("tel:".Length), StringComparison.Ordinal)) ||
+            (Url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+             string.Equals(Text, Url.Substring("http://".Length), StringComparison.Ordinal)) ||
+            (Url.StartsWith("https://", StringComparison.OrdinalIgnoreCase) &&
+             string.Equals(Text, Url.Substring("https://".Length), StringComparison.Ordinal))) {
+            return Url.StartsWith("tel:", StringComparison.OrdinalIgnoreCase) ? Url : Text;
+        }
+
+        return null;
+    }
+    internal string RenderHtml() {
+        var o = HtmlRenderContext.Options;
+        string title = string.IsNullOrEmpty(Title) ? string.Empty : $" title=\"{HtmlTextEncoder.Encode(Title!, o)}\"";
+        if (!UrlOriginPolicy.IsAllowedHttpLink(o, Url)) {
+            if (LabelInlines != null) return LabelInlines.RenderHtml();
+            return HtmlTextEncoder.Encode(Text, o);
+        }
+        string extra = LinkHtmlAttributes.BuildLinkAttributes(o, Url, LinkTarget, LinkRel);
+        if (LabelInlines != null) {
+            return $"<a href=\"{HtmlAttributeUrlEncoder.Encode(Url, o)}\"{title}{extra}>{LabelInlines.RenderHtml()}</a>";
+        }
+        return $"<a href=\"{HtmlAttributeUrlEncoder.Encode(Url, o)}\"{title}{extra}>{HtmlTextEncoder.Encode(Text, o)}</a>";
+    }
+    string IRenderableMarkdownInline.RenderMarkdown() => RenderMarkdown();
+    string IRenderableMarkdownInline.RenderHtml() => RenderHtml();
+    void IPlainTextMarkdownInline.AppendPlainText(System.Text.StringBuilder sb) {
+        if (LabelInlines != null) {
+            InlinePlainText.AppendPlainText(sb, LabelInlines);
+            return;
+        }
+
+        sb.Append(Text);
+    }
+    InlineSequence? IInlineContainerMarkdownInline.NestedInlines => LabelInlines;
+}

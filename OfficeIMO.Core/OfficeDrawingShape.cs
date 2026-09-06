@@ -1,0 +1,63 @@
+using System;
+
+namespace OfficeIMO.Drawing;
+
+/// <summary>
+/// Positioned shape inside an <see cref="OfficeDrawing"/> canvas.
+/// Coordinates use the drawing's local top-left coordinate space.
+/// Standalone shapes may use finite negative coordinates for clipped intermediate scenes; <see cref="OfficeDrawing.AddShape"/> still enforces canvas bounds.
+/// </summary>
+public sealed class OfficeDrawingShape : OfficeDrawingElement {
+    /// <summary>Shape horizontal position inside the drawing.</summary>
+    public double X { get; }
+
+    /// <summary>Shape vertical position inside the drawing.</summary>
+    public double Y { get; }
+
+    /// <summary>Detached shape descriptor.</summary>
+    public OfficeShape Shape { get; }
+
+    /// <summary>Creates a positioned shape.</summary>
+    public OfficeDrawingShape(OfficeShape shape, double x, double y) {
+        if (shape is null) {
+            throw new ArgumentNullException(nameof(shape));
+        }
+
+        ValidateFinite(x, nameof(x));
+        ValidateFinite(y, nameof(y));
+        if (shape.Kind == OfficeShapeKind.Line) {
+            ValidateFiniteNonNegative(shape.Width, nameof(shape.Width));
+            ValidateFiniteNonNegative(shape.Height, nameof(shape.Height));
+        } else {
+            ValidatePositiveFinite(shape.Width, nameof(shape.Width));
+            ValidatePositiveFinite(shape.Height, nameof(shape.Height));
+        }
+
+        Shape = shape.Clone();
+        X = x;
+        Y = y;
+    }
+
+    /// <summary>Creates a detached copy of this positioned shape.</summary>
+    public OfficeDrawingShape Clone() => new OfficeDrawingShape(Shape, X, Y);
+
+    internal override OfficeDrawingElement CloneElement() => Clone();
+
+    private static void ValidateFiniteNonNegative(double value, string paramName) {
+        if (double.IsNaN(value) || double.IsInfinity(value) || value < 0) {
+            throw new ArgumentOutOfRangeException(paramName, "Drawing coordinates must be finite non-negative numbers.");
+        }
+    }
+
+    private static void ValidateFinite(double value, string paramName) {
+        if (double.IsNaN(value) || double.IsInfinity(value)) {
+            throw new ArgumentOutOfRangeException(paramName, "Drawing coordinates must be finite numbers.");
+        }
+    }
+
+    private static void ValidatePositiveFinite(double value, string paramName) {
+        if (double.IsNaN(value) || double.IsInfinity(value) || value <= 0) {
+            throw new ArgumentOutOfRangeException(paramName, "Drawing shape dimensions must be finite positive numbers.");
+        }
+    }
+}

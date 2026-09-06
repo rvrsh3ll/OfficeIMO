@@ -1,0 +1,653 @@
+using System.Text;
+using OfficeIMO.Markdown;
+using Xunit;
+
+namespace OfficeIMO.Tests.MarkdownSuite;
+
+public class Markdown_Reader_Block_Extension_Tests {
+    [Fact]
+    public void Parse_Uses_Delegate_Based_Block_Parser_Extension_With_Nested_Blocks() {
+        var markdown = """
+:::panel Ops Notes
+Paragraph line
+
+- item
+:::
+""";
+
+        var document = OfficeIMO.Markdown.MarkdownReader.Parse(markdown, CreateOptions());
+
+        var panel = Assert.IsType<PanelBlock>(Assert.Single(document.Blocks));
+        Assert.Equal("Ops Notes", panel.Title);
+        Assert.Equal(2, panel.ChildBlocks.Count);
+        Assert.IsType<ParagraphBlock>(panel.ChildBlocks[0]);
+        Assert.IsType<UnorderedListBlock>(panel.ChildBlocks[1]);
+
+        Assert.Equal(2, document.DescendantsOfType<ParagraphBlock>().Count());
+        var nestedParagraph = Assert.IsType<ParagraphBlock>(panel.ChildBlocks[0]);
+        Assert.Equal(new MarkdownSourceSpan(2, 1, 2, 14), nestedParagraph.SourceSpan);
+    }
+
+    [Fact]
+    public void ParseWithSyntaxTree_Captures_Custom_Block_Parser_Ast_And_SourceSpans() {
+        var markdown = """
+:::panel Ops Notes
+Paragraph line
+
+- item
+:::
+""";
+
+        var result = OfficeIMO.Markdown.MarkdownReader.ParseWithSyntaxTree(markdown, CreateOptions());
+
+        var panelSyntax = Assert.Single(result.SyntaxTree.Children);
+        Assert.Equal(MarkdownSyntaxKind.Unknown, panelSyntax.Kind);
+        Assert.Equal("panel-block", panelSyntax.CustomKind);
+        Assert.Equal(new MarkdownSourceSpan(1, 1, 5, 3), panelSyntax.SourceSpan);
+
+        Assert.Equal(new[] {
+            MarkdownSyntaxKind.Paragraph,
+            MarkdownSyntaxKind.Paragraph,
+            MarkdownSyntaxKind.UnorderedList
+        }, panelSyntax.Children.Select(child => child.Kind).ToArray());
+
+        var panel = Assert.IsType<PanelBlock>(Assert.Single(result.Document.Blocks));
+        Assert.Equal(new MarkdownSourceSpan(1, 1, 5, 3), panel.SourceSpan);
+        Assert.Equal(new MarkdownSourceSpan(1, 1, 5, 3), panel.ParserSourceSpan);
+        Assert.Equal(new MarkdownSourceSpan(2, 1, 2, 14), ((MarkdownObject)panel.ChildBlocks[0]).SourceSpan);
+        Assert.Same(panel, panelSyntax.AssociatedObject);
+    }
+
+    [Fact]
+    public void Block_Parser_Context_Creates_SourceSpans_For_Custom_Syntax_Children() {
+        const string markdown = ":::panel **Ops** Notes\r\nParagraph line\r\n:::\r\n";
+
+        var result = OfficeIMO.Markdown.MarkdownReader.ParseWithSyntaxTree(markdown, CreateOptions());
+
+        var panel = Assert.IsType<PanelBlock>(Assert.Single(result.Document.Blocks));
+        var panelSyntax = Assert.Single(result.FinalSyntaxTree.Children);
+        var titleSyntax = panelSyntax.Children[0];
+        var titleStrong = Assert.Single(titleSyntax.Children, child => child.Kind == MarkdownSyntaxKind.InlineStrong);
+
+        Assert.Equal(new MarkdownSourceSpan(1, 1, 3, 3), panel.ParserSourceSpan);
+        Assert.Equal(new MarkdownSourceSpan(1, 10, 1, 22), panel.TitleSourceSpan);
+        Assert.Equal(panel.TitleSourceSpan, titleSyntax.SourceSpan);
+        Assert.Equal(new MarkdownSourceSpan(1, 10, 1, 16), titleStrong.SourceSpan);
+        Assert.Same(panel.TitleSyntaxOwner, titleSyntax.AssociatedObject);
+    }
+
+    [Fact]
+    public void Block_Parser_Context_SourceSpans_Use_Absolute_Lines_In_Nested_Parses() {
+        const string markdown = "> :::panel Ops\r\n> Body\r\n> :::\r\n";
+
+        var result = OfficeIMO.Markdown.MarkdownReader.ParseWithSyntaxTree(markdown, CreateOptions());
+
+        var panel = Assert.Single(result.Document.DescendantsOfType<PanelBlock>());
+        Assert.NotNull(panel.ParserSourceSpan);
+        Assert.Equal(1, panel.ParserSourceSpan.Value.StartLine);
+        Assert.Equal(3, panel.ParserSourceSpan.Value.EndLine);
+    }
+
+    [Fact]
+    public void Block_Parser_Context_Can_Create_Normalized_SourceSlices_For_Custom_Parsers() {
+        const string markdown = "::claim alpha\r\ncontinued\r\n\r\n";
+        MarkdownSourceSlice sourceSlice = default;
+        bool sourceSliceOk = false;
+        var options = MarkdownReaderOptions.CreatePortableProfile();
+        options.BlockParserExtensions.Add(new MarkdownBlockParserExtension(
+            "source-aware-claim",
+            MarkdownBlockParserPlacement.BeforeParagraphs,
+            (MarkdownBlockParser)((MarkdownBlockParserContext context, out MarkdownBlockParseResult result) => {
+                result = default;
+                if (!context.CurrentLine.StartsWith("::claim", StringComparison.Ordinal)) {
+                    return false;
+                }
+
+                sourceSliceOk = context.TryCreateSourceSlice(0, 2, out sourceSlice);
+                result = new MarkdownBlockParseResult(
+                    new ParagraphBlock(new InlineSequence().Text("claimed")),
+                    consumedLineCount: 2);
+                return true;
+            })));
+
+        var document = OfficeIMO.Markdown.MarkdownReader.Parse(markdown, options);
+
+        var paragraph = Assert.IsType<ParagraphBlock>(Assert.Single(document.Blocks));
+        Assert.Equal("claimed", InlinePlainText.Extract(paragraph.Inlines));
+        Assert.True(sourceSliceOk);
+        Assert.Equal(MarkdownSourceTextKind.Normalized, sourceSlice.TextKind);
+        Assert.Equal("::claim alpha\ncontinued", sourceSlice.Text);
+        Assert.Equal(new MarkdownSourceSpan(1, 1, 2, 9), sourceSlice.SourceSpan);
+    }
+
+    [Fact]
+    public void Block_Parser_Context_Exposes_A_Bound_Document_During_Parsing() {
+        const string markdown = "# Existing\n\n::claim";
+        bool observedBoundDocument = false;
+        var options = MarkdownReaderOptions.CreatePortableProfile();
+        options.BlockParserExtensions.Add(new MarkdownBlockParserExtension(
+            "document-aware-claim",
+            MarkdownBlockParserPlacement.BeforeParagraphs,
+            (MarkdownBlockParser)((MarkdownBlockParserContext context, out MarkdownBlockParseResult result) => {
+                result = default;
+                if (!string.Equals(context.CurrentLine, "::claim", StringComparison.Ordinal)) {
+                    return false;
+                }
+
+                MarkdownDoc document = context.Document;
+                var existingHeading = Assert.IsType<HeadingBlock>(Assert.Single(document.Blocks));
+                observedBoundDocument = ReferenceEquals(existingHeading.Parent, document) && existingHeading.IndexInParent == 0;
+                result = new MarkdownBlockParseResult(
+                    new ParagraphBlock(new InlineSequence().Text("claimed")),
+                    consumedLineCount: 1);
+                return true;
+            })));
+
+        MarkdownDoc parsed = OfficeIMO.Markdown.MarkdownReader.Parse(markdown, options);
+
+        Assert.True(observedBoundDocument);
+        Assert.Equal(2, parsed.Blocks.Count);
+        MarkdownInvariantAssert.SemanticTreeIsWellFormed(parsed);
+    }
+
+    [Fact]
+    public void Context_SyntaxBuilder_Can_Associate_Inline_Container_Syntax_With_Custom_Owner() {
+        var markdown = """
+:::panel Ops Notes
+Paragraph line
+:::
+""";
+
+        var result = OfficeIMO.Markdown.MarkdownReader.ParseWithSyntaxTree(markdown, CreateOptions());
+
+        var panel = Assert.IsType<PanelBlock>(Assert.Single(result.Document.Blocks));
+        var panelSyntax = Assert.Single(result.FinalSyntaxTree.Children);
+        var titleSyntax = panelSyntax.Children[0];
+
+        Assert.Equal(MarkdownSyntaxKind.Paragraph, titleSyntax.Kind);
+        Assert.Same(panel.TitleSyntaxOwner, titleSyntax.AssociatedObject);
+        Assert.IsNotType<InlineSequence>(titleSyntax.AssociatedObject);
+        MarkdownInvariantAssert.MappedAssociatedObjectsAreConsistent(result);
+    }
+
+    [Fact]
+    public void Context_SyntaxBuilder_Can_Use_Owned_Child_Syntax_For_Custom_Block_Containers() {
+        var markdown = """
+:::panel Ops Notes
+Paragraph line
+
+- item
+:::
+""";
+
+        var result = OfficeIMO.Markdown.MarkdownReader.ParseWithSyntaxTree(markdown, CreateOptions());
+
+        var panel = Assert.IsType<PanelBlock>(Assert.Single(result.Document.Blocks));
+        var panelSyntax = Assert.Single(result.FinalSyntaxTree.Children);
+
+        Assert.Equal(new[] {
+            MarkdownSyntaxKind.Paragraph,
+            MarkdownSyntaxKind.Paragraph,
+            MarkdownSyntaxKind.UnorderedList
+        }, panelSyntax.Children.Select(child => child.Kind).ToArray());
+        Assert.Same(panel, panelSyntax.AssociatedObject);
+        Assert.Same(panel.ChildBlocks[0], panelSyntax.Children[1].AssociatedObject);
+        Assert.Same(panel.ChildBlocks[1], panelSyntax.Children[2].AssociatedObject);
+        MarkdownInvariantAssert.MappedAssociatedObjectsAreConsistent(result);
+    }
+
+    [Fact]
+    public void Custom_Block_Can_Render_Html_With_Public_Heading_Context_Helpers() {
+        var markdown = """
+# Intro
+
+:::panel Ops Notes
+Paragraph line
+:::
+
+## Child
+### Deep
+""";
+
+        var document = OfficeIMO.Markdown.MarkdownReader.Parse(markdown, CreateOptions());
+        var html = document.ToHtmlFragment(new HtmlOptions {
+            Kind = HtmlKind.Fragment,
+            Title = "panel-title"
+        });
+
+        Assert.Contains("data-title=\"panel-title\"", html, StringComparison.Ordinal);
+        Assert.Contains("data-block-index=\"1\"", html, StringComparison.Ordinal);
+        Assert.Contains("data-parent-anchor=\"intro\"", html, StringComparison.Ordinal);
+        Assert.Contains("href=\"#child\"", html, StringComparison.Ordinal);
+        Assert.Contains("href=\"#deep\"", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Html_Block_Render_Extension_Can_Use_Public_Body_Context_And_Override_Contextual_Block_Rendering() {
+        var markdown = """
+# Intro
+
+:::panel Ops Notes
+Paragraph line
+:::
+
+## Child
+""";
+
+        var document = OfficeIMO.Markdown.MarkdownReader.Parse(markdown, CreateOptions());
+        var htmlOptions = new HtmlOptions {
+            Kind = HtmlKind.Fragment,
+            Title = "override-title"
+        };
+        htmlOptions.BlockRenderExtensions.Add(MarkdownBlockHtmlRenderExtension.CreateContextual(
+            "panel-override",
+            typeof(PanelBlock),
+            static (block, context) => {
+                if (block is not PanelBlock panel) {
+                    return null;
+                }
+
+                var blockIndex = context.GetBlockIndex(panel);
+                var titleAnchor = context.GetPrecedingHeadingAnchor(blockIndex, new TocOptions {
+                    Scope = TocScope.PreviousHeading,
+                    IncludeTitle = true,
+                    MinLevel = 2,
+                    MaxLevel = 6
+                });
+                return $"<aside data-panel-override=\"true\" data-title=\"{System.Net.WebUtility.HtmlEncode(context.Options.Title)}\" data-block-index=\"{blockIndex}\" data-parent-anchor=\"{System.Net.WebUtility.HtmlEncode(titleAnchor)}\">{System.Net.WebUtility.HtmlEncode(panel.Title)}</aside>";
+            }));
+
+        var html = document.ToHtmlFragment(htmlOptions);
+
+        Assert.Contains("data-panel-override=\"true\"", html, StringComparison.Ordinal);
+        Assert.Contains("data-title=\"override-title\"", html, StringComparison.Ordinal);
+        Assert.Contains("data-block-index=\"1\"", html, StringComparison.Ordinal);
+        Assert.Contains("data-parent-anchor=\"intro\"", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-panel=\"true\"", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Html_Block_Render_Extension_Can_Read_Final_Syntax_Node_And_Source_Slices() {
+        const string markdown = "# Intro\r\n\r\n:::panel Ops Notes\r\nParagraph line\r\n:::\r\n";
+        var readerOptions = CreateOptions();
+        readerOptions.PreserveTrivia = true;
+        var document = OfficeIMO.Markdown.MarkdownReader.ParseWithSyntaxTree(markdown, readerOptions).Document;
+        MarkdownSyntaxNode? seenSyntax = null;
+        MarkdownSourceSlice normalizedSlice = default;
+        MarkdownSourceSlice originalSlice = default;
+        var normalizedOk = false;
+        var originalOk = false;
+
+        var htmlOptions = new HtmlOptions {
+            Kind = HtmlKind.Fragment
+        };
+        htmlOptions.BlockRenderExtensions.Add(MarkdownBlockHtmlRenderExtension.CreateContextual(
+            "panel-source-aware",
+            typeof(PanelBlock),
+            (block, context) => {
+                if (block is not PanelBlock panel) {
+                    return null;
+                }
+
+                seenSyntax = context.FindSyntaxNode(panel);
+                normalizedOk = context.TryCreateSourceSlice(panel, out normalizedSlice);
+                originalOk = context.TryCreateOriginalSourceSlice(panel, out originalSlice);
+                return "<aside data-panel-source=\"true\">"
+                    + System.Net.WebUtility.HtmlEncode(panel.Title)
+                    + "</aside>";
+            }));
+
+        var html = document.ToHtmlFragment(htmlOptions);
+
+        Assert.Contains("data-panel-source=\"true\"", html, StringComparison.Ordinal);
+        Assert.NotNull(seenSyntax);
+        Assert.Equal(MarkdownSyntaxKind.Unknown, seenSyntax!.Kind);
+        Assert.Equal("panel-block", seenSyntax.CustomKind);
+        Assert.True(normalizedOk);
+        Assert.Equal(":::panel Ops Notes\nParagraph line\n:::", normalizedSlice.Text);
+        Assert.True(originalOk);
+        Assert.Equal(MarkdownSourceTextKind.Original, originalSlice.TextKind);
+        Assert.Equal(":::panel Ops Notes\r\nParagraph line\r\n:::", originalSlice.Text);
+    }
+
+    [Fact]
+    public void Html_Block_Render_Extension_Legacy_Constructor_Still_Uses_Options_And_Applies() {
+        var markdown = """
+:::panel Ops Notes
+Paragraph line
+:::
+""";
+
+        var document = OfficeIMO.Markdown.MarkdownReader.Parse(markdown, CreateOptions());
+        var htmlOptions = new HtmlOptions {
+            Kind = HtmlKind.Fragment,
+            Title = "legacy-title"
+        };
+        htmlOptions.BlockRenderExtensions.Add(new MarkdownBlockHtmlRenderExtension(
+            "panel-legacy-override",
+            typeof(PanelBlock),
+            static (block, options) => {
+                if (block is not PanelBlock panel) {
+                    return null;
+                }
+
+                return $"<aside data-legacy-panel=\"true\" data-title=\"{System.Net.WebUtility.HtmlEncode(options.Title)}\">{System.Net.WebUtility.HtmlEncode(panel.Title)}</aside>";
+            }));
+
+        var html = document.ToHtmlFragment(htmlOptions);
+
+        Assert.Contains("data-legacy-panel=\"true\"", html, StringComparison.Ordinal);
+        Assert.Contains("data-title=\"legacy-title\"", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Block_Parser_Extensions_Use_Registration_Order_And_Stop_After_First_Success() {
+        const string markdown = "::claim";
+        var firstCalls = 0;
+        var secondCalls = 0;
+        var options = MarkdownReaderOptions.CreatePortableProfile();
+        options.BlockParserExtensions.Add(new MarkdownBlockParserExtension(
+            "first-claim",
+            MarkdownBlockParserPlacement.BeforeParagraphs,
+            (MarkdownBlockParser)((MarkdownBlockParserContext _, out MarkdownBlockParseResult result) => {
+                firstCalls++;
+                result = new MarkdownBlockParseResult(
+                    new ParagraphBlock(new InlineSequence().Text("first extension")),
+                    consumedLineCount: 1);
+                return true;
+            })));
+        options.BlockParserExtensions.Add(new MarkdownBlockParserExtension(
+            "second-claim",
+            MarkdownBlockParserPlacement.BeforeParagraphs,
+            (MarkdownBlockParser)((MarkdownBlockParserContext _, out MarkdownBlockParseResult result) => {
+                secondCalls++;
+                result = new MarkdownBlockParseResult(
+                    new ParagraphBlock(new InlineSequence().Text("second extension")),
+                    consumedLineCount: 1);
+                return true;
+            })));
+
+        var document = OfficeIMO.Markdown.MarkdownReader.Parse(markdown, options);
+
+        var paragraph = Assert.IsType<ParagraphBlock>(Assert.Single(document.Blocks));
+        Assert.Equal("first extension", InlinePlainText.Extract(paragraph.Inlines));
+        Assert.Equal(1, firstCalls);
+        Assert.Equal(0, secondCalls);
+    }
+
+    [Fact]
+    public void Disabled_Block_Parser_Extension_Falls_Back_To_Core_Parsers() {
+        const string markdown = "::disabled";
+        var calls = 0;
+        var options = MarkdownReaderOptions.CreatePortableProfile();
+        options.BlockParserExtensions.Add(new MarkdownBlockParserExtension(
+            "disabled-claim",
+            MarkdownBlockParserPlacement.BeforeParagraphs,
+            (MarkdownBlockParser)((MarkdownBlockParserContext _, out MarkdownBlockParseResult result) => {
+                calls++;
+                result = new MarkdownBlockParseResult(
+                    new ParagraphBlock(new InlineSequence().Text("disabled extension")),
+                    consumedLineCount: 1);
+                return true;
+            }),
+            isEnabled: _ => false));
+
+        var document = OfficeIMO.Markdown.MarkdownReader.Parse(markdown, options);
+
+        var paragraph = Assert.IsType<ParagraphBlock>(Assert.Single(document.Blocks));
+        Assert.Equal("::disabled", InlinePlainText.Extract(paragraph.Inlines));
+        Assert.Equal(0, calls);
+    }
+
+    [Fact]
+    public void Block_Parser_Extension_Placement_Can_Claim_Input_Before_Later_Core_Parsers() {
+        const string markdown = "[hero]: /url\n\n[hero]";
+        var calls = 0;
+        var options = MarkdownReaderOptions.CreatePortableProfile();
+        options.BlockParserExtensions.Add(new MarkdownBlockParserExtension(
+            "claim-reference-looking-line",
+            MarkdownBlockParserPlacement.AfterHtmlBlocks,
+            CreateClaimingParser(
+                "claimed before reference definitions",
+                () => calls++,
+                context => context.CurrentLine.StartsWith("[hero]:", StringComparison.Ordinal))));
+
+        var document = OfficeIMO.Markdown.MarkdownReader.Parse(markdown, options);
+
+        Assert.Equal(2, document.Blocks.Count);
+        var claimed = Assert.IsType<ParagraphBlock>(document.Blocks[0]);
+        Assert.Equal("claimed before reference definitions", InlinePlainText.Extract(claimed.Inlines));
+        Assert.IsType<ParagraphBlock>(document.Blocks[1]);
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public void Block_Parser_Extension_Later_Placement_Does_Not_Preempt_Earlier_Core_Parsers() {
+        const string markdown = """
+| A | B |
+|---|---|
+| 1 | 2 |
+""";
+        var calls = 0;
+        var options = MarkdownReaderOptions.CreateGitHubFlavoredMarkdownProfile();
+        options.BlockParserExtensions.Add(new MarkdownBlockParserExtension(
+            "late-claim-anything",
+            MarkdownBlockParserPlacement.BeforeParagraphs,
+            CreateClaimingParser("late extension", () => calls++)));
+
+        var document = OfficeIMO.Markdown.MarkdownReader.Parse(markdown, options);
+
+        Assert.IsType<TableBlock>(Assert.Single(document.Blocks));
+        Assert.Equal(0, calls);
+    }
+
+    [Fact]
+    public void BuiltIn_Block_Parser_Extension_Wins_At_Same_Placement_When_Registered_First() {
+        const string markdown = """
+> [!NOTE] Heads up
+> Body
+""";
+        var calls = 0;
+        var options = new MarkdownReaderOptions();
+        options.BlockParserExtensions.Add(new MarkdownBlockParserExtension(
+            "custom-after-default-callout",
+            MarkdownBlockParserPlacement.AfterFrontMatter,
+            CreateClaimingParser(
+                "custom callout",
+                () => calls++,
+                context => context.CurrentLine.StartsWith("> [!", StringComparison.Ordinal))));
+
+        var document = OfficeIMO.Markdown.MarkdownReader.Parse(markdown, options);
+
+        Assert.IsType<CalloutBlock>(Assert.Single(document.Blocks));
+        Assert.Equal(0, calls);
+    }
+
+    [Fact]
+    public void Custom_Block_Parser_Extension_Can_Preempt_BuiltIn_When_Registered_First() {
+        const string markdown = """
+> [!NOTE] Heads up
+> Body
+""";
+        var calls = 0;
+        var options = MarkdownReaderOptions.CreatePortableProfile();
+        options.Callouts = true;
+        options.BlockParserExtensions.Add(new MarkdownBlockParserExtension(
+            "custom-before-callout",
+            MarkdownBlockParserPlacement.AfterFrontMatter,
+            CreateClaimingParser(
+                "custom before callout",
+                () => calls++,
+                context => context.CurrentLine.StartsWith("> [!", StringComparison.Ordinal),
+                consumedLineCount: 2)));
+        MarkdownReaderBuiltInExtensions.AddCallouts(options);
+
+        var document = OfficeIMO.Markdown.MarkdownReader.Parse(markdown, options);
+
+        var paragraph = Assert.IsType<ParagraphBlock>(Assert.Single(document.Blocks));
+        Assert.Equal("custom before callout", InlinePlainText.Extract(paragraph.Inlines));
+        Assert.Equal(1, calls);
+    }
+
+    private static MarkdownReaderOptions CreateOptions() {
+        var options = MarkdownReaderOptions.CreatePortableProfile();
+        options.BlockParserExtensions.Add(new MarkdownBlockParserExtension(
+            "panel-block",
+            MarkdownBlockParserPlacement.BeforeParagraphs,
+            TryParsePanelBlock));
+        return options;
+    }
+
+    private static MarkdownBlockParser CreateClaimingParser(
+        string text,
+        Action? onClaim = null,
+        Func<MarkdownBlockParserContext, bool>? canClaim = null,
+        int consumedLineCount = 1) =>
+        (MarkdownBlockParser)((MarkdownBlockParserContext context, out MarkdownBlockParseResult result) => {
+            if (canClaim != null && !canClaim(context)) {
+                result = default;
+                return false;
+            }
+
+            onClaim?.Invoke();
+            result = new MarkdownBlockParseResult(
+                new ParagraphBlock(new InlineSequence().Text(text)),
+                consumedLineCount);
+            return true;
+        });
+
+    private static bool TryParsePanelBlock(MarkdownBlockParserContext context, out MarkdownBlockParseResult result) {
+        result = default;
+        const string prefix = ":::panel";
+        var trimmed = context.CurrentLine.Trim();
+        if (!trimmed.StartsWith(prefix, StringComparison.Ordinal)) {
+            return false;
+        }
+
+        var title = trimmed.Length == prefix.Length ? string.Empty : trimmed.Substring(prefix.Length).Trim();
+        var sourceLine = context.CurrentLine;
+        var titleStartColumn = GetPanelTitleStartColumn(sourceLine, prefix);
+        var titleSourceSpan = title.Length > 0
+            ? context.CreateSourceSpan(0, titleStartColumn, 0, titleStartColumn + title.Length - 1)
+            : (MarkdownSourceSpan?)null;
+        var closingOffset = -1;
+        for (var offset = 1; context.TryGetLine(offset, out var line); offset++) {
+            if (string.Equals(line.Trim(), ":::", StringComparison.Ordinal)) {
+                closingOffset = offset;
+                break;
+            }
+        }
+
+        if (closingOffset < 0) {
+            return false;
+        }
+
+        var nestedBlocks = closingOffset > 1
+            ? context.ParseNestedBlocks(1, closingOffset - 1)
+            : Array.Empty<IMarkdownBlock>();
+        result = new MarkdownBlockParseResult(
+            new PanelBlock(
+                title,
+                nestedBlocks,
+                title.Length > 0 ? context.ParseInlineText(0, titleStartColumn, title.Length) : new InlineSequence(),
+                context.CreateLineSpan(0, closingOffset + 1),
+                titleSourceSpan),
+            closingOffset + 1);
+        return true;
+    }
+
+    private static int GetPanelTitleStartColumn(string line, string prefix) {
+        var prefixIndex = line.IndexOf(prefix, StringComparison.Ordinal);
+        if (prefixIndex < 0) {
+            return 1;
+        }
+
+        var titleStartIndex = prefixIndex + prefix.Length;
+        while (titleStartIndex < line.Length && char.IsWhiteSpace(line[titleStartIndex])) {
+            titleStartIndex++;
+        }
+
+        return titleStartIndex + 1;
+    }
+
+    private sealed class PanelBlock : MarkdownBlock, IMarkdownBlock, ISyntaxMarkdownBlockWithContext, IContextualHtmlMarkdownBlock, IChildMarkdownBlockContainer {
+        public PanelBlock(
+            string title,
+            IReadOnlyList<IMarkdownBlock> childBlocks,
+            InlineSequence titleInlines,
+            MarkdownSourceSpan? parserSourceSpan,
+            MarkdownSourceSpan? titleSourceSpan) {
+            Title = title ?? string.Empty;
+            ChildBlocks = childBlocks ?? Array.Empty<IMarkdownBlock>();
+            TitleInlines = titleInlines ?? new InlineSequence().Text(Title);
+            TitleSyntaxOwner = new PanelTitleSyntaxOwner(Title);
+            ParserSourceSpan = parserSourceSpan;
+            TitleSourceSpan = titleSourceSpan;
+        }
+
+        public string Title { get; }
+        public InlineSequence TitleInlines { get; }
+        public object TitleSyntaxOwner { get; }
+        public IReadOnlyList<IMarkdownBlock> ChildBlocks { get; }
+        public MarkdownSourceSpan? ParserSourceSpan { get; }
+        public MarkdownSourceSpan? TitleSourceSpan { get; }
+
+        string IMarkdownBlock.RenderMarkdown() {
+            var body = string.Join("\n\n", ChildBlocks.Select(block => block.RenderMarkdown().TrimEnd()));
+            return string.IsNullOrWhiteSpace(body)
+                ? $":::panel {Title}\n:::"
+                : $":::panel {Title}\n{body}\n:::";
+        }
+
+        string IMarkdownBlock.RenderHtml() {
+            var body = string.Concat(ChildBlocks.Select(block => block.RenderHtml()));
+            return $"<section data-panel=\"true\"><h2>{System.Net.WebUtility.HtmlEncode(Title)}</h2>{body}</section>";
+        }
+
+        string IContextualHtmlMarkdownBlock.RenderHtml(MarkdownBodyRenderContext context) {
+            var body = string.Concat(ChildBlocks.Select(block => block.RenderHtml()));
+            var blockIndex = context.GetBlockIndex(this);
+            var tocOptions = new TocOptions {
+                Scope = TocScope.PreviousHeading,
+                IncludeTitle = true,
+                MinLevel = 2,
+                MaxLevel = 6
+            };
+            var titleAnchor = context.GetPrecedingHeadingAnchor(blockIndex, tocOptions);
+            var entries = context.BuildTocEntries(blockIndex, tocOptions, titleAnchor);
+            var nav = string.Concat(entries.Select(entry =>
+                $"<a href=\"#{System.Net.WebUtility.HtmlEncode(entry.Anchor)}\">{System.Net.WebUtility.HtmlEncode(entry.Text)}</a>"));
+            return $"<section data-panel=\"true\" data-title=\"{System.Net.WebUtility.HtmlEncode(context.Options.Title)}\" data-block-index=\"{blockIndex}\" data-parent-anchor=\"{System.Net.WebUtility.HtmlEncode(titleAnchor)}\"><h2>{System.Net.WebUtility.HtmlEncode(Title)}</h2>{nav}{body}</section>";
+        }
+
+        public MarkdownSyntaxNode BuildSyntaxNode(MarkdownBlockSyntaxBuilderContext context, MarkdownSourceSpan? span) {
+            var titleNode = context.BuildInlineContainerNode(
+                MarkdownSyntaxKind.Paragraph,
+                TitleInlines,
+                span: TitleSourceSpan,
+                literal: Title,
+                associatedObject: TitleSyntaxOwner);
+            var childNodes = context.BuildOwnedChildSyntaxNodes(this);
+            var children = new List<MarkdownSyntaxNode>(childNodes.Count + 1) { titleNode };
+            for (int i = 0; i < childNodes.Count; i++) {
+                children.Add(childNodes[i]);
+            }
+
+            return new MarkdownSyntaxNode(
+                MarkdownSyntaxKind.Unknown,
+                span ?? context.GetAggregateSpan(children),
+                literal: context.NormalizeLiteralLineEndings(((IMarkdownBlock)this).RenderMarkdown()),
+                children: children,
+                associatedObject: this,
+                customKind: "panel-block");
+        }
+    }
+
+    private sealed class PanelTitleSyntaxOwner {
+        public PanelTitleSyntaxOwner(string title) {
+            Title = title ?? string.Empty;
+        }
+
+        public string Title { get; }
+    }
+}

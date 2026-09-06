@@ -1,12 +1,11 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 
 namespace OfficeIMO.Word {
+    /// <summary>
+    /// Helper methods for adding and retrieving headers and footers in Word documents.
+    /// </summary>
     public static partial class WordHeadersAndFooters {
         /// <summary>
         /// Add default header and footers to section. You can control odd/even/first with DifferentOddAndEventPages/DifferentFirstPage properties.
@@ -34,15 +33,9 @@ namespace OfficeIMO.Word {
         /// <param name="headerFooterValue"></param>
         /// <returns></returns>
         internal static bool GetHeaderReference(WordDocument document, WordSection section, HeaderFooterValues headerFooterValue) {
-            var sectionProperties = section._sectionProperties;
-
-            foreach (var element in sectionProperties.ChildElements.OfType<HeaderReference>()) {
-                if (element.Type == headerFooterValue) {
-                    // we found the header reference already exists; we do nothing;
-                    return true;
-                }
-            }
-            return false;
+            return section._sectionProperties.ChildElements
+                .OfType<HeaderReference>()
+                .Any(element => element.Type?.Value == headerFooterValue);
         }
 
 
@@ -54,13 +47,9 @@ namespace OfficeIMO.Word {
         /// <param name="headerFooterValue"></param>
         /// <returns></returns>
         internal static bool GetFooterReference(WordDocument document, WordSection section, HeaderFooterValues headerFooterValue) {
-            var sectionProperties = section._sectionProperties;
-            foreach (var element in sectionProperties.ChildElements.OfType<FooterReference>()) {
-                if (element.Type == headerFooterValue) {
-                    return true;
-                }
-            }
-            return false;
+            return section._sectionProperties.ChildElements
+                .OfType<FooterReference>()
+                .Any(element => element.Type?.Value == headerFooterValue);
         }
 
         /// <summary>
@@ -73,39 +62,37 @@ namespace OfficeIMO.Word {
             var sectionProperties = section._sectionProperties;
 
             foreach (var element in sectionProperties.ChildElements.OfType<HeaderReference>()) {
-                if (element.Type == headerFooterValue) {
+                if (element.Type?.Value == headerFooterValue) {
                     // we found the header reference already exists; we do nothing;
                     return;
                 }
             }
 
-            var headerPart = document._wordprocessingDocument.MainDocumentPart.AddNewPart<HeaderPart>();
+            var headerPart = document._wordprocessingDocument.MainDocumentPart!.AddNewPart<HeaderPart>();
 
             var header = new Header();
             header.Save(headerPart);
+            var headerElement = headerPart.Header ?? throw new InvalidOperationException("Header element is missing.");
 
-            if (headerPart != null) {
-                var id = document._wordprocessingDocument.MainDocumentPart.GetIdOfPart(headerPart);
-                //var id1 = document._wordprocessingDocument.MainDocumentPart.GetIdOfPart(part.HeaderParts.FirstOrDefault());
+            var id = document._wordprocessingDocument.MainDocumentPart!.GetIdOfPart(headerPart);
+            //var id1 = document._wordprocessingDocument.MainDocumentPart.GetIdOfPart(part.HeaderParts.FirstOrDefault());
 
-                if (id != null) {
-                    var headerReference = new HeaderReference() {
-                        Type = headerFooterValue,
-                        Id = id
-                    };
-                    sectionProperties.Append(headerReference);
-                }
+            if (id != null) {
+                var headerReference = new HeaderReference() {
+                    Type = headerFooterValue,
+                    Id = id
+                };
+
+                InsertHeaderFooterReference(sectionProperties, headerReference);
             }
 
+            var headers = section.Header ?? throw new InvalidOperationException("Headers collection is missing.");
             if (headerFooterValue == HeaderFooterValues.Default) {
-                //  section._headerDefault = headerPart.Header;
-                section.Header.Default = new WordHeader(document, HeaderFooterValues.Default, headerPart.Header, section);
+                headers.Default = new WordHeader(document, HeaderFooterValues.Default, headerElement, section);
             } else if (headerFooterValue == HeaderFooterValues.First) {
-                //  section._headerFirst = headerPart.Header;
-                section.Header.First = new WordHeader(document, HeaderFooterValues.First, headerPart.Header, section);
+                headers.First = new WordHeader(document, HeaderFooterValues.First, headerElement, section);
             } else {
-                // section._headerEven = headerPart.Header;
-                section.Header.Even = new WordHeader(document, HeaderFooterValues.Even, headerPart.Header, section);
+                headers.Even = new WordHeader(document, HeaderFooterValues.Even, headerElement, section);
             }
         }
 
@@ -118,40 +105,51 @@ namespace OfficeIMO.Word {
         internal static void AddFooterReference(WordDocument document, WordSection section, HeaderFooterValues headerFooterValue) {
             var sectionProperties = section._sectionProperties;
             foreach (var element in sectionProperties.ChildElements.OfType<FooterReference>()) {
-                if (element.Type == headerFooterValue) {
+                if (element.Type?.Value == headerFooterValue) {
                     // we found the footer reference already exists; we do nothing;
                     return;
                 }
             }
 
-            var footerPart = document._wordprocessingDocument.MainDocumentPart.AddNewPart<FooterPart>();
-
-            MainDocumentPart part = document._wordprocessingDocument.MainDocumentPart;
-            Body body = document._wordprocessingDocument.MainDocumentPart.Document.Body;
+            var footerPart = document._wordprocessingDocument.MainDocumentPart!.AddNewPart<FooterPart>();
 
             var footer = new Footer();
             footer.Save(footerPart);
+            var footerElement = footerPart.Footer ?? throw new InvalidOperationException("Footer element is missing.");
 
-            if (footerPart != null) {
-                var id = document._wordprocessingDocument.MainDocumentPart.GetIdOfPart(footerPart);
-                if (id != null) {
-                    var footerReference = new FooterReference() {
-                        Type = headerFooterValue,
-                        Id = id
-                    };
-                    sectionProperties.Append(footerReference);
-                }
+            var id = document._wordprocessingDocument.MainDocumentPart!.GetIdOfPart(footerPart);
+            if (id != null) {
+                var footerReference = new FooterReference() {
+                    Type = headerFooterValue,
+                    Id = id
+                };
+
+                InsertHeaderFooterReference(sectionProperties, footerReference);
             }
 
+            var footers = section.Footer ?? throw new InvalidOperationException("Footers collection is missing.");
             if (headerFooterValue == HeaderFooterValues.Default) {
-                //section._footerDefault = footerPart.Footer;
-                section.Footer.Default = new WordFooter(document, HeaderFooterValues.Default, footerPart.Footer, section);
+                footers.Default = new WordFooter(document, HeaderFooterValues.Default, footerElement, section);
             } else if (headerFooterValue == HeaderFooterValues.First) {
-                //section._footerFirst = footerPart.Footer;
-                section.Footer.First = new WordFooter(document, HeaderFooterValues.First, footerPart.Footer, section);
+                footers.First = new WordFooter(document, HeaderFooterValues.First, footerElement, section);
             } else {
-                //section._footerEven = footerPart.Footer;
-                section.Footer.Even = new WordFooter(document, HeaderFooterValues.Even, footerPart.Footer, section);
+                footers.Even = new WordFooter(document, HeaderFooterValues.Even, footerElement, section);
+            }
+        }
+
+        private static void InsertHeaderFooterReference(SectionProperties sectionProperties, OpenXmlElement reference) {
+            // Header/footer references must appear before other section
+            // properties (such as pgSz/pgMar) to satisfy the Open XML
+            // schema content model.
+            var lastHdrFtrRef = sectionProperties
+                .ChildElements
+                .Where(e => e is HeaderReference || e is FooterReference)
+                .LastOrDefault();
+
+            if (lastHdrFtrRef != null) {
+                sectionProperties.InsertAfter(reference, lastHdrFtrRef);
+            } else {
+                sectionProperties.InsertAt(reference, 0);
             }
         }
 
@@ -161,8 +159,11 @@ namespace OfficeIMO.Word {
         /// <param name="wordDocument"></param>
         /// <returns></returns>
         internal static SectionProperties AddSectionProperties(this WordprocessingDocument wordDocument) {
-            var sectionProperties = CreateSectionProperties();
-            wordDocument.MainDocumentPart.Document.Body.Append(sectionProperties);
+            // When attaching section properties directly to the document body
+            // we want explicit page size and margins so that the document
+            // validates cleanly against the Open XML schema.
+            var sectionProperties = CreateSectionProperties(includeDefaultPageSettings: true);
+            wordDocument.MainDocumentPart!.Document!.Body!.Append(sectionProperties);
             return sectionProperties;
         }
 
@@ -190,19 +191,68 @@ namespace OfficeIMO.Word {
             return Guid.NewGuid().ToString("N").Substring(0, 8).ToUpper();
         }
 
+        private static uint _revisionIdCounter = 1;
+
         /// <summary>
-        /// Create a new section properties
+        /// Generate a unique revision id used by <see cref="InsertedRun"/> and
+        /// <see cref="DeletedRun"/> elements.
         /// </summary>
-        /// <returns></returns>
+        /// <returns>Revision identifier as decimal string.</returns>
+        internal static string GenerateRevisionId() {
+            return (_revisionIdCounter++).ToString();
+        }
+
+        /// <summary>
+        /// Create a new section properties container.
+        /// </summary>
+        /// <remarks>
+        /// For new sections inserted into an existing document we only want a bare
+        /// <see cref="SectionProperties"/> element so that <see cref="WordSection"/>
+        /// can copy settings such as headers, footers, margins and numbering from
+        /// the previous section using <c>CopySectionProperties</c>.
+        /// </remarks>
+        /// <returns>Empty section properties element with a unique rsid.</returns>
         internal static SectionProperties CreateSectionProperties() {
+            // New sections should start with an empty sectPr so that existing
+            // section properties can be copied correctly.
+            return CreateSectionProperties(includeDefaultPageSettings: false);
+        }
+
+        /// <summary>
+        /// Create a new section properties container.
+        /// </summary>
+        /// <param name="includeDefaultPageSettings">
+        /// When <c>true</c>, includes default Letter page size and Normal margins.
+        /// </param>
+        /// <returns>Section properties element.</returns>
+        internal static SectionProperties CreateSectionProperties(bool includeDefaultPageSettings) {
             SectionProperties sectionProperties = new SectionProperties() { RsidR = GenerateRsid() };
 
-            // Set the page size and margins
-            //PageSize pageSize = new PageSize() { Width = 12240, Height = 15840 }; // A4 size
-            //PageMargin pageMargin = new PageMargin() { Top = 1440, Right = 1440, Bottom = 1440, Left = 1440 }; // 1 inch margins
+            if (includeDefaultPageSettings) {
+                // Align new documents with Word defaults:
+                // Letter page size with 1" Normal margins.
+                var pageSize = WordPageSizes.Letter;
+                // Clone to avoid sharing instances between sections.
+                PageSize pageSizeClone = new PageSize() {
+                    Width = pageSize.WidthTwips,
+                    Height = pageSize.HeightTwips,
+                    Code = pageSize.PaperCode
+                };
 
-            //sectionProperties.Append(pageSize);
-            //sectionProperties.Append(pageMargin);
+                // Match WordMargins.Normal so that margin presets are detected correctly.
+                PageMargin pageMargin = new PageMargin() {
+                    Top = 1440,    // 1 inch
+                    Right = 1440,  // 1 inch
+                    Bottom = 1440, // 1 inch
+                    Left = 1440,   // 1 inch
+                    Header = 720,
+                    Footer = 720,
+                    Gutter = 0
+                };
+
+                sectionProperties.Append(pageSizeClone);
+                sectionProperties.Append(pageMargin);
+            }
 
             return sectionProperties;
         }

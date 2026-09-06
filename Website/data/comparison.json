@@ -1,0 +1,79 @@
+{
+  "title": "Choose the Right Fit",
+  "description": "Compare OfficeIMO against the typical trade-offs of commercial document suites without freezing the page around vendor snapshots that drift over time.",
+  "columns": ["Decision point", "OfficeIMO", "Typical commercial suite", "What to validate"],
+  "rows": [
+    {
+      "feature": "Licensing and source access",
+      "values": [
+        "MIT license with source available",
+        "Paid license or subscription with closed-source implementation",
+        "Procurement rules, redistribution terms, and whether source inspection matters to your team"
+      ]
+    },
+    {
+      "feature": "Primary workflow",
+      "values": [
+        ".NET packages plus first-party PowerShell automation through PSWriteOffice",
+        "Usually strong .NET APIs, with PowerShell often handled through custom wrappers",
+        "Whether the team needs native scripting, CI automation, or admin-friendly document jobs"
+      ]
+    },
+    {
+      "feature": "Format and workload focus",
+      "values": [
+        "Modern and legacy Word, Excel, and PowerPoint; PDF, email, OneNote, OpenDocument, HTML, RTF, publishing, and Reader workflows",
+        "Often broader across rendering, conversion, and additional file-format families",
+        "The exact read, create, edit, save, convert, render, extract, and preserve operations your product needs"
+      ]
+    },
+    {
+      "feature": "Conversion fidelity and loss policy",
+      "values": [
+        "Feature-level compatibility evidence distinguishes native, editable approximation, visual fallback, preservation, deliberate drop, and blocked outcomes",
+        "Vendor behavior and diagnostics vary by product and route",
+        "Whether the application can detect and approve loss before committing an output file"
+      ]
+    },
+    {
+      "feature": "Deployment model",
+      "values": [
+        "COM-free and friendly to server, container, and automation environments",
+        "Often server-safe as well, but packaging and runtime dependencies still vary",
+        "Target OS, hosting model, native dependencies, and whether your builds need to stay lightweight"
+      ]
+    },
+    {
+      "feature": "AOT and trimming reality",
+      "values": [
+        "114 of 118 production projects have Windows and Linux NativeAOT evidence, including 111 fully rooted libraries and one build-time source generator; the Chromium browser-PDF bridge, HTML/PDF workbench, OfficeIMO Studio, and WPF/WebView2 renderer use managed deployment",
+        "Varies by vendor, package, and feature set",
+        "Real publish profiles, linker settings, and the exact package mix you plan to ship"
+      ]
+    },
+    {
+      "feature": "Support model",
+      "values": [
+        "GitHub issues, source inspection, community support, sponsorship, and scoped commercial engineering",
+        "Vendor-maintained docs, support channels, and commercial escalation paths",
+        "Response expectations, SLA requirements, and who owns production support"
+      ]
+    },
+    {
+      "feature": "Debugging and customization",
+      "values": [
+        "You can inspect behavior directly, patch locally, and understand how documents are produced",
+        "You usually depend on vendor fixes, support guidance, and extension points",
+        "How often you need deep debugging, custom behavior, or internal platform ownership"
+      ]
+    },
+    {
+      "feature": "Total cost profile",
+      "values": [
+        "No license fee, but your team still owns evaluation, testing, and operational confidence",
+        "License cost in exchange for support, broader coverage, and procurement-friendly packaging",
+        "Whether engineering time or commercial support is the scarcer resource for your organization"
+      ]
+    }
+  ]
+}

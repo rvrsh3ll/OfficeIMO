@@ -1,0 +1,188 @@
+using System;
+
+namespace OfficeIMO.Visio.Diagrams {
+    internal static class VisioNetworkDiagramVisuals {
+        internal const double BackgroundZoneCaptionHeaderClearance = 0.42D;
+
+        internal static void GetNodeShape(VisioNetworkNodeKind kind, double nodeWidth, double nodeHeight, out string masterNameU, out double width, out double height) {
+            width = nodeWidth;
+            height = nodeHeight;
+            switch (kind) {
+                case VisioNetworkNodeKind.User:
+                case VisioNetworkNodeKind.Internet:
+                case VisioNetworkNodeKind.Wireless:
+                    masterNameU = "Circle";
+                    width = 0.9D;
+                    height = 0.9D;
+                    break;
+                case VisioNetworkNodeKind.Firewall:
+                case VisioNetworkNodeKind.Router:
+                    masterNameU = "Decision";
+                    width = nodeWidth * 0.95D;
+                    height = nodeHeight * 1.2D;
+                    break;
+                case VisioNetworkNodeKind.Storage:
+                case VisioNetworkNodeKind.Database:
+                    masterNameU = "Data";
+                    break;
+                case VisioNetworkNodeKind.Switch:
+                    masterNameU = "Rectangle";
+                    width = nodeWidth * 1.15D;
+                    height = nodeHeight * 0.75D;
+                    break;
+                case VisioNetworkNodeKind.Note:
+                    masterNameU = "Rectangle";
+                    width = nodeWidth * 1.55D;
+                    height = nodeHeight * 1.15D;
+                    break;
+                default:
+                    masterNameU = "Process";
+                    break;
+            }
+        }
+
+        internal static VisioShapeStyle GetNodeStyle(VisioStyleTheme theme, VisioNetworkNodeKind kind) {
+            switch (kind) {
+                case VisioNetworkNodeKind.User:
+                case VisioNetworkNodeKind.Wireless:
+                    return theme.Marker;
+                case VisioNetworkNodeKind.Firewall:
+                case VisioNetworkNodeKind.Router:
+                    return theme.Emphasis;
+                case VisioNetworkNodeKind.Storage:
+                case VisioNetworkNodeKind.Database:
+                    return theme.Success;
+                case VisioNetworkNodeKind.Note:
+                    return theme.Container;
+                case VisioNetworkNodeKind.Internet:
+                    return theme.Decision;
+                default:
+                    return theme.Primary;
+            }
+        }
+
+        internal static string GetNodeStencilId(VisioNetworkNodeKind kind) {
+            switch (kind) {
+                case VisioNetworkNodeKind.User:
+                    return "net.user";
+                case VisioNetworkNodeKind.Workstation:
+                    return "net.workstation";
+                case VisioNetworkNodeKind.Switch:
+                    return "net.switch";
+                case VisioNetworkNodeKind.Router:
+                    return "net.router";
+                case VisioNetworkNodeKind.Firewall:
+                    return "net.firewall";
+                case VisioNetworkNodeKind.Internet:
+                    return "net.internet";
+                case VisioNetworkNodeKind.Printer:
+                    return "net.printer";
+                case VisioNetworkNodeKind.Storage:
+                    return "net.storage";
+                case VisioNetworkNodeKind.Database:
+                    return "net.database";
+                case VisioNetworkNodeKind.Wireless:
+                    return "net.wireless";
+                case VisioNetworkNodeKind.Note:
+                    return "net.note";
+                default:
+                    return "net.server";
+            }
+        }
+
+        internal static VisioConnectorStyle GetConnectorStyle(VisioStyleTheme theme, VisioNetworkLinkKind kind) {
+            switch (kind) {
+                case VisioNetworkLinkKind.Management:
+                    return theme.ControlConnector;
+                case VisioNetworkLinkKind.Trunk:
+                    return theme.DataConnector;
+                case VisioNetworkLinkKind.Wireless:
+                    return theme.ControlConnector;
+                default:
+                    return theme.Connector;
+            }
+        }
+
+        internal static VisioShape CreateBackgroundZone(
+            VisioDocument document,
+            string id,
+            double pinX,
+            double pinY,
+            double width,
+            double height,
+            string text,
+            VisioStyleTheme theme,
+            VisioMeasurementUnit unit = VisioMeasurementUnit.Inches) {
+            VisioShape shape = new(id, pinX.ToInches(unit), pinY.ToInches(unit), width.ToInches(unit), height.ToInches(unit), text) {
+                NameU = "Rectangle",
+            };
+            theme.Container.ApplyTo(shape);
+            shape.SetUserCell(VisioSemanticUserCells.Kind, VisioSemanticUserCells.BackgroundSurfaceKind, "STR", prompt: "OfficeIMO semantic kind");
+            return shape;
+        }
+
+        internal static VisioShape? AddBackgroundZoneCaption(
+            VisioPage page,
+            string id,
+            string text,
+            double left,
+            double top,
+            double width,
+            VisioStyleTheme theme) {
+            if (string.IsNullOrWhiteSpace(text)) {
+                return null;
+            }
+
+            VisioShape label = page.AddTextBox(
+                id,
+                left + width / 2D,
+                top + 0.16D,
+                Math.Max(0.8D, width - 0.3D),
+                0.3D,
+                text);
+            label.TextStyle = CreateBackgroundZoneCaptionTextStyle(theme);
+            VisioSemanticUserCells.MarkGeneratedAdornment(label);
+            return label;
+        }
+
+        internal static string CreateBackgroundZoneCaptionId(string zoneId) => zoneId + "-label";
+
+        private static VisioTextStyle CreateBackgroundZoneCaptionTextStyle(VisioStyleTheme theme) {
+            VisioTextStyle style = theme.Container.TextStyle?.Clone() ?? new VisioTextStyle();
+            style.FontFamily = string.IsNullOrWhiteSpace(style.FontFamily) ? "Aptos" : style.FontFamily;
+            style.Size = Math.Max(style.Size ?? 0D, 9.5D);
+            style.Bold = true;
+            style.HorizontalAlignment = VisioTextHorizontalAlignment.Left;
+            style.VerticalAlignment = VisioTextVerticalAlignment.Middle;
+            style.LeftMargin = 0.08D;
+            style.RightMargin = 0.08D;
+            style.TopMargin = 0D;
+            style.BottomMargin = 0D;
+            return style;
+        }
+
+        internal static void ResolveSides(VisioShape from, VisioShape to, out VisioSide fromSide, out VisioSide toSide) {
+            double dx = to.PinX - from.PinX;
+            double dy = to.PinY - from.PinY;
+            if (Math.Abs(dx) >= Math.Abs(dy)) {
+                if (dx >= 0D) {
+                    fromSide = VisioSide.Right;
+                    toSide = VisioSide.Left;
+                } else {
+                    fromSide = VisioSide.Left;
+                    toSide = VisioSide.Right;
+                }
+
+                return;
+            }
+
+            if (dy >= 0D) {
+                fromSide = VisioSide.Top;
+                toSide = VisioSide.Bottom;
+            } else {
+                fromSide = VisioSide.Bottom;
+                toSide = VisioSide.Top;
+            }
+        }
+    }
+}

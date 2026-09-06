@@ -1,10 +1,12 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using DocumentFormat.OpenXml.Wordprocessing;
 using OfficeIMO.Word;
+
+namespace OfficeIMO.Examples.Word;
 
 internal static partial class PageSettings {
     internal static void Example_BasicSettings(string folderPath, bool openWord) {
@@ -14,18 +16,19 @@ internal static partial class PageSettings {
             Console.WriteLine("Default page orientation: " + document.PageSettings.Orientation);
             Console.WriteLine("Default page orientation: " + document.PageOrientation);
             // this sets the page orientation to proper value
-            document.PageOrientation = PageOrientationValues.Portrait;
+            document.PageOrientation = OfficePageOrientation.Portrait;
 
             Console.WriteLine("Page orientation 1: " + document.PageSettings.Orientation);
             Console.WriteLine("Page orientation 1: " + document.PageOrientation);
 
             // this sets the page orientation to proper value, using PageSettings
-            document.PageSettings.Orientation = PageOrientationValues.Landscape;
+            document.PageSettings.Orientation = OfficePageOrientation.Landscape;
 
             Console.WriteLine("Page orientation 2: " + document.PageSettings.Orientation);
             Console.WriteLine("Page orientation 2: " + document.PageOrientation);
 
-            document.Save(openWord);
+            document.Save();
+            if (openWord) document.OpenInApplication();
         }
     }
 }

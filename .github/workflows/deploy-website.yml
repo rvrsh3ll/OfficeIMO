@@ -1,0 +1,78 @@
+name: Deploy Website
+
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  push:
+    branches: [master]
+    paths:
+      - "Website/**"
+      - "Docs/Compatibility/generated/**"
+      - "Build/CompatibilityCatalog/**"
+      - "OfficeIMO.Word/OfficeIMO.Word.csproj"
+      - "OfficeIMO.Excel/OfficeIMO.Excel.csproj"
+      - "OfficeIMO.PowerPoint/OfficeIMO.PowerPoint.csproj"
+      - ".github/workflows/deploy-website.yml"
+  pull_request:
+    branches: [master]
+    paths:
+      - ".github/workflows/deploy-website.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  workflow-contract:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Confirm reusable deployment workflow resolved
+        run: echo "GitHub resolved the pinned PowerForge deployment workflow."
+
+  resolve-post-deploy:
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    outputs:
+      post_deploy_pipeline_config: ${{ steps.cloudflare.outputs.post_deploy_pipeline_config }}
+    steps:
+      - name: Resolve optional post-deploy pipeline
+        id: cloudflare
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE_ID_OFFICEIMO: ${{ secrets.CLOUDFLARE_ZONE_ID_OFFICEIMO }}
+        run: |
+          if [ -n "${CLOUDFLARE_API_TOKEN:-}" ] && [ -n "${CLOUDFLARE_ZONE_ID_OFFICEIMO:-}" ]; then
+            echo "post_deploy_pipeline_config=Website/pipeline.cloudflare.json" >> "$GITHUB_OUTPUT"
+          else
+            echo "post_deploy_pipeline_config=" >> "$GITHUB_OUTPUT"
+          fi
+
+  website-deploy:
+    if: ${{ github.event_name != 'pull_request' }}
+    needs: resolve-post-deploy
+    permissions:
+      actions: write
+      contents: read
+      deployments: read
+      packages: read
+      pages: write
+      id-token: write
+    uses: EvotecIT/PSPublishModule/.github/workflows/powerforge-website-deploy.yml@3fb959e848e8d05744af826b7a74ae7edcc1e41d
+    with:
+      website_root: Website
+      pipeline_config: Website/pipeline.json
+      site_output_path: Website/_site
+      post_deploy_pipeline_config: ${{ needs.resolve-post-deploy.outputs.post_deploy_pipeline_config }}
+      manage_cloudflare_site_policy: ${{ needs.resolve-post-deploy.outputs.post_deploy_pipeline_config != '' }}
+      engine_mode: source
+      runner_labels_json: ${{ (github.event.repository.private && vars.OFFICEIMO_FORCE_GITHUB_HOSTED != 'true') && '["self-hosted","linux"]' || '["ubuntu-latest"]' }}
+      dotnet_workloads: wasm-tools
+      powerforge_repository: EvotecIT/PSPublishModule
+      powerforge_ref: 3fb959e848e8d05744af826b7a74ae7edcc1e41d
+    secrets:
+      indexnow_key: ${{ secrets.INDEXNOW_KEY }}
+      cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      cloudflare_zone_id: ${{ secrets.CLOUDFLARE_ZONE_ID_OFFICEIMO }}

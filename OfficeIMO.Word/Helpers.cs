@@ -1,87 +1,137 @@
+using OfficeIMO.Drawing;
 using System;
-using System.Diagnostics;
-using System.IO;
-using DocumentFormat.OpenXml.Packaging;
-using SixLabors.ImageSharp.Formats;
 
 namespace OfficeIMO.Word {
-    public static partial class Helpers {
-        /// <summary>
-        /// Converts Color to Hex Color
-        /// </summary>
-        /// <param name="c"></param>
-        /// <returns></returns>
-        public static string ToHexColor(this SixLabors.ImageSharp.Color c) {
-            return c.ToHex().Remove(6);
+    /// <summary>
+    /// Provides various utility methods used throughout the library.
+    /// </summary>
+    internal static partial class Helpers {
+        private const double PixelsPerInch = 96.0;
+
+        internal static double ConvertPixelsToPoints(double pixels) {
+            return pixels * 72 / PixelsPerInch;
         }
 
+        internal static double ConvertPointsToPixels(double points) {
+            return points * PixelsPerInch / 72;
+        }
         /// <summary>
-        /// Opens up any file using assigned Application
+        /// Parses a color string that may or may not start with '#'.
         /// </summary>
-        /// <param name="filePath"></param>
-        /// <param name="open"></param>
-        public static void Open(string filePath, bool open) {
-            if (open) {
-                ProcessStartInfo startInfo = new ProcessStartInfo(filePath) {
-                    UseShellExecute = true
-                };
-                Process.Start(startInfo);
+        /// <param name="hex">Color value in hex without alpha or with '#'.</param>
+        internal static OfficeIMO.Drawing.OfficeColor ParseColor(string hex) {
+            if (string.IsNullOrEmpty(hex)) {
+                throw new ArgumentException("Value cannot be null or empty.", nameof(hex));
             }
+            if (!hex.StartsWith("#", StringComparison.Ordinal)) {
+                hex = "#" + hex;
+            }
+            return OfficeIMO.Drawing.OfficeColor.Parse(hex);
         }
 
         /// <summary>
-        /// Checks if file is locked/used by another process
+        /// Normalizes color input which may be a hex value or a named color.
+        /// Hex values may be specified as three or six digits, with or without '#'.
+        /// Returns an uppercase six-digit hex string without '#'.
+        /// Throws <see cref="ArgumentException"/> if the value cannot be parsed
+        /// as a valid color.
         /// </summary>
-        /// <param name="file"></param>
-        /// <returns></returns>
-        public static bool IsFileLocked(this FileInfo file) {
+        internal static string? NormalizeColor(string? color) {
+            if (string.IsNullOrEmpty(color)) {
+                return null;
+            }
+
             try {
-                using (FileStream stream = file.Open(FileMode.Open, FileAccess.Read, FileShare.None)) {
-                    stream.Close();
+                var parsed = OfficeIMO.Drawing.OfficeColor.Parse(color!);
+                return parsed.ToRgbHex().ToUpperInvariant();
+            } catch {
+                if (!color!.StartsWith("#", StringComparison.Ordinal)) {
+                    try {
+                        var parsedHex = OfficeIMO.Drawing.OfficeColor.Parse("#" + color);
+                        return parsedHex.ToRgbHex().ToUpperInvariant();
+                    } catch {
+                        // ignored so that ArgumentException below is thrown
+                    }
                 }
-            } catch (IOException) {
-                //the file is unavailable because it is:
-                //still being written to
-                //or being processed by another thread
-                //or does not exist (has already been processed)
-                return true;
+                throw new ArgumentException($"Invalid color value: {color}. Must be a valid hex color (3 or 6 characters) or named color.", nameof(color));
             }
-
-            //file is not locked
-            return false;
         }
 
         /// <summary>
-        /// Checks if file is locked/used by another process
+        /// Normalizes a required six-digit hexadecimal RGB value for DrawingML color attributes.
         /// </summary>
-        /// <param name="fileName"></param>
-        /// <returns></returns>
-        public static bool IsFileLocked(this string fileName) {
-            if (string.IsNullOrEmpty(fileName)) {
-                return false;
+        internal static string NormalizeSixDigitRgb(string? color, string paramName) {
+            string normalized = color?.Trim() ?? string.Empty;
+            if (normalized.StartsWith("#", StringComparison.Ordinal)) normalized = normalized.Substring(1);
+            if (normalized.Length != 6 || normalized.Any(character =>
+                character is not (>= '0' and <= '9')
+                && character is not (>= 'A' and <= 'F')
+                && character is not (>= 'a' and <= 'f'))) {
+                throw new ArgumentException("Color must be a six-digit hexadecimal RGB value.", paramName);
             }
-            if (!File.Exists(fileName)) {
-                return false;
-            }
-            return IsFileLocked(new FileInfo(fileName));
+            return normalized.ToUpperInvariant();
         }
 
-        internal static ImageCharacteristics GetImageCharacteristics(Stream imageStream) {
-            using var img = SixLabors.ImageSharp.Image.Load(imageStream, out var imageFormat);
-            imageStream.Position = 0;
-            var type = ConvertToImagePartType(imageFormat);
-            return new ImageCharacteristics(img.Width, img.Height, type);
+        internal static string? NormalizeOpenXmlColor(string? color) {
+            if (color == null) {
+                return null;
+            }
+
+            string normalized = color.Replace("#", string.Empty);
+            return string.Equals(normalized, "auto", StringComparison.OrdinalIgnoreCase)
+                ? "auto"
+                : normalized.ToUpperInvariant();
         }
 
-        private static CustomImagePartType ConvertToImagePartType(IImageFormat imageFormat) =>
-            imageFormat.Name switch {
-                "BMP" => CustomImagePartType.Bmp,
-                "GIF" => CustomImagePartType.Gif,
-                "JPEG" => CustomImagePartType.Jpeg,
-                "PNG" => CustomImagePartType.Png,
-                "TIFF" => CustomImagePartType.Tiff,
-                _ => throw new ImageFormatNotSupportedException($"Image format not supported: {imageFormat.Name}.")
-            };
+        internal static TResult UseSeekableImageStream<TResult>(Stream imageStream, Func<Stream, TResult> action) {
+            if (imageStream == null) {
+                throw new ArgumentNullException(nameof(imageStream));
+            }
+
+            if (action == null) {
+                throw new ArgumentNullException(nameof(action));
+            }
+
+            if (imageStream.CanSeek) {
+                long originalPosition = imageStream.Position;
+                imageStream.Position = 0;
+
+                try {
+                    return action(imageStream);
+                } finally {
+                    imageStream.Position = originalPosition;
+                }
+            }
+
+            using var copy = new MemoryStream();
+            imageStream.CopyTo(copy);
+            copy.Position = 0;
+            return action(copy);
+        }
+
+        internal static ImageCharacteristics GetImageCharacteristics(Stream imageStream, string? fileName = null) {
+            return UseSeekableImageStream(imageStream, seekableImageStream => GetImageCharacteristicsCore(seekableImageStream, fileName));
+        }
+
+        private static ImageCharacteristics GetImageCharacteristicsCore(Stream imageStream, string? fileName) {
+            if (OfficeImageReader.TryIdentify(imageStream, fileName, out var imageInfo)) {
+                return new ImageCharacteristics(imageInfo.Width, imageInfo.Height, EnsureSupportedImageFormat(imageInfo.Format));
+            }
+
+            return new ImageCharacteristics(0, 0, OfficeImageFormat.Png);
+        }
+
+        private static OfficeImageFormat EnsureSupportedImageFormat(OfficeImageFormat imageFormat) =>
+            imageFormat is OfficeImageFormat.Bmp or
+                OfficeImageFormat.Gif or
+                OfficeImageFormat.Jpeg or
+                OfficeImageFormat.Png or
+                OfficeImageFormat.Tiff or
+                OfficeImageFormat.Emf or
+                OfficeImageFormat.Wmf or
+                OfficeImageFormat.Svg
+                ? imageFormat
+                : throw new NotSupportedException($"Word image parts do not support {imageFormat} images.");
 
         /// <summary>
         /// Converts centimeters to EMUs and returns int value
@@ -263,5 +313,5 @@ namespace OfficeIMO.Word {
         }
     }
 
-    internal record ImageCharacteristics(double Width, double Height, CustomImagePartType Type);
+    internal record ImageCharacteristics(double Width, double Height, OfficeImageFormat Type);
 }

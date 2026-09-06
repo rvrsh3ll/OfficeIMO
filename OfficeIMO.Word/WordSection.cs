@@ -1,11 +1,11 @@
-using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Linq;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
+using System.Diagnostics;
 
 namespace OfficeIMO.Word {
+    /// <summary>
+    /// Represents a section within a Word document.
+    /// </summary>
     public partial class WordSection {
         /// <summary>
         /// Provides a list of all elements within the section including paragraphs, tables, images, etc.
@@ -45,17 +45,25 @@ namespace OfficeIMO.Word {
                 var listNumbers = new List<int>();
                 var listItems = Paragraphs.Where(p => p.IsListItem).ToList();
                 foreach (var item in listItems) {
-                    listNumbers.Add(item._listNumberId.Value);
+                    if (item._listNumberId != null) {
+                        listNumbers.Add(item._listNumberId.Value);
+                    }
                 }
 
                 return listNumbers.Distinct().ToList();
             }
         }
 
+        /// <summary>
+        /// Provides a list of paragraphs that contain hyperlinks.
+        /// </summary>
         public List<WordParagraph> ParagraphsHyperLinks {
             get { return Paragraphs.Where(p => p.IsHyperLink).ToList(); }
         }
 
+        /// <summary>
+        /// Provides a list of paragraphs that contain fields.
+        /// </summary>
         public List<WordParagraph> ParagraphsFields {
             get { return Paragraphs.Where(p => p.IsField).ToList(); }
         }
@@ -96,56 +104,145 @@ namespace OfficeIMO.Word {
         }
 
         /// <summary>
+        /// Provides a list of paragraphs that contain checkbox controls
+        /// </summary>
+        public List<WordParagraph> ParagraphsCheckBoxes {
+            get { return Paragraphs.Where(p => p.IsCheckBox).ToList(); }
+        }
+
+        /// <summary>
+        /// Provides a list of paragraphs that contain date picker controls
+        /// </summary>
+        public List<WordParagraph> ParagraphsDatePickers {
+            get { return Paragraphs.Where(p => p.IsDatePicker).ToList(); }
+        }
+
+        /// <summary>
+        /// Provides a list of paragraphs that contain dropdown list controls
+        /// </summary>
+        public List<WordParagraph> ParagraphsDropDownLists {
+            get { return Paragraphs.Where(p => p.IsDropDownList).ToList(); }
+        }
+
+        /// <summary>
+        /// Provides a list of paragraphs that contain combo box controls
+        /// </summary>
+        public List<WordParagraph> ParagraphsComboBoxes {
+            get { return Paragraphs.Where(p => p.IsComboBox).ToList(); }
+        }
+
+        /// <summary>
+        /// Provides a list of paragraphs that contain picture controls
+        /// </summary>
+        public List<WordParagraph> ParagraphsPictureControls {
+            get { return Paragraphs.Where(p => p.IsPictureControl).ToList(); }
+        }
+
+        /// <summary>
+        /// Provides a list of paragraphs that contain repeating section controls
+        /// </summary>
+        public List<WordParagraph> ParagraphsRepeatingSections {
+            get { return Paragraphs.Where(p => p.IsRepeatingSection).ToList(); }
+        }
+        /// <summary>
         /// Provides a list of paragraphs that contain Image
         /// </summary>
         public List<WordParagraph> ParagraphsImages {
             get { return Paragraphs.Where(p => p.IsImage).ToList(); }
         }
 
+        /// <summary>
+        /// Provides a list of paragraphs that contain embedded objects.
+        /// </summary>
+        public List<WordParagraph> ParagraphsEmbeddedObjects {
+            get { return Paragraphs.Where(p => p.IsEmbeddedObject).ToList(); }
+        }
+
+        /// <summary>
+        /// Provides a list of paragraphs that contain charts.
+        /// </summary>
         public List<WordParagraph> ParagraphsCharts {
             get { return Paragraphs.Where(p => p.IsChart).ToList(); }
         }
 
+        /// <summary>
+        /// Provides a list of paragraphs that contain end notes.
+        /// </summary>
         public List<WordParagraph> ParagraphsEndNotes {
             get { return Paragraphs.Where(p => p.IsEndNote).ToList(); }
         }
 
+        /// <summary>
+        /// Provides a list of paragraphs that contain foot notes.
+        /// </summary>
         public List<WordParagraph> ParagraphsFootNotes {
             get { return Paragraphs.Where(p => p.IsFootNote).ToList(); }
         }
 
+        /// <summary>
+        /// Provides a list of paragraphs that contain text boxes.
+        /// </summary>
         public List<WordParagraph> ParagraphsTextBoxes {
             get { return Paragraphs.Where(p => p.IsTextBox).ToList(); }
         }
 
+        /// <summary>
+        /// Provides a list of paragraphs that contain shapes.
+        /// </summary>
+        public List<WordParagraph> ParagraphsShapes {
+            get { return Paragraphs.Where(p => p.IsShape).ToList(); }
+        }
+
+        /// <summary>
+        /// Provides a list of paragraphs that contain SmartArt diagrams.
+        /// </summary>
+        public List<WordParagraph> ParagraphsSmartArts {
+            get { return Paragraphs.Where(p => p.IsSmartArt).ToList(); }
+        }
+
+        /// <summary>
+        /// Gets all page break objects within the section.
+        /// </summary>
         public List<WordBreak> PageBreaks {
             get {
                 List<WordBreak> list = new List<WordBreak>();
                 var paragraphs = Paragraphs.Where(p => p.IsPageBreak).ToList();
                 foreach (var paragraph in paragraphs) {
-                    list.Add(paragraph.PageBreak);
+                    if (paragraph.PageBreak != null) {
+                        list.Add(paragraph.PageBreak);
+                    }
                 }
                 return list;
             }
         }
 
+        /// <summary>
+        /// Gets all charts contained in the section.
+        /// </summary>
         public List<WordChart> Charts {
             get {
                 List<WordChart> list = new List<WordChart>();
                 var paragraphs = Paragraphs.Where(p => p.IsChart).ToList();
                 foreach (var paragraph in paragraphs) {
-                    list.Add(paragraph.Chart);
+                    if (paragraph.Chart != null) {
+                        list.Add(paragraph.Chart);
+                    }
                 }
                 return list;
             }
         }
 
+        /// <summary>
+        /// Gets all line breaks within the section.
+        /// </summary>
         public List<WordBreak> Breaks {
             get {
                 List<WordBreak> list = new List<WordBreak>();
                 var paragraphs = Paragraphs.Where(p => p.IsBreak).ToList();
                 foreach (var paragraph in paragraphs) {
-                    list.Add(paragraph.Break);
+                    if (paragraph.Break != null) {
+                        list.Add(paragraph.Break);
+                    }
                 }
                 return list;
             }
@@ -159,66 +256,177 @@ namespace OfficeIMO.Word {
                 List<WordImage> list = new List<WordImage>();
                 var paragraphs = Paragraphs.Where(p => p.IsImage).ToList();
                 foreach (var paragraph in paragraphs) {
-                    list.Add(paragraph.Image);
-                }
-                return list;
-            }
-        }
-        public List<WordBookmark> Bookmarks {
-            get {
-                List<WordBookmark> list = new List<WordBookmark>();
-                var paragraphs = Paragraphs.Where(p => p.IsBookmark).ToList();
-                foreach (var paragraph in paragraphs) {
-                    list.Add(paragraph.Bookmark);
+                    if (paragraph.Image != null) {
+                        list.Add(paragraph.Image);
+                    }
                 }
                 return list;
             }
         }
 
+        /// <summary>
+        /// Gets all embedded objects within the section.
+        /// </summary>
+        public List<WordEmbeddedObject> EmbeddedObjects {
+            get {
+                List<WordEmbeddedObject> list = new List<WordEmbeddedObject>();
+                var paragraphs = Paragraphs.Where(p => p.IsEmbeddedObject).ToList();
+                foreach (var paragraph in paragraphs) {
+                    if (paragraph.EmbeddedObject != null) {
+                        list.Add(paragraph.EmbeddedObject);
+                    }
+                }
+                return list;
+            }
+        }
+        /// <summary>
+        /// Gets all bookmarks defined in the section.
+        /// </summary>
+        public List<WordBookmark> Bookmarks {
+            get {
+                List<WordBookmark> list = new List<WordBookmark>();
+                AddBookmarksFromParagraphs(Paragraphs, list);
+
+                foreach (var table in Tables) {
+                    AddBookmarksFromTable(table, list);
+                }
+
+                AddBookmarksFromHeaderFooter(Header.Default, list);
+                AddBookmarksFromHeaderFooter(Header.First, list);
+                AddBookmarksFromHeaderFooter(Header.Even, list);
+                AddBookmarksFromHeaderFooter(Footer.Default, list);
+                AddBookmarksFromHeaderFooter(Footer.First, list);
+                AddBookmarksFromHeaderFooter(Footer.Even, list);
+
+                foreach (var footnote in FootNotes) {
+                    AddBookmarksFromParagraphs(footnote.Paragraphs, list);
+                }
+
+                foreach (var endnote in EndNotes) {
+                    AddBookmarksFromParagraphs(endnote.Paragraphs, list);
+                }
+
+                return list;
+            }
+        }
+
+        private static void AddBookmarksFromParagraphs(IEnumerable<WordParagraph>? paragraphs, List<WordBookmark> list) {
+            if (paragraphs == null) {
+                return;
+            }
+
+            var visitedParagraphs = new HashSet<Paragraph>();
+            foreach (var paragraph in paragraphs) {
+                if (!visitedParagraphs.Add(paragraph._paragraph)) {
+                    continue;
+                }
+
+                foreach (BookmarkStart bookmarkStart in paragraph._paragraph.Descendants<BookmarkStart>()) {
+                    list.Add(new WordBookmark(paragraph._document, paragraph._paragraph, bookmarkStart));
+                }
+            }
+        }
+
+        private static void AddBookmarksFromHeaderFooter(WordHeaderFooter? headerFooter, List<WordBookmark> list) {
+            if (headerFooter == null) {
+                return;
+            }
+
+            AddBookmarksFromParagraphs(headerFooter.Paragraphs, list);
+
+            foreach (var table in headerFooter.Tables) {
+                AddBookmarksFromTable(table, list);
+            }
+        }
+
+        private static void AddBookmarksFromTable(WordTable table, List<WordBookmark> list) {
+            AddBookmarksFromParagraphs(table.Paragraphs, list);
+
+            foreach (var nestedTable in table.NestedTables) {
+                AddBookmarksFromTable(nestedTable, list);
+            }
+        }
+
+        /// <summary>
+        /// Gets all fields within the section.
+        /// </summary>
         public List<WordField> Fields {
             get {
                 List<WordField> list = new List<WordField>();
                 var paragraphs = Paragraphs.Where(p => p.IsField).ToList();
                 foreach (var paragraph in paragraphs) {
-                    list.Add(paragraph.Field);
+                    if (paragraph.Field != null) {
+                        list.Add(paragraph.Field);
+                    }
+                }
+
+                foreach (var table in Tables) {
+                    AddFieldsFromTable(table, list);
                 }
                 return list;
             }
         }
 
+        private static void AddFieldsFromTable(WordTable table, List<WordField> list) {
+            foreach (var paragraph in table.Paragraphs.Where(p => p.IsField)) {
+                if (paragraph.Field != null) {
+                    list.Add(paragraph.Field);
+                }
+            }
+
+            foreach (var nestedTable in table.NestedTables) {
+                AddFieldsFromTable(nestedTable, list);
+            }
+        }
+
+        /// <summary>
+        /// Gets all end notes within the section.
+        /// </summary>
         public List<WordEndNote> EndNotes {
             get {
                 List<WordEndNote> list = new List<WordEndNote>();
                 var paragraphs = Paragraphs.Where(p => p.IsEndNote).ToList();
                 foreach (var paragraph in paragraphs) {
-                    list.Add(paragraph.EndNote);
+                    if (paragraph.EndNote != null) {
+                        list.Add(paragraph.EndNote);
+                    }
                 }
                 return list;
             }
         }
 
+        /// <summary>
+        /// Gets all foot notes within the section.
+        /// </summary>
         public List<WordFootNote> FootNotes {
             get {
                 List<WordFootNote> list = new List<WordFootNote>();
                 var paragraphs = Paragraphs.Where(p => p.IsFootNote).ToList();
                 foreach (var paragraph in paragraphs) {
-                    list.Add(paragraph.FootNote);
+                    if (paragraph.FootNote != null) {
+                        list.Add(paragraph.FootNote);
+                    }
                 }
                 return list;
             }
         }
 
+        /// <summary>
+        /// Gets all hyperlinks within the section.
+        /// </summary>
         public List<WordHyperLink> HyperLinks {
             get {
                 List<WordHyperLink> list = new List<WordHyperLink>();
                 var paragraphs = Paragraphs.Where(p => p.IsHyperLink).ToList();
                 foreach (var paragraph in paragraphs) {
-                    list.Add(paragraph.Hyperlink);
+                    if (paragraph.Hyperlink != null) {
+                        list.Add(paragraph.Hyperlink);
+                    }
                 }
 
                 foreach (var table in this.Tables) {
                     foreach (var paragraph in table.Paragraphs) {
-                        if (paragraph.IsHyperLink) {
+                        if (paragraph.IsHyperLink && paragraph.Hyperlink != null) {
                             list.Add(paragraph.Hyperlink);
                         }
                     }
@@ -227,58 +435,246 @@ namespace OfficeIMO.Word {
             }
         }
 
+        /// <summary>
+        /// Gets all tab characters defined in the section.
+        /// </summary>
         public List<WordTabChar> Tabs {
             get {
                 List<WordTabChar> list = new List<WordTabChar>();
                 var paragraphs = Paragraphs.Where(p => p.IsTab).ToList();
                 foreach (var paragraph in paragraphs) {
-                    list.Add(paragraph.Tab);
+                    if (paragraph.Tab != null) {
+                        list.Add(paragraph.Tab);
+                    }
                 }
                 return list;
             }
         }
 
 
+        /// <summary>
+        /// Gets all text boxes within the section.
+        /// </summary>
         public List<WordTextBox> TextBoxes {
             get {
                 List<WordTextBox> list = new List<WordTextBox>();
                 var paragraphs = Paragraphs.Where(p => p.IsTextBox).ToList();
                 foreach (var paragraph in paragraphs) {
-                    list.Add(paragraph.TextBox);
+                    if (paragraph.TextBox != null) {
+                        list.Add(paragraph.TextBox);
+                    }
                 }
                 return list;
             }
 
         }
 
+        /// <summary>
+        /// Collection of shapes available within the section.
+        /// </summary>
+        public List<WordShape> Shapes {
+            get {
+                List<WordShape> list = new List<WordShape>();
+                var paragraphs = ParagraphsShapes;
+                foreach (var paragraph in paragraphs) {
+                    if (paragraph.Shape != null) {
+                        list.Add(paragraph.Shape);
+                    }
+                }
+                return list;
+            }
+
+        }
+
+        /// <summary>
+        /// Collection of SmartArt diagrams available within the section.
+        /// </summary>
+        public List<WordSmartArt> SmartArts {
+            get {
+                List<WordSmartArt> list = new List<WordSmartArt>();
+                var paragraphs = ParagraphsSmartArts;
+                foreach (var paragraph in paragraphs) {
+                    if (paragraph.SmartArt != null) {
+                        list.Add(paragraph.SmartArt);
+                    }
+                }
+                return list;
+            }
+
+        }
+
+        /// <summary>
+        /// Gets all equations within the section.
+        /// </summary>
         public List<WordEquation> Equations {
             get {
-                List<WordEquation> list = new List<WordEquation>();
-                var paragraphs = Paragraphs.Where(p => p.IsEquation).ToList();
-                foreach (var paragraph in paragraphs) {
-                    list.Add(paragraph.Equation);
+                var list = new List<WordEquation>();
+                foreach (Paragraph paragraph in Paragraphs
+                    .Select(wordParagraph => wordParagraph._paragraph)
+                    .Distinct()) {
+                    list.AddRange(WordEquation
+                        .GetOccurrences(_document, paragraph)
+                        .Select(occurrence => occurrence.Equation));
                 }
                 return list;
             }
         }
 
+        /// <summary>
+        /// Gets all structured document tags within the section.
+        /// </summary>
         public List<WordStructuredDocumentTag> StructuredDocumentTags {
             get {
                 List<WordStructuredDocumentTag> list = new List<WordStructuredDocumentTag>();
                 var paragraphs = Paragraphs.Where(p => p.IsStructuredDocumentTag).ToList();
                 foreach (var paragraph in paragraphs) {
-                    list.Add(paragraph.StructuredDocumentTag);
+                    var structuredDocumentTag = paragraph.StructuredDocumentTag;
+                    if (structuredDocumentTag != null) {
+                        list.Add(structuredDocumentTag);
+                    }
+                }
+
+                var sdtBlocks = GetSdtBlockList();
+                foreach (var block in sdtBlocks) {
+                    var element = ConvertStdBlockToWordElements(_document, block);
+                    if (element is WordStructuredDocumentTag sdt) {
+                        list.Add(sdt);
+                    }
+                }
+
+                foreach (var table in Tables) {
+                    list.AddRange(table.StructuredDocumentTags);
+                }
+
+                return list;
+            }
+        }
+
+        /// <summary>
+        /// Gets all checkbox content controls within the section.
+        /// </summary>
+        public List<WordCheckBox> CheckBoxes {
+            get {
+                List<WordCheckBox> list = new List<WordCheckBox>();
+                var paragraphs = Paragraphs.Where(p => p.IsCheckBox).ToList();
+                foreach (var paragraph in paragraphs) {
+                    var checkBox = paragraph.CheckBox;
+                    if (checkBox != null) {
+                        list.Add(checkBox);
+                    }
                 }
                 return list;
             }
         }
 
-        public WordFooters Footer = new WordFooters();
-        public WordHeaders Header = new WordHeaders();
+        /// <summary>
+        /// Gets all date picker content controls within the section.
+        /// </summary>
+        public List<WordDatePicker> DatePickers {
+            get {
+                List<WordDatePicker> list = new List<WordDatePicker>();
+                var paragraphs = Paragraphs.Where(p => p.IsDatePicker).ToList();
+                foreach (var paragraph in paragraphs) {
+                    var datePicker = paragraph.DatePicker;
+                    if (datePicker != null) {
+                        list.Add(datePicker);
+                    }
+                }
+                return list;
+            }
+        }
 
-        public WordBorders Borders;
-        public WordMargins Margins;
-        public WordPageSizes PageSettings;
+        /// <summary>
+        /// Gets all dropdown list content controls within the section.
+        /// </summary>
+        public List<WordDropDownList> DropDownLists {
+            get {
+                List<WordDropDownList> list = new List<WordDropDownList>();
+                var paragraphs = Paragraphs.Where(p => p.IsDropDownList).ToList();
+                foreach (var paragraph in paragraphs) {
+                    var dropDownList = paragraph.DropDownList;
+                    if (dropDownList != null) {
+                        list.Add(dropDownList);
+                    }
+                }
+                return list;
+            }
+        }
+
+        /// <summary>
+        /// Gets all combo box content controls within the section.
+        /// </summary>
+        public List<WordComboBox> ComboBoxes {
+            get {
+                List<WordComboBox> list = new List<WordComboBox>();
+                var paragraphs = Paragraphs.Where(p => p.IsComboBox).ToList();
+                foreach (var paragraph in paragraphs) {
+                    var comboBox = paragraph.ComboBox;
+                    if (comboBox != null) {
+                        list.Add(comboBox);
+                    }
+                }
+                return list;
+            }
+        }
+
+        /// <summary>
+        /// Gets all picture content controls within the section.
+        /// </summary>
+        public List<WordPictureControl> PictureControls {
+            get {
+                List<WordPictureControl> list = new List<WordPictureControl>();
+                var paragraphs = Paragraphs.Where(p => p.IsPictureControl).ToList();
+                foreach (var paragraph in paragraphs) {
+                    var pictureControl = paragraph.PictureControl;
+                    if (pictureControl != null) {
+                        list.Add(pictureControl);
+                    }
+                }
+                return list;
+            }
+        }
+
+        /// <summary>
+        /// Gets all repeating section content controls within the section.
+        /// </summary>
+        public List<WordRepeatingSection> RepeatingSections {
+            get {
+                List<WordRepeatingSection> list = new List<WordRepeatingSection>();
+                var paragraphs = Paragraphs.Where(p => p.IsRepeatingSection).ToList();
+                foreach (var paragraph in paragraphs) {
+                    var repeatingSection = paragraph.RepeatingSection;
+                    if (repeatingSection != null) {
+                        list.Add(repeatingSection);
+                    }
+                }
+                return list;
+            }
+        }
+        /// <summary>
+        /// Exposes the footers available for this section.
+        /// </summary>
+        public WordFooters Footer { get; internal set; } = new WordFooters();
+
+        /// <summary>
+        /// Exposes the headers available for this section.
+        /// </summary>
+        public WordHeaders Header { get; internal set; } = new WordHeaders();
+
+        /// <summary>
+        /// Provides access to page border settings for this section.
+        /// </summary>
+        public WordBorders Borders { get; internal set; } = null!;
+
+        /// <summary>
+        /// Provides access to page margin settings for this section.
+        /// </summary>
+        public WordMargins Margins { get; internal set; } = null!;
+
+        /// <summary>
+        /// Provides access to page size and orientation settings for this section.
+        /// </summary>
+        public WordPageSizes PageSettings { get; internal set; } = null!;
 
         /// <summary>
         /// Provides a list of all lists within the section
@@ -296,12 +692,20 @@ namespace OfficeIMO.Word {
         public List<WordEmbeddedDocument> EmbeddedDocuments => GetEmbeddedDocumentsList();
 
         /// <summary>
-        /// Provides a list of all watermarks within the section
+        /// Provides a list of all watermarks within the section, including
+        /// any watermarks found in the section headers.
         /// </summary>
         public List<WordWatermark> Watermarks {
             get {
+                List<WordWatermark> list = new List<WordWatermark>();
                 var sdtBlockList = GetSdtBlockList();
-                return WordSection.ConvertStdBlockToWatermark(_document, sdtBlockList);
+                list.AddRange(WordSection.ConvertStdBlockToWatermark(_document, sdtBlockList));
+
+                if (Header.Default != null) list.AddRange(Header.Default.Watermarks);
+                if (Header.Even != null) list.AddRange(Header.Even.Watermarks);
+                if (Header.First != null) list.AddRange(Header.First.Watermarks);
+
+                return list;
             }
         }
 
@@ -322,10 +726,10 @@ namespace OfficeIMO.Word {
         }
 
 
-        internal WordDocument _document;
-        internal SectionProperties _sectionProperties;
-        private WordprocessingDocument _wordprocessingDocument;
-        private readonly Paragraph _paragraph;
+        internal WordDocument _document = null!;
+        internal SectionProperties _sectionProperties = null!;
+        private WordprocessingDocument _wordprocessingDocument = null!;
+        private readonly Paragraph? _paragraph;
 
 
         /// <summary>
@@ -335,14 +739,14 @@ namespace OfficeIMO.Word {
         /// <param name="sectionProperties"></param>
         /// <param name="paragraph"></param>
         /// <exception cref="NotImplementedException"></exception>
-        internal WordSection(WordDocument wordDocument, SectionProperties sectionProperties = null, Paragraph paragraph = null) {
+        internal WordSection(WordDocument wordDocument, SectionProperties? sectionProperties = null, Paragraph? paragraph = null) {
             this._document = wordDocument;
             this._wordprocessingDocument = wordDocument._wordprocessingDocument;
             this._paragraph = paragraph;
             if (sectionProperties != null) {
                 this._sectionProperties = sectionProperties.MakeSureSectionIsValid();
             } else {
-                sectionProperties = wordDocument._wordprocessingDocument.MainDocumentPart.Document.Body.ChildElements.OfType<SectionProperties>().FirstOrDefault();
+                sectionProperties = wordDocument._wordprocessingDocument.MainDocumentPart!.Document!.Body!.ChildElements.OfType<SectionProperties>().FirstOrDefault();
                 if (sectionProperties == null) {
                     // most likely not necessary during load - but lets see
                     // would require a broken document created by some app
@@ -384,20 +788,20 @@ namespace OfficeIMO.Word {
         /// </summary>
         /// <param name="wordDocument"></param>
         /// <param name="paragraph"></param>
-        internal WordSection(WordDocument wordDocument, Paragraph paragraph = null) {
+        internal WordSection(WordDocument wordDocument, Paragraph? paragraph = null) {
             this._document = wordDocument;
             this._wordprocessingDocument = wordDocument._wordprocessingDocument;
             this._paragraph = paragraph;
 
             if (paragraph != null) {
-                var sectionProperties = paragraph.ParagraphProperties.SectionProperties;
+                var sectionProperties = paragraph.ParagraphProperties?.SectionProperties;
                 if (sectionProperties == null) {
-                    return;
+                    throw new InvalidOperationException("Paragraph does not contain section properties.");
                 }
 
                 this._sectionProperties = sectionProperties;
             } else {
-                var sectionProperties = wordDocument._wordprocessingDocument.MainDocumentPart.Document.Body.ChildElements.OfType<SectionProperties>().FirstOrDefault();
+                var sectionProperties = wordDocument._wordprocessingDocument.MainDocumentPart!.Document!.Body!.ChildElements.OfType<SectionProperties>().FirstOrDefault();
                 if (sectionProperties == null) {
                     sectionProperties = wordDocument._wordprocessingDocument.AddSectionProperties();
                 }
@@ -424,6 +828,9 @@ namespace OfficeIMO.Word {
             wordDocument.Sections.Add(this);
         }
 
+        /// <summary>
+        /// Gets or sets a value indicating whether the first page has different headers and footers.
+        /// </summary>
         public bool DifferentFirstPage {
             get {
                 var sectionProperties = _sectionProperties;
@@ -463,12 +870,15 @@ namespace OfficeIMO.Word {
             }
         }
 
+        /// <summary>
+        /// Gets or sets a value indicating whether odd and even pages use separate headers and footers.
+        /// </summary>
         public bool DifferentOddAndEvenPages {
             get {
                 var headerReference = WordHeadersAndFooters.GetHeaderReference(this._document, this, HeaderFooterValues.Even);
                 var footerReference = WordHeadersAndFooters.GetFooterReference(this._document, this, HeaderFooterValues.Even);
 
-                var settings = _wordprocessingDocument.MainDocumentPart.DocumentSettingsPart.Settings.ChildElements.OfType<EvenAndOddHeaders>().FirstOrDefault();
+                var settings = _wordprocessingDocument.MainDocumentPart?.DocumentSettingsPart?.Settings?.ChildElements.OfType<EvenAndOddHeaders>().FirstOrDefault();
                 if (headerReference == true && footerReference == true && settings != null) {
                     return true;
                 }
@@ -477,15 +887,54 @@ namespace OfficeIMO.Word {
 
             }
             set {
-                var sectionProperties = _sectionProperties;
+                if (!value) {
+                    _wordprocessingDocument.MainDocumentPart?
+                        .DocumentSettingsPart?
+                        .Settings?
+                        .GetFirstChild<EvenAndOddHeaders>()?
+                        .Remove();
+                    return;
+                }
+
+                _ = _document.Settings;
                 WordHeadersAndFooters.AddHeaderReference(this._document, this, HeaderFooterValues.Even);
                 WordHeadersAndFooters.AddFooterReference(this._document, this, HeaderFooterValues.Even);
 
-                var settings = _wordprocessingDocument.MainDocumentPart.DocumentSettingsPart.Settings.ChildElements.OfType<EvenAndOddHeaders>().FirstOrDefault();
-                if (value != false) {
-                    if (settings == null) {
-                        _wordprocessingDocument.MainDocumentPart.DocumentSettingsPart.Settings.Append(new EvenAndOddHeaders());
+                Settings settings = _wordprocessingDocument.MainDocumentPart!.DocumentSettingsPart!.Settings!;
+                if (settings.GetFirstChild<EvenAndOddHeaders>() == null) {
+                    settings.Append(new EvenAndOddHeaders());
+                }
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether the gutter should be on the right for RTL pages.
+        /// </summary>
+        public bool RtlGutter {
+            get {
+                var sectionProperties = _sectionProperties;
+                if (sectionProperties != null) {
+                    var rtlGutter = sectionProperties.GetFirstChild<GutterOnRight>();
+                    if (rtlGutter?.Val != null) {
+                        return rtlGutter.Val;
                     }
+                }
+                return false;
+            }
+            set {
+                var sectionProperties = _sectionProperties;
+                if (sectionProperties == null) {
+                    return;
+                }
+                var rtlGutter = sectionProperties.GetFirstChild<GutterOnRight>();
+                if (value == false) {
+                    rtlGutter?.Remove();
+                } else {
+                    if (rtlGutter == null) {
+                        rtlGutter = new GutterOnRight();
+                        sectionProperties.Append(rtlGutter);
+                    }
+                    rtlGutter.Val = value;
                 }
             }
         }
@@ -498,6 +947,13 @@ namespace OfficeIMO.Word {
             } else {
                 return HeaderFooterValues.First;
             }
+        }
+
+        internal static HeaderFooterValues GetType(DocumentFormat.OpenXml.EnumValue<HeaderFooterValues>? type) {
+            var value = type?.Value;
+            if (value == HeaderFooterValues.Even) return HeaderFooterValues.Even;
+            if (value == HeaderFooterValues.First) return HeaderFooterValues.First;
+            return HeaderFooterValues.Default;
         }
     }
 }

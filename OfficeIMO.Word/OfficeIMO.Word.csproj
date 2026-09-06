@@ -1,43 +1,36 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <Description>An Open Source cross-platform .NET library providing an easy way to create
-            Microsoft Word (DocX) documents.</Description>
+        <Description>Open-source, cross-platform .NET library for creating, reading, editing, and converting Microsoft Word DOC, DOCX, DOCM, DOT, DOTX, and DOTM documents without Microsoft Office.</Description>
         <AssemblyName>OfficeIMO.Word</AssemblyName>
         <AssemblyTitle>OfficeIMO.Word</AssemblyTitle>
 
-        <VersionPrefix>0.22.0</VersionPrefix>
+        <VersionPrefix>3.4.0</VersionPrefix>
+        <TargetFrameworks>netstandard2.0;net8.0;net10.0</TargetFrameworks>
         <TargetFrameworks Condition=" '$([MSBuild]::IsOsPlatform(`Windows`))' ">
-            netstandard2.0;netstandard2.1;net472;net48;net8.0;net9.0</TargetFrameworks>
-        <TargetFrameworks
-            Condition=" '$([MSBuild]::IsOsPlatform(`OSX`))'  Or '$([MSBuild]::IsOsPlatform(`Linux`))' ">
-            net8.0</TargetFrameworks>
+            $(TargetFrameworks);net472</TargetFrameworks>
         <GeneratePackageOnBuild>False</GeneratePackageOnBuild>
         <Company>Evotec</Company>
         <Authors>Przemyslaw Klys</Authors>
 
         <PackageId>OfficeIMO.Word</PackageId>
-        <PackageTags>
-            docx;net60;word;office;openxml;net472;net48;net50;netstandard;netstandard2.0,netstandard2.1;net70</PackageTags>
+        <PackageTags>doc;docx;docm;dot;dotx;word;office;openxml;document;conversion;netstandard;netstandard2.0;net8.0;net10.0;net472</PackageTags>
         <PackageProjectUrl>https://github.com/EvotecIT/OfficeIMO</PackageProjectUrl>
-        <PackageLicenseUrl>https://github.com/EvotecIT/OfficeIMO/blob/master/LICENSE</PackageLicenseUrl>
+        <PackageLicenseExpression>MIT</PackageLicenseExpression>
         <DelaySign>False</DelaySign>
         <IsPublishable>True</IsPublishable>
         <Copyright>(c) 2011 - 2024 Przemyslaw Klys @ Evotec. All rights reserved.</Copyright>
         <PackageIcon>OfficeIMO.png</PackageIcon>
         <RepositoryUrl>https://github.com/EvotecIT/OfficeIMO</RepositoryUrl>
         <DebugType>portable</DebugType>
-        <!--
-      Turns off reference assembly generation
-      See: https://docs.microsoft.com/en-us/dotnet/standard/assembly/reference-assemblies
-    -->
         <ProduceReferenceAssembly>False</ProduceReferenceAssembly>
         <ApplicationIcon>OfficeIMO.ico</ApplicationIcon>
-        <PackageReadmeFile>README.MD</PackageReadmeFile>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
         <RepositoryType>git</RepositoryType>
         <SignAssembly>False</SignAssembly>
         <GenerateDocumentationFile>True</GenerateDocumentationFile>
         <LangVersion>Latest</LangVersion>
+        <Nullable>enable</Nullable>
     </PropertyGroup>
 
     <PropertyGroup
@@ -59,19 +52,35 @@
             <Pack>True</Pack>
             <PackagePath>\</PackagePath>
         </None>
-        <None Include="..\Assets\README.MD">
+        <None Include="README.md">
             <Pack>True</Pack>
-            <PackagePath>\</PackagePath>
-        </None>
-        <None Include="..\README.md">
-            <Pack>True</Pack>
-            <PackagePath>\</PackagePath>
+            <PackagePath>README.md</PackagePath>
         </None>
     </ItemGroup>
 
     <ItemGroup>
-        <PackageReference Include="DocumentFormat.OpenXml" Version="[3.3.0,4.0.0)" />
-        <PackageReference Include="SixLabors.ImageSharp" Version="[2.1.10,3.0.0)" />
+        <PackageReference Include="DocumentFormat.OpenXml" Version="[3.5.1, 4.0.0)" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <Compile Include="..\OfficeIMO.SharedSource\OpenXml\OfficeOpenXmlThemeColorResolver.cs" Link="SharedSource\OpenXml\OfficeOpenXmlThemeColorResolver.cs" />
+        <Compile Include="..\OfficeIMO.SharedSource\OpenXml\OfficeOpenXmlPackagePayload.cs" Link="SharedSource\OpenXml\OfficeOpenXmlPackagePayload.cs" />
+        <Compile Include="..\OfficeIMO.SharedSource\OpenXml\OfficeOpenXmlContractMappings.cs" Link="SharedSource\OpenXml\OfficeOpenXmlContractMappings.cs" />
+        <Compile Include="..\OfficeIMO.SharedSource\Processes\OfficeWindowsSuspendedProcess.cs" Link="SharedSource\Processes\OfficeWindowsSuspendedProcess.cs" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\OfficeIMO.Core\OfficeIMO.Core.csproj" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0' Or '$(TargetFramework)' == 'net472'">
+        <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Version="10.0.9" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(TargetFramework)' == 'net472'">
+        <Reference Include="System.IO.Compression" />
+        <Reference Include="System.Net.Http" />
+        <Reference Include="WindowsBase" />
     </ItemGroup>
 
     <ItemGroup>
@@ -81,11 +90,26 @@
         <Using Include="System.Collections" />
         <Using Include="System.Linq" />
         <Using Include="System.IO" />
+        <Using Include="OfficeIMO.Drawing" />
+        <Using Include="OfficeIMO.OpenXml.Internal" />
         <Using Include="DocumentFormat.OpenXml" />
     </ItemGroup>
 
     <ItemGroup>
-        <InternalsVisibleTo Include="OfficeIMO.Tests" />
+        <InternalsVisibleTo Include="OfficeIMO.Word.Tests" />
+        <InternalsVisibleTo Include="OfficeIMO.Markdown.Tests" />
+        <InternalsVisibleTo Include="OfficeIMO.Pdf.Tests" />
+        <InternalsVisibleTo Include="OfficeIMO.Rtf.Tests" />
+        <InternalsVisibleTo Include="OfficeIMO.Html.Tests" />
+        <InternalsVisibleTo Include="OfficeIMO.OpenDocument.Converters.Tests" />
+        <InternalsVisibleTo Include="OfficeIMO.Word.Html" />
+        <InternalsVisibleTo Include="OfficeIMO.Word.GoogleDocs" />
+        <InternalsVisibleTo Include="OfficeIMO.Word.Markdown" />
+        <InternalsVisibleTo Include="OfficeIMO.Word.Pdf" />
+        <InternalsVisibleTo Include="OfficeIMO.Word.Rtf" />
+        <InternalsVisibleTo Include="OfficeIMO.LegacyImport.Tests" />
+        <InternalsVisibleTo Include="OfficeIMO.Word.IWork" />
+        <InternalsVisibleTo Include="OfficeIMO.VerifyTests" />
     </ItemGroup>
 
 </Project>

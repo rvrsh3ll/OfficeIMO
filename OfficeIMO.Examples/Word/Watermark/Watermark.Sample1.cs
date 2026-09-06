@@ -4,10 +4,15 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using OfficeIMO.Word;
-using SixLabors.ImageSharp;
+using Color = OfficeIMO.Drawing.OfficeColor;
 
 namespace OfficeIMO.Examples.Word {
     internal static partial class Watermark {
+        /// <summary>
+        /// Demonstrates how to create a document with a basic watermark.
+        /// </summary>
+        /// <param name="folderPath">Destination folder for the file.</param>
+        /// <param name="openWord">Whether to open the document after creation.</param>
         public static void Watermark_Sample1(string folderPath, bool openWord) {
             Console.WriteLine("[*] Creating standard document with Watermark 2");
             string filePath = System.IO.Path.Combine(folderPath, "Basic Document with Watermark 4.docx");
@@ -15,11 +20,14 @@ namespace OfficeIMO.Examples.Word {
             using (WordDocument document = WordDocument.Create(filePath)) {
                 document.AddParagraph("Section 0");
                 document.AddHeadersAndFooters();
-                document.Sections[0].Header.Default.AddParagraph("Section 0 - In header");
-                document.Sections[0].SetMargins(WordMargin.Normal);
 
-                Console.WriteLine(document.Sections[0].Margins.Left.Value);
-                Console.WriteLine(document.Sections[0].Margins.Right.Value);
+                var section0 = document.Sections[0];
+                var section0Header = GetRequiredHeader(section0);
+                section0Header.AddParagraph("Section 0 - In header");
+                section0.SetMargins(WordMargin.Normal);
+
+                Console.WriteLine(document.Sections[0].Margins.Left);
+                Console.WriteLine(document.Sections[0].Margins.Right);
 
                 Console.WriteLine(document.Sections[0].Margins.Type);
 
@@ -28,7 +36,7 @@ namespace OfficeIMO.Examples.Word {
                 Console.WriteLine(document.Sections[0].Margins.Type);
 
                 Console.WriteLine("----");
-                var watermark = document.Sections[0].Header.Default.AddWatermark(WordWatermarkStyle.Text, "Watermark");
+                var watermark = section0Header.AddWatermark(WordWatermarkStyle.Text, "Watermark");
                 watermark.Color = Color.Red;
 
                 // ColorHex normally returns hex colors, but for watermark it returns string as the underlying value is in string name, not hex
@@ -56,23 +64,25 @@ namespace OfficeIMO.Examples.Word {
 
                 document.AddParagraph("Section 1");
 
-                document.Sections[1].AddHeadersAndFooters();
-                document.Sections[1].Header.Default.AddParagraph("Section 1 - In header");
-                document.Sections[1].Margins.Type = WordMargin.Narrow;
+                var section1 = document.Sections[1];
+                section1.AddHeadersAndFooters();
+                var section1Header = GetRequiredHeader(section1);
+                section1Header.AddParagraph("Section 1 - In header");
+                section1.Margins.Type = WordMargin.Narrow;
                 Console.WriteLine("----");
 
-                Console.WriteLine("Section 0 - Paragraphs Count: " + document.Sections[0].Header.Default.Paragraphs.Count);
-                Console.WriteLine("Section 1 - Paragraphs Count: " + document.Sections[1].Header.Default.Paragraphs.Count);
+                Console.WriteLine("Section 0 - Paragraphs Count: " + section0Header.Paragraphs.Count);
+                Console.WriteLine("Section 1 - Paragraphs Count: " + section1Header.Paragraphs.Count);
 
                 Console.WriteLine("----");
-                document.Sections[1].AddParagraph("Test");
-                document.Sections[1].Header.Default.AddWatermark(WordWatermarkStyle.Text, "Draft");
+                section1.AddParagraph("Test");
+                section1Header.AddWatermark(WordWatermarkStyle.Text, "Draft");
 
-                Console.WriteLine(document.Sections[0].Margins.Left.Value);
-                Console.WriteLine(document.Sections[0].Margins.Right.Value);
+                Console.WriteLine(document.Sections[0].Margins.Left);
+                Console.WriteLine(document.Sections[0].Margins.Right);
 
-                Console.WriteLine(document.Sections[1].Margins.Left.Value);
-                Console.WriteLine(document.Sections[1].Margins.Right.Value);
+                Console.WriteLine(document.Sections[1].Margins.Left);
+                Console.WriteLine(document.Sections[1].Margins.Right);
 
                 Console.WriteLine(document.Sections[1].Margins.Type);
 
@@ -81,40 +91,45 @@ namespace OfficeIMO.Examples.Word {
 
                 Console.WriteLine("----");
 
-                Console.WriteLine("Watermarks in default header: " + document.Header.Default.Watermarks.Count);
+                var documentHeaders = document.Header ?? throw new InvalidOperationException("Document headers must exist when inspecting watermarks.");
+                var documentDefaultHeader = documentHeaders.Default ?? throw new InvalidOperationException("The default document header must exist when inspecting watermarks.");
+                Console.WriteLine("Watermarks in default header: " + documentDefaultHeader.Watermarks.Count);
 
-                Console.WriteLine("Watermarks in default footer: " + document.Footer.Default.Watermarks.Count);
+                var documentFooters = document.Footer ?? throw new InvalidOperationException("Document footers must exist when inspecting watermarks.");
+                var documentDefaultFooter = documentFooters.Default ?? throw new InvalidOperationException("The default document footer must exist when inspecting watermarks.");
+                Console.WriteLine("Watermarks in default footer: " + documentDefaultFooter.Watermarks.Count);
 
                 Console.WriteLine("Watermarks in section 0: " + document.Sections[0].Watermarks.Count);
-                Console.WriteLine("Watermarks in section 0 (header): " + document.Sections[0].Header.Default.Watermarks.Count);
-                Console.WriteLine("Paragraphs in section 0 (header): " + document.Sections[0].Header.Default.Paragraphs.Count);
+                Console.WriteLine("Watermarks in section 0 (header): " + section0Header.Watermarks.Count);
+                Console.WriteLine("Paragraphs in section 0 (header): " + section0Header.Paragraphs.Count);
 
                 Console.WriteLine("Watermarks in section 1: " + document.Sections[1].Watermarks.Count);
-                Console.WriteLine("Watermarks in section 1 (header): " + document.Sections[1].Header.Default.Watermarks.Count);
-                Console.WriteLine("Paragraphs in section 1 (header): " + document.Sections[1].Header.Default.Paragraphs.Count);
+                Console.WriteLine("Watermarks in section 1 (header): " + section1Header.Watermarks.Count);
+                Console.WriteLine("Paragraphs in section 1 (header): " + section1Header.Paragraphs.Count);
 
                 Console.WriteLine("Watermarks in document: " + document.Watermarks.Count);
 
-                document.Save(false);
+                document.Save();
             }
 
             using (WordDocument document = WordDocument.Load(filePath)) {
                 //Console.WriteLine("----");
-                //Console.WriteLine("Watermarks in default header: " + document.Header.Default.Watermarks.Count);
+                //Console.WriteLine("Watermarks in default header: " + document.Header!.Default.Watermarks.Count);
 
-                //Console.WriteLine("Watermarks in default footer: " + document.Footer.Default.Watermarks.Count);
+                //Console.WriteLine("Watermarks in default footer: " + document.Footer!.Default.Watermarks.Count);
 
                 //Console.WriteLine("Watermarks in section 0: " + document.Sections[0].Watermarks.Count);
-                //Console.WriteLine("Watermarks in section 0 (header): " + document.Sections[0].Header.Default.Watermarks.Count);
-                //Console.WriteLine("Paragraphs in section 0 (header): " + document.Sections[0].Header.Default.Paragraphs.Count);
+                //Console.WriteLine("Watermarks in section 0 (header): " + document.Sections[0].Header!.Default.Watermarks.Count);
+                //Console.WriteLine("Paragraphs in section 0 (header): " + document.Sections[0].Header!.Default.Paragraphs.Count);
 
                 //Console.WriteLine("Watermarks in section 1: " + document.Sections[1].Watermarks.Count);
 
-                //Console.WriteLine("Paragraphs in section 1 (header): " + document.Sections[1].Header.Default.Paragraphs.Count);
+                //Console.WriteLine("Paragraphs in section 1 (header): " + document.Sections[1].Header!.Default.Paragraphs.Count);
 
                 //Console.WriteLine("Watermarks in document: " + document.Watermarks.Count);
 
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
 

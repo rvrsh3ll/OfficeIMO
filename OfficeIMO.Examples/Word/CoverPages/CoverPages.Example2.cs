@@ -18,13 +18,13 @@ namespace OfficeIMO.Examples.Word {
 
                 document.Settings.UpdateFieldsOnOpen = true;
 
-                document.AddCoverPage(CoverPageTemplate.Austin);
+                document.AddCoverPage(WordCoverPageTemplate.Austin);
 
-                document.AddTableOfContent();
+                var tableOfContent = document.AddTableOfContent();
 
                 document.AddPageBreak();
 
-                var wordListToc = document.AddTableOfContentList(WordListStyle.Headings111);
+                var wordListToc = document.AddTableOfContentList(WordListStyle.Numbered);
 
                 wordListToc.AddItem("Prepare document");
 
@@ -38,9 +38,10 @@ namespace OfficeIMO.Examples.Word {
 
                 wordListToc.AddItem("More on the next page");
 
-                document.TableOfContent.Update();
+                tableOfContent.Update();
 
-                document.Save(openWord);
+                document.Save();
+                if (openWord) document.OpenInApplication();
             }
         }
     }

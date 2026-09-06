@@ -1,0 +1,1030 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Packaging;
+using A = DocumentFormat.OpenXml.Drawing;
+using C = DocumentFormat.OpenXml.Drawing.Charts;
+using Xdr = DocumentFormat.OpenXml.Drawing.Spreadsheet;
+
+namespace OfficeIMO.Excel {
+    /// <summary>
+    /// Represents a chart on a worksheet.
+    /// </summary>
+    public sealed partial class ExcelChart {
+        /// <summary>
+        /// Sets the category axis title.
+        /// </summary>
+        public ExcelChart SetCategoryAxisTitle(string title) {
+            return SetCategoryAxisTitle(title, OfficeChartAxisGroup.Primary);
+        }
+
+        /// <summary>
+        /// Sets the category axis title for the selected axis group.
+        /// </summary>
+        public ExcelChart SetCategoryAxisTitle(string title, OfficeChartAxisGroup axisGroup) {
+            return SetAxisTitle(title, axisGroup, AxisKind.Category);
+        }
+
+        /// <summary>
+        /// Sets the value axis title.
+        /// </summary>
+        public ExcelChart SetValueAxisTitle(string title) {
+            return SetValueAxisTitle(title, OfficeChartAxisGroup.Primary);
+        }
+
+        /// <summary>
+        /// Sets the value axis title for the selected axis group.
+        /// </summary>
+        public ExcelChart SetValueAxisTitle(string title, OfficeChartAxisGroup axisGroup) {
+            return SetAxisTitle(title, axisGroup, AxisKind.Value);
+        }
+
+        /// <summary>
+        /// Sets the category axis title text style.
+        /// </summary>
+        public ExcelChart SetCategoryAxisTitleTextStyle(double? fontSizePoints = null, bool? bold = null,
+            bool? italic = null, string? color = null, string? fontName = null,
+            OfficeChartAxisGroup axisGroup = OfficeChartAxisGroup.Primary) {
+            return SetAxisTitleTextStyle(axisGroup, AxisKind.Category, fontSizePoints, bold, italic, color, fontName);
+        }
+
+        /// <summary>
+        /// Sets the value axis title text style.
+        /// </summary>
+        public ExcelChart SetValueAxisTitleTextStyle(double? fontSizePoints = null, bool? bold = null,
+            bool? italic = null, string? color = null, string? fontName = null,
+            OfficeChartAxisGroup axisGroup = OfficeChartAxisGroup.Primary) {
+            return SetAxisTitleTextStyle(axisGroup, AxisKind.Value, fontSizePoints, bold, italic, color, fontName);
+        }
+
+        /// <summary>
+        /// Sets category axis gridlines visibility and optional styling.
+        /// </summary>
+        public ExcelChart SetCategoryAxisGridlines(bool showMajor = true, bool showMinor = false,
+            string? lineColor = null, double? lineWidthPoints = null,
+            OfficeChartAxisGroup axisGroup = OfficeChartAxisGroup.Primary) {
+            return SetAxisGridlines(axisGroup, AxisKind.Category, showMajor, showMinor, lineColor, lineWidthPoints);
+        }
+
+        /// <summary>
+        /// Sets value axis gridlines visibility and optional styling.
+        /// </summary>
+        public ExcelChart SetValueAxisGridlines(bool showMajor = true, bool showMinor = false,
+            string? lineColor = null, double? lineWidthPoints = null,
+            OfficeChartAxisGroup axisGroup = OfficeChartAxisGroup.Primary) {
+            return SetAxisGridlines(axisGroup, AxisKind.Value, showMajor, showMinor, lineColor, lineWidthPoints);
+        }
+
+        /// <summary>
+        /// Sets category axis line visibility and optional styling.
+        /// </summary>
+        public ExcelChart SetCategoryAxisLine(string? lineColor = null, double? lineWidthPoints = null,
+            bool noLine = false, OfficeChartAxisGroup axisGroup = OfficeChartAxisGroup.Primary) {
+            return SetAxisLine(axisGroup, AxisKind.Category, lineColor, lineWidthPoints, noLine);
+        }
+
+        /// <summary>
+        /// Sets value axis line visibility and optional styling.
+        /// </summary>
+        public ExcelChart SetValueAxisLine(string? lineColor = null, double? lineWidthPoints = null,
+            bool noLine = false, OfficeChartAxisGroup axisGroup = OfficeChartAxisGroup.Primary) {
+            return SetAxisLine(axisGroup, AxisKind.Value, lineColor, lineWidthPoints, noLine);
+        }
+
+        /// <summary>
+        /// Sets the category axis label text style.
+        /// </summary>
+        public ExcelChart SetCategoryAxisLabelTextStyle(double? fontSizePoints = null, bool? bold = null,
+            bool? italic = null, string? color = null, string? fontName = null,
+            OfficeChartAxisGroup axisGroup = OfficeChartAxisGroup.Primary) {
+            return SetAxisLabelTextStyle(axisGroup, AxisKind.Category, fontSizePoints, bold, italic, color, fontName);
+        }
+
+        /// <summary>
+        /// Sets the value axis label text style.
+        /// </summary>
+        public ExcelChart SetValueAxisLabelTextStyle(double? fontSizePoints = null, bool? bold = null,
+            bool? italic = null, string? color = null, string? fontName = null,
+            OfficeChartAxisGroup axisGroup = OfficeChartAxisGroup.Primary) {
+            return SetAxisLabelTextStyle(axisGroup, AxisKind.Value, fontSizePoints, bold, italic, color, fontName);
+        }
+
+        /// <summary>
+        /// Sets the category axis label rotation in degrees (-90..90).
+        /// </summary>
+        public ExcelChart SetCategoryAxisLabelRotation(double rotationDegrees,
+            OfficeChartAxisGroup axisGroup = OfficeChartAxisGroup.Primary) {
+            return SetAxisLabelRotation(axisGroup, AxisKind.Category, rotationDegrees);
+        }
+
+        /// <summary>
+        /// Sets the value axis label rotation in degrees (-90..90).
+        /// </summary>
+        public ExcelChart SetValueAxisLabelRotation(double rotationDegrees,
+            OfficeChartAxisGroup axisGroup = OfficeChartAxisGroup.Primary) {
+            return SetAxisLabelRotation(axisGroup, AxisKind.Value, rotationDegrees);
+        }
+
+        /// <summary>
+        /// Sets the category axis tick label position.
+        /// </summary>
+        public ExcelChart SetCategoryAxisTickLabelPosition(OfficeChartAxisTickLabelPosition position,
+            OfficeChartAxisGroup axisGroup = OfficeChartAxisGroup.Primary) {
+            return SetAxisTickLabelPosition(axisGroup, AxisKind.Category, position);
+        }
+
+        /// <summary>
+        /// Sets the value axis tick label position.
+        /// </summary>
+        public ExcelChart SetValueAxisTickLabelPosition(OfficeChartAxisTickLabelPosition position,
+            OfficeChartAxisGroup axisGroup = OfficeChartAxisGroup.Primary) {
+            return SetAxisTickLabelPosition(axisGroup, AxisKind.Value, position);
+        }
+
+        /// <summary>
+        /// Sets how the value axis crosses between categories.
+        /// </summary>
+        public ExcelChart SetValueAxisCrossBetween(OfficeChartAxisCrossBetween between,
+            OfficeChartAxisGroup axisGroup = OfficeChartAxisGroup.Primary) {
+            C.Chart chart = GetChart();
+            C.PlotArea? plotArea = chart.GetFirstChild<C.PlotArea>();
+            if (plotArea == null) {
+                return this;
+            }
+
+            C.ValueAxis? axis = ResolveValueAxis(plotArea, axisGroup);
+            if (axis == null) {
+                return this;
+            }
+
+            ReplaceChild(axis, new C.CrossBetween { Val = between.ToOpenXml() });
+            Save();
+            return this;
+        }
+
+        /// <summary>
+        /// Sets where the category axis crosses the value axis.
+        /// </summary>
+        public ExcelChart SetCategoryAxisCrossing(OfficeChartAxisCrossingPosition crosses, double? crossesAt = null,
+            OfficeChartAxisGroup axisGroup = OfficeChartAxisGroup.Primary) {
+            if (crossesAt != null && (double.IsNaN(crossesAt.Value) || double.IsInfinity(crossesAt.Value))) {
+                throw new ArgumentOutOfRangeException(nameof(crossesAt));
+            }
+
+            C.Chart chart = GetChart();
+            C.PlotArea? plotArea = chart.GetFirstChild<C.PlotArea>();
+            if (plotArea == null) {
+                return this;
+            }
+
+            C.CategoryAxis? axis = ResolveCategoryAxis(plotArea, axisGroup);
+            if (axis == null) {
+                return this;
+            }
+
+            ApplyAxisCrossing(axis, crosses, crossesAt);
+            Save();
+            return this;
+        }
+
+        /// <summary>
+        /// Sets where the value axis crosses the category axis.
+        /// </summary>
+        public ExcelChart SetValueAxisCrossing(OfficeChartAxisCrossingPosition crosses, double? crossesAt = null,
+            OfficeChartAxisGroup axisGroup = OfficeChartAxisGroup.Primary) {
+            if (crossesAt != null && (double.IsNaN(crossesAt.Value) || double.IsInfinity(crossesAt.Value))) {
+                throw new ArgumentOutOfRangeException(nameof(crossesAt));
+            }
+
+            C.Chart chart = GetChart();
+            C.PlotArea? plotArea = chart.GetFirstChild<C.PlotArea>();
+            if (plotArea == null) {
+                return this;
+            }
+
+            C.ValueAxis? axis = ResolveValueAxis(plotArea, axisGroup);
+            if (axis == null) {
+                return this;
+            }
+
+            ValidateCrossesAtForAxis(axis, crossesAt);
+            ApplyAxisCrossing(axis, crosses, crossesAt);
+            Save();
+            return this;
+        }
+
+        /// <summary>
+        /// Sets where the scatter X-axis crosses the Y-axis.
+        /// </summary>
+        public ExcelChart SetScatterXAxisCrossing(OfficeChartAxisCrossingPosition crosses, double? crossesAt = null) {
+            if (crossesAt != null && (double.IsNaN(crossesAt.Value) || double.IsInfinity(crossesAt.Value))) {
+                throw new ArgumentOutOfRangeException(nameof(crossesAt));
+            }
+
+            C.Chart chart = GetChart();
+            C.PlotArea? plotArea = chart.GetFirstChild<C.PlotArea>();
+            if (plotArea == null) {
+                return this;
+            }
+
+            C.ValueAxis? axis = ResolveScatterXAxis(plotArea);
+            if (axis == null) {
+                return this;
+            }
+
+            ValidateCrossesAtForAxis(axis, crossesAt);
+            ApplyAxisCrossing(axis, crosses, crossesAt);
+            Save();
+            return this;
+        }
+
+        /// <summary>
+        /// Sets where the scatter Y-axis crosses the X-axis.
+        /// </summary>
+        public ExcelChart SetScatterYAxisCrossing(OfficeChartAxisCrossingPosition crosses, double? crossesAt = null) {
+            if (crossesAt != null && (double.IsNaN(crossesAt.Value) || double.IsInfinity(crossesAt.Value))) {
+                throw new ArgumentOutOfRangeException(nameof(crossesAt));
+            }
+
+            C.Chart chart = GetChart();
+            C.PlotArea? plotArea = chart.GetFirstChild<C.PlotArea>();
+            if (plotArea == null) {
+                return this;
+            }
+
+            C.ValueAxis? axis = ResolveScatterYAxis(plotArea);
+            if (axis == null) {
+                return this;
+            }
+
+            ValidateCrossesAtForAxis(axis, crossesAt);
+            ApplyAxisCrossing(axis, crosses, crossesAt);
+            Save();
+            return this;
+        }
+
+        /// <summary>
+        /// Sets display units for the value axis.
+        /// </summary>
+        public ExcelChart SetValueAxisDisplayUnits(OfficeChartDisplayUnit unit, bool showLabel = true,
+            OfficeChartAxisGroup axisGroup = OfficeChartAxisGroup.Primary) {
+            C.Chart chart = GetChart();
+            C.PlotArea? plotArea = chart.GetFirstChild<C.PlotArea>();
+            if (plotArea == null) {
+                return this;
+            }
+
+            C.ValueAxis? axis = ResolveValueAxis(plotArea, axisGroup);
+            if (axis == null) {
+                return this;
+            }
+
+            C.DisplayUnits displayUnits = axis.GetFirstChild<C.DisplayUnits>() ?? new C.DisplayUnits();
+            displayUnits.RemoveAllChildren<C.CustomDisplayUnit>();
+            displayUnits.RemoveAllChildren<C.BuiltInUnit>();
+            displayUnits.Append(new C.BuiltInUnit { Val = unit.ToOpenXml() });
+            ApplyDisplayUnitsLabel(displayUnits, showLabel);
+            if (displayUnits.Parent == null) {
+                axis.Append(displayUnits);
+            }
+
+            Save();
+            return this;
+        }
+
+        /// <summary>
+        /// Sets display units for the value axis with custom label text.
+        /// </summary>
+        public ExcelChart SetValueAxisDisplayUnits(OfficeChartDisplayUnit unit, string labelText, bool showLabel = true,
+            OfficeChartAxisGroup axisGroup = OfficeChartAxisGroup.Primary) {
+            if (string.IsNullOrWhiteSpace(labelText)) {
+                throw new ArgumentException("Label text cannot be empty.", nameof(labelText));
+            }
+
+            C.Chart chart = GetChart();
+            C.PlotArea? plotArea = chart.GetFirstChild<C.PlotArea>();
+            if (plotArea == null) {
+                return this;
+            }
+
+            C.ValueAxis? axis = ResolveValueAxis(plotArea, axisGroup);
+            if (axis == null) {
+                return this;
+            }
+
+            C.DisplayUnits displayUnits = axis.GetFirstChild<C.DisplayUnits>() ?? new C.DisplayUnits();
+            displayUnits.RemoveAllChildren<C.CustomDisplayUnit>();
+            displayUnits.RemoveAllChildren<C.BuiltInUnit>();
+            displayUnits.Append(new C.BuiltInUnit { Val = unit.ToOpenXml() });
+            ApplyDisplayUnitsLabel(displayUnits, showLabel, labelText);
+            if (displayUnits.Parent == null) {
+                axis.Append(displayUnits);
+            }
+
+            Save();
+            return this;
+        }
+
+        /// <summary>
+        /// Sets custom display units for the value axis.
+        /// </summary>
+        public ExcelChart SetValueAxisDisplayUnits(double customUnit, bool showLabel = true,
+            OfficeChartAxisGroup axisGroup = OfficeChartAxisGroup.Primary) {
+            if (customUnit <= 0 || double.IsNaN(customUnit) || double.IsInfinity(customUnit)) {
+                throw new ArgumentOutOfRangeException(nameof(customUnit));
+            }
+
+            C.Chart chart = GetChart();
+            C.PlotArea? plotArea = chart.GetFirstChild<C.PlotArea>();
+            if (plotArea == null) {
+                return this;
+            }
+
+            C.ValueAxis? axis = ResolveValueAxis(plotArea, axisGroup);
+            if (axis == null) {
+                return this;
+            }
+
+            C.DisplayUnits displayUnits = axis.GetFirstChild<C.DisplayUnits>() ?? new C.DisplayUnits();
+            displayUnits.RemoveAllChildren<C.BuiltInUnit>();
+            displayUnits.RemoveAllChildren<C.CustomDisplayUnit>();
+            displayUnits.Append(new C.CustomDisplayUnit { Val = customUnit });
+            ApplyDisplayUnitsLabel(displayUnits, showLabel);
+            if (displayUnits.Parent == null) {
+                axis.Append(displayUnits);
+            }
+
+            Save();
+            return this;
+        }
+
+        /// <summary>
+        /// Sets custom display units for the value axis with custom label text.
+        /// </summary>
+        public ExcelChart SetValueAxisDisplayUnits(double customUnit, string labelText, bool showLabel = true,
+            OfficeChartAxisGroup axisGroup = OfficeChartAxisGroup.Primary) {
+            if (customUnit <= 0 || double.IsNaN(customUnit) || double.IsInfinity(customUnit)) {
+                throw new ArgumentOutOfRangeException(nameof(customUnit));
+            }
+            if (string.IsNullOrWhiteSpace(labelText)) {
+                throw new ArgumentException("Label text cannot be empty.", nameof(labelText));
+            }
+
+            C.Chart chart = GetChart();
+            C.PlotArea? plotArea = chart.GetFirstChild<C.PlotArea>();
+            if (plotArea == null) {
+                return this;
+            }
+
+            C.ValueAxis? axis = ResolveValueAxis(plotArea, axisGroup);
+            if (axis == null) {
+                return this;
+            }
+
+            C.DisplayUnits displayUnits = axis.GetFirstChild<C.DisplayUnits>() ?? new C.DisplayUnits();
+            displayUnits.RemoveAllChildren<C.BuiltInUnit>();
+            displayUnits.RemoveAllChildren<C.CustomDisplayUnit>();
+            displayUnits.Append(new C.CustomDisplayUnit { Val = customUnit });
+            ApplyDisplayUnitsLabel(displayUnits, showLabel, labelText);
+            if (displayUnits.Parent == null) {
+                axis.Append(displayUnits);
+            }
+
+            Save();
+            return this;
+        }
+
+        /// <summary>
+        /// Clears display units from the value axis.
+        /// </summary>
+        public ExcelChart ClearValueAxisDisplayUnits(OfficeChartAxisGroup axisGroup = OfficeChartAxisGroup.Primary) {
+            C.Chart chart = GetChart();
+            C.PlotArea? plotArea = chart.GetFirstChild<C.PlotArea>();
+            if (plotArea == null) {
+                return this;
+            }
+
+            C.ValueAxis? axis = ResolveValueAxis(plotArea, axisGroup);
+            if (axis == null) {
+                return this;
+            }
+
+            axis.GetFirstChild<C.DisplayUnits>()?.Remove();
+            Save();
+            return this;
+        }
+
+        /// <summary>
+        /// Sets the category axis orientation (normal or reversed order).
+        /// </summary>
+        public ExcelChart SetCategoryAxisReverseOrder(bool reverseOrder = true,
+            OfficeChartAxisGroup axisGroup = OfficeChartAxisGroup.Primary) {
+            C.Chart chart = GetChart();
+            C.PlotArea? plotArea = chart.GetFirstChild<C.PlotArea>();
+            if (plotArea == null) {
+                return this;
+            }
+
+            C.CategoryAxis? axis = ResolveCategoryAxis(plotArea, axisGroup);
+            if (axis == null) {
+                return this;
+            }
+
+            C.Scaling scaling = EnsureScaling(axis);
+            ReplaceChild(scaling, new C.Orientation {
+                Val = reverseOrder ? C.OrientationValues.MaxMin : C.OrientationValues.MinMax
+            });
+            Save();
+            return this;
+        }
+
+        /// <summary>
+        /// Sets category axis scale parameters for line, bar, column, and area charts.
+        /// </summary>
+        /// <param name="minimum">Optional minimum category-axis value.</param>
+        /// <param name="maximum">Optional maximum category-axis value.</param>
+        /// <param name="majorUnit">Optional major unit spacing.</param>
+        /// <param name="minorUnit">Optional minor unit spacing.</param>
+        /// <param name="reverseOrder">Optional category order direction.</param>
+        /// <param name="axisGroup">Primary or secondary category axis.</param>
+        public ExcelChart SetCategoryAxisScale(double? minimum = null, double? maximum = null,
+            double? majorUnit = null, double? minorUnit = null, bool? reverseOrder = null,
+            OfficeChartAxisGroup axisGroup = OfficeChartAxisGroup.Primary) {
+            ValidateAxisScale(minimum, maximum, majorUnit, minorUnit, logScale: null, logBase: null);
+
+            C.Chart chart = GetChart();
+            C.PlotArea? plotArea = chart.GetFirstChild<C.PlotArea>();
+            if (plotArea == null) {
+                return this;
+            }
+
+            OpenXmlCompositeElement? axis = ResolveDateAxis(plotArea, axisGroup);
+            if (axis == null) {
+                C.CategoryAxis? categoryAxis = ResolveCategoryAxis(plotArea, axisGroup);
+                if (categoryAxis == null) {
+                    return this;
+                }
+
+                axis = minimum != null || maximum != null || majorUnit != null || minorUnit != null
+                    ? PromoteCategoryAxisToDateAxis(plotArea, categoryAxis)
+                    : categoryAxis;
+            }
+
+            ApplyAxisScale(axis, minimum, maximum, majorUnit, minorUnit, reverseOrder, logScale: null, logBase: null);
+            Save();
+            return this;
+        }
+
+        /// <summary>
+        /// Sets scatter chart X-axis scale (value axis on the bottom).
+        /// </summary>
+        public ExcelChart SetScatterXAxisScale(double? minimum = null, double? maximum = null,
+            double? majorUnit = null, double? minorUnit = null, bool? reverseOrder = null,
+            bool? logScale = null, double? logBase = null) {
+            ValidateAxisScale(minimum, maximum, majorUnit, minorUnit, logScale, logBase);
+
+            C.Chart chart = GetChart();
+            C.PlotArea? plotArea = chart.GetFirstChild<C.PlotArea>();
+            if (plotArea == null) {
+                return this;
+            }
+
+            C.ValueAxis? axis = ResolveScatterXAxis(plotArea);
+            if (axis == null) {
+                return this;
+            }
+
+            ApplyAxisScale(axis, minimum, maximum, majorUnit, minorUnit, reverseOrder, logScale, logBase);
+            Save();
+            return this;
+        }
+
+        /// <summary>
+        /// Sets scatter chart Y-axis scale (value axis on the left).
+        /// </summary>
+        public ExcelChart SetScatterYAxisScale(double? minimum = null, double? maximum = null,
+            double? majorUnit = null, double? minorUnit = null, bool? reverseOrder = null,
+            bool? logScale = null, double? logBase = null) {
+            ValidateAxisScale(minimum, maximum, majorUnit, minorUnit, logScale, logBase);
+
+            C.Chart chart = GetChart();
+            C.PlotArea? plotArea = chart.GetFirstChild<C.PlotArea>();
+            if (plotArea == null) {
+                return this;
+            }
+
+            C.ValueAxis? axis = ResolveScatterYAxis(plotArea);
+            if (axis == null) {
+                return this;
+            }
+
+            ApplyAxisScale(axis, minimum, maximum, majorUnit, minorUnit, reverseOrder, logScale, logBase);
+            Save();
+            return this;
+        }
+
+        /// <summary>
+        /// Sets the category axis number format.
+        /// </summary>
+        public ExcelChart SetCategoryAxisNumberFormat(string formatCode, bool sourceLinked = false) {
+            return SetCategoryAxisNumberFormat(formatCode, sourceLinked, OfficeChartAxisGroup.Primary);
+        }
+
+        /// <summary>
+        /// Sets the category axis number format for the selected axis group.
+        /// </summary>
+        public ExcelChart SetCategoryAxisNumberFormat(string formatCode, bool sourceLinked, OfficeChartAxisGroup axisGroup) {
+            return SetAxisNumberFormat(formatCode, sourceLinked, axisGroup, AxisKind.Category);
+        }
+
+        /// <summary>
+        /// Sets the value axis number format.
+        /// </summary>
+        public ExcelChart SetValueAxisNumberFormat(string formatCode, bool sourceLinked = false) {
+            return SetValueAxisNumberFormat(formatCode, sourceLinked, OfficeChartAxisGroup.Primary);
+        }
+
+        /// <summary>
+        /// Sets the value axis number format for the selected axis group.
+        /// </summary>
+        public ExcelChart SetValueAxisNumberFormat(string formatCode, bool sourceLinked, OfficeChartAxisGroup axisGroup) {
+            return SetAxisNumberFormat(formatCode, sourceLinked, axisGroup, AxisKind.Value);
+        }
+
+        /// <summary>
+        /// Sets value axis scale parameters for the selected axis group.
+        /// </summary>
+        public ExcelChart SetValueAxisScale(double? minimum = null, double? maximum = null, double? majorUnit = null,
+            double? minorUnit = null, double? logBase = null, bool? reverseOrder = null,
+            OfficeChartAxisGroup axisGroup = OfficeChartAxisGroup.Primary, bool? logScale = null) {
+            ValidateAxisScale(minimum, maximum, majorUnit, minorUnit, logScale, logBase);
+
+            C.Chart chart = GetChart();
+            C.PlotArea? plotArea = chart.GetFirstChild<C.PlotArea>();
+            if (plotArea == null) {
+                return this;
+            }
+
+            C.ValueAxis? axis = ResolveValueAxis(plotArea, axisGroup);
+            if (axis == null) {
+                return this;
+            }
+
+            ApplyAxisScale(axis, minimum, maximum, majorUnit, minorUnit, reverseOrder, logScale, logBase);
+            Save();
+            return this;
+        }
+
+        private enum AxisKind {
+            Category,
+            Value
+        }
+
+        private ExcelChart SetAxisTitle(string title, OfficeChartAxisGroup axisGroup, AxisKind axisKind) {
+            if (title == null) {
+                throw new ArgumentNullException(nameof(title));
+            }
+
+            C.Chart chart = GetChart();
+            C.PlotArea? plotArea = chart.GetFirstChild<C.PlotArea>();
+            if (plotArea == null) {
+                return this;
+            }
+
+            OpenXmlCompositeElement? axis = axisKind == AxisKind.Category
+                ? ResolveCategoryAxis(plotArea, axisGroup)
+                : ResolveValueAxis(plotArea, axisGroup);
+
+            if (axis == null && axisKind == AxisKind.Category && axisGroup == OfficeChartAxisGroup.Primary) {
+                axis = ResolveScatterXAxis(plotArea);
+            }
+
+            if (axis == null) {
+                return this;
+            }
+
+            axis.RemoveAllChildren<C.Title>();
+            InsertAxisTitle(axis, CreateAxisTitle(title));
+            Save();
+            return this;
+        }
+
+        private static void InsertAxisTitle(OpenXmlCompositeElement axis, C.Title title) {
+            if (axis == null) {
+                throw new ArgumentNullException(nameof(axis));
+            }
+            if (title == null) {
+                throw new ArgumentNullException(nameof(title));
+            }
+
+            OpenXmlElement? insertBefore = axis.GetFirstChild<C.NumberingFormat>();
+            insertBefore ??= axis.GetFirstChild<C.MajorTickMark>();
+            insertBefore ??= axis.GetFirstChild<C.MinorTickMark>();
+            insertBefore ??= axis.GetFirstChild<C.TickLabelPosition>();
+            insertBefore ??= axis.GetFirstChild<C.ShapeProperties>();
+            insertBefore ??= axis.GetFirstChild<C.TextProperties>();
+            insertBefore ??= axis.GetFirstChild<C.CrossingAxis>();
+            insertBefore ??= axis.GetFirstChild<C.Crosses>();
+            insertBefore ??= axis.GetFirstChild<C.CrossesAt>();
+            insertBefore ??= axis.GetFirstChild<C.CrossBetween>();
+            insertBefore ??= axis.GetFirstChild<C.MajorUnit>();
+            insertBefore ??= axis.GetFirstChild<C.MinorUnit>();
+            insertBefore ??= axis.GetFirstChild<C.DisplayUnits>();
+            insertBefore ??= axis.GetFirstChild<C.ExtensionList>();
+
+            if (insertBefore != null) {
+                axis.InsertBefore(title, insertBefore);
+            } else {
+                axis.Append(title);
+            }
+        }
+
+        private static void InsertAxisShapeProperties(OpenXmlCompositeElement axis, C.ShapeProperties properties) {
+            OpenXmlElement? insertBefore = axis.GetFirstChild<C.TextProperties>();
+            insertBefore ??= axis.GetFirstChild<C.CrossingAxis>();
+            insertBefore ??= axis.GetFirstChild<C.Crosses>();
+            insertBefore ??= axis.GetFirstChild<C.CrossesAt>();
+            insertBefore ??= axis.GetFirstChild<C.CrossBetween>();
+            insertBefore ??= axis.GetFirstChild<C.MajorUnit>();
+            insertBefore ??= axis.GetFirstChild<C.MinorUnit>();
+            insertBefore ??= axis.GetFirstChild<C.DisplayUnits>();
+            insertBefore ??= axis.GetFirstChild<C.ExtensionList>();
+
+            if (insertBefore != null) {
+                axis.InsertBefore(properties, insertBefore);
+            } else {
+                axis.Append(properties);
+            }
+        }
+
+        private ExcelChart SetAxisTitleTextStyle(OfficeChartAxisGroup axisGroup, AxisKind axisKind,
+            double? fontSizePoints, bool? bold, bool? italic, string? color, string? fontName) {
+            ValidateDataLabelTextStyle(fontSizePoints, color, fontName);
+
+            C.Chart chart = GetChart();
+            C.PlotArea? plotArea = chart.GetFirstChild<C.PlotArea>();
+            if (plotArea == null) {
+                return this;
+            }
+
+            OpenXmlCompositeElement? axis = axisKind == AxisKind.Category
+                ? ResolveCategoryAxis(plotArea, axisGroup)
+                : ResolveValueAxis(plotArea, axisGroup);
+
+            if (axis == null && axisKind == AxisKind.Category && axisGroup == OfficeChartAxisGroup.Primary) {
+                axis = ResolveScatterXAxis(plotArea);
+            }
+
+            if (axis == null) {
+                return this;
+            }
+
+            C.Title? title = axis.GetFirstChild<C.Title>();
+            if (title == null) {
+                return this;
+            }
+
+            C.ChartText? chartText = title.GetFirstChild<C.ChartText>();
+            if (chartText == null) {
+                return this;
+            }
+
+            ApplyTextStyle(EnsureChartTextRunProperties(chartText), fontSizePoints, bold, italic, color, fontName);
+            Save();
+            return this;
+        }
+
+        private ExcelChart SetAxisLabelTextStyle(OfficeChartAxisGroup axisGroup, AxisKind axisKind,
+            double? fontSizePoints, bool? bold, bool? italic, string? color, string? fontName) {
+            ValidateDataLabelTextStyle(fontSizePoints, color, fontName);
+
+            C.Chart chart = GetChart();
+            C.PlotArea? plotArea = chart.GetFirstChild<C.PlotArea>();
+            if (plotArea == null) {
+                return this;
+            }
+
+            OpenXmlCompositeElement? axis = axisKind == AxisKind.Category
+                ? ResolveCategoryAxis(plotArea, axisGroup)
+                : ResolveValueAxis(plotArea, axisGroup);
+
+            if (axis == null && axisKind == AxisKind.Category && axisGroup == OfficeChartAxisGroup.Primary) {
+                axis = ResolveScatterXAxis(plotArea);
+            }
+
+            if (axis == null) {
+                return this;
+            }
+
+            ApplyTextStyle(EnsureTextPropertiesRunProperties(axis), fontSizePoints, bold, italic, color, fontName);
+            Save();
+            return this;
+        }
+
+        private ExcelChart SetAxisGridlines(OfficeChartAxisGroup axisGroup, AxisKind axisKind,
+            bool showMajor, bool showMinor, string? lineColor, double? lineWidthPoints) {
+            ValidateAxisGridlinesStyle(lineColor, lineWidthPoints);
+
+            C.Chart chart = GetChart();
+            C.PlotArea? plotArea = chart.GetFirstChild<C.PlotArea>();
+            if (plotArea == null) {
+                return this;
+            }
+
+            OpenXmlCompositeElement? axis = axisKind == AxisKind.Category
+                ? ResolveCategoryAxis(plotArea, axisGroup)
+                : ResolveValueAxis(plotArea, axisGroup);
+
+            if (axis == null && axisKind == AxisKind.Category && axisGroup == OfficeChartAxisGroup.Primary) {
+                axis = ResolveScatterXAxis(plotArea);
+            }
+
+            if (axis == null) {
+                return this;
+            }
+
+            ApplyGridlines(axis, showMajor, showMinor, lineColor, lineWidthPoints);
+            Save();
+            return this;
+        }
+
+        private ExcelChart SetAxisLine(OfficeChartAxisGroup axisGroup, AxisKind axisKind,
+            string? lineColor, double? lineWidthPoints, bool noLine) {
+            ValidateAxisLineStyle(lineColor, lineWidthPoints, noLine);
+
+            C.Chart chart = GetChart();
+            C.PlotArea? plotArea = chart.GetFirstChild<C.PlotArea>();
+            if (plotArea == null) {
+                return this;
+            }
+
+            OpenXmlCompositeElement? axis = axisKind == AxisKind.Category
+                ? ResolveCategoryAxis(plotArea, axisGroup)
+                : ResolveValueAxis(plotArea, axisGroup);
+
+            if (axis == null && axisKind == AxisKind.Category && axisGroup == OfficeChartAxisGroup.Primary) {
+                axis = ResolveScatterXAxis(plotArea);
+            }
+
+            if (axis == null) {
+                return this;
+            }
+
+            C.ShapeProperties props = axis.GetFirstChild<C.ShapeProperties>() ?? new C.ShapeProperties();
+            if (noLine) {
+                ApplyNoLine(props);
+            } else if (lineColor != null || lineWidthPoints != null) {
+                string? normalizedLine = lineColor != null ? NormalizeHexColor(lineColor) : null;
+                ApplyOptionalLine(props, normalizedLine, lineWidthPoints);
+            } else {
+                return this;
+            }
+
+            if (props.Parent == null) {
+                InsertAxisShapeProperties(axis, props);
+            }
+
+            Save();
+            return this;
+        }
+
+        private static void ValidateAxisLineStyle(string? lineColor, double? lineWidthPoints, bool noLine) {
+            if (lineColor != null && string.IsNullOrWhiteSpace(lineColor)) {
+                throw new ArgumentException("Axis line color cannot be empty.", nameof(lineColor));
+            }
+            if (lineWidthPoints != null && lineWidthPoints <= 0) {
+                throw new ArgumentOutOfRangeException(nameof(lineWidthPoints));
+            }
+            if (noLine && (lineColor != null || lineWidthPoints != null)) {
+                throw new ArgumentException("Cannot set axis line color/width when noLine is true.", nameof(noLine));
+            }
+        }
+
+        private ExcelChart SetAxisLabelRotation(OfficeChartAxisGroup axisGroup, AxisKind axisKind, double rotationDegrees) {
+            if (double.IsNaN(rotationDegrees) || double.IsInfinity(rotationDegrees)) {
+                throw new ArgumentOutOfRangeException(nameof(rotationDegrees));
+            }
+            if (rotationDegrees < -90 || rotationDegrees > 90) {
+                throw new ArgumentOutOfRangeException(nameof(rotationDegrees), "Rotation must be between -90 and 90 degrees.");
+            }
+
+            C.Chart chart = GetChart();
+            C.PlotArea? plotArea = chart.GetFirstChild<C.PlotArea>();
+            if (plotArea == null) {
+                return this;
+            }
+
+            OpenXmlCompositeElement? axis = axisKind == AxisKind.Category
+                ? ResolveCategoryAxis(plotArea, axisGroup)
+                : ResolveValueAxis(plotArea, axisGroup);
+
+            if (axis == null && axisKind == AxisKind.Category && axisGroup == OfficeChartAxisGroup.Primary) {
+                axis = ResolveScatterXAxis(plotArea);
+            }
+
+            if (axis == null) {
+                return this;
+            }
+
+            // Ensure a complete <c:txPr> structure before mutating rotation.
+            EnsureTextPropertiesRunProperties(axis);
+            C.TextProperties? textProps = axis.GetFirstChild<C.TextProperties>();
+            if (textProps != null) {
+                A.BodyProperties body = textProps.GetFirstChild<A.BodyProperties>() ?? new A.BodyProperties();
+                body.Rotation = (int)Math.Round(rotationDegrees * 60000d);
+                if (body.Parent == null) {
+                    textProps.Append(body);
+                }
+            }
+
+            Save();
+            return this;
+        }
+
+        private ExcelChart SetAxisTickLabelPosition(OfficeChartAxisGroup axisGroup, AxisKind axisKind,
+            OfficeChartAxisTickLabelPosition position) {
+            C.Chart chart = GetChart();
+            C.PlotArea? plotArea = chart.GetFirstChild<C.PlotArea>();
+            if (plotArea == null) {
+                return this;
+            }
+
+            OpenXmlCompositeElement? axis = axisKind == AxisKind.Category
+                ? ResolveCategoryAxis(plotArea, axisGroup)
+                : ResolveValueAxis(plotArea, axisGroup);
+
+            if (axis == null && axisKind == AxisKind.Category && axisGroup == OfficeChartAxisGroup.Primary) {
+                axis = ResolveScatterXAxis(plotArea);
+            }
+
+            if (axis == null) {
+                return this;
+            }
+
+            ReplaceChild(axis, new C.TickLabelPosition { Val = position.ToOpenXml() });
+            Save();
+            return this;
+        }
+
+        private ExcelChart SetAxisNumberFormat(string formatCode, bool sourceLinked,
+            OfficeChartAxisGroup axisGroup, AxisKind axisKind) {
+            if (string.IsNullOrWhiteSpace(formatCode)) {
+                throw new ArgumentException("Format code cannot be null or empty.", nameof(formatCode));
+            }
+
+            C.Chart chart = GetChart();
+            C.PlotArea? plotArea = chart.GetFirstChild<C.PlotArea>();
+            if (plotArea == null) {
+                return this;
+            }
+
+            OpenXmlCompositeElement? axis = axisKind == AxisKind.Category
+                ? ResolveCategoryAxis(plotArea, axisGroup)
+                : ResolveValueAxis(plotArea, axisGroup);
+
+            if (axis == null && axisKind == AxisKind.Category && axisGroup == OfficeChartAxisGroup.Primary) {
+                axis = ResolveScatterXAxis(plotArea);
+            }
+
+            if (axis == null) {
+                return this;
+            }
+
+            C.NumberingFormat format = axis.GetFirstChild<C.NumberingFormat>() ?? new C.NumberingFormat();
+            format.FormatCode = formatCode;
+            format.SourceLinked = sourceLinked;
+            if (format.Parent == null) {
+                axis.InsertAt(format, 0);
+            }
+
+            Save();
+            return this;
+        }
+
+        private static C.CategoryAxis? ResolveCategoryAxis(C.PlotArea plotArea, OfficeChartAxisGroup axisGroup) {
+            var axes = plotArea.Elements<C.CategoryAxis>().ToList();
+            if (axes.Count == 0) {
+                return null;
+            }
+
+            bool isBar = HasHorizontalBarChart(plotArea);
+            C.AxisPositionValues primaryPosition = isBar ? C.AxisPositionValues.Left : C.AxisPositionValues.Bottom;
+            C.AxisPositionValues secondaryPosition = isBar ? C.AxisPositionValues.Right : C.AxisPositionValues.Top;
+            C.AxisPositionValues desired = axisGroup == OfficeChartAxisGroup.Primary ? primaryPosition : secondaryPosition;
+
+            C.CategoryAxis? axis = axes.FirstOrDefault(ax => ax.AxisPosition?.Val?.Value == desired);
+            if (axis != null) {
+                return axis;
+            }
+
+            return axisGroup == OfficeChartAxisGroup.Primary
+                ? axes.FirstOrDefault()
+                : axes.Skip(1).FirstOrDefault() ?? axes.LastOrDefault();
+        }
+
+        private static C.DateAxis? ResolveDateAxis(C.PlotArea plotArea, OfficeChartAxisGroup axisGroup) {
+            var axes = plotArea.Elements<C.DateAxis>().ToList();
+            if (axes.Count == 0) {
+                return null;
+            }
+
+            bool isBar = HasHorizontalBarChart(plotArea);
+            C.AxisPositionValues primaryPosition = isBar ? C.AxisPositionValues.Left : C.AxisPositionValues.Bottom;
+            C.AxisPositionValues secondaryPosition = isBar ? C.AxisPositionValues.Right : C.AxisPositionValues.Top;
+            C.AxisPositionValues desired = axisGroup == OfficeChartAxisGroup.Primary ? primaryPosition : secondaryPosition;
+
+            C.DateAxis? axis = axes.FirstOrDefault(ax => ax.AxisPosition?.Val?.Value == desired);
+            if (axis != null) {
+                return axis;
+            }
+
+            return axisGroup == OfficeChartAxisGroup.Primary
+                ? axes.FirstOrDefault()
+                : axes.Skip(1).FirstOrDefault() ?? axes.LastOrDefault();
+        }
+
+        private static C.DateAxis PromoteCategoryAxisToDateAxis(C.PlotArea plotArea, C.CategoryAxis categoryAxis) {
+            var dateAxis = new C.DateAxis();
+            AppendClone<C.AxisId>(dateAxis, categoryAxis);
+            AppendClone<C.Scaling>(dateAxis, categoryAxis);
+            AppendClone<C.Delete>(dateAxis, categoryAxis);
+            AppendClone<C.AxisPosition>(dateAxis, categoryAxis);
+            AppendClone<C.MajorGridlines>(dateAxis, categoryAxis);
+            AppendClone<C.MinorGridlines>(dateAxis, categoryAxis);
+            AppendClone<C.Title>(dateAxis, categoryAxis);
+            AppendClone<C.NumberingFormat>(dateAxis, categoryAxis);
+            AppendClone<C.MajorTickMark>(dateAxis, categoryAxis);
+            AppendClone<C.MinorTickMark>(dateAxis, categoryAxis);
+            AppendClone<C.TickLabelPosition>(dateAxis, categoryAxis);
+            AppendClone<C.ChartShapeProperties>(dateAxis, categoryAxis);
+            AppendClone<C.TextProperties>(dateAxis, categoryAxis);
+            AppendClone<C.CrossingAxis>(dateAxis, categoryAxis);
+            AppendClone<C.Crosses>(dateAxis, categoryAxis);
+            AppendClone<C.CrossesAt>(dateAxis, categoryAxis);
+            AppendClone<C.LabelOffset>(dateAxis, categoryAxis);
+
+            if (categoryAxis.Parent != null) {
+                plotArea.ReplaceChild(dateAxis, categoryAxis);
+            } else {
+                plotArea.Append(dateAxis);
+            }
+
+            return dateAxis;
+        }
+
+        private static void AppendClone<T>(OpenXmlCompositeElement destination, OpenXmlCompositeElement source) where T : OpenXmlElement {
+            T? child = source.GetFirstChild<T>();
+            if (child != null) {
+                destination.Append(child.CloneNode(true));
+            }
+        }
+
+        private static C.ValueAxis? ResolveValueAxis(C.PlotArea plotArea, OfficeChartAxisGroup axisGroup) {
+            var axes = plotArea.Elements<C.ValueAxis>().ToList();
+            if (axes.Count == 0) {
+                return null;
+            }
+
+            bool isBar = HasHorizontalBarChart(plotArea);
+            C.AxisPositionValues primaryPosition = isBar ? C.AxisPositionValues.Bottom : C.AxisPositionValues.Left;
+            C.AxisPositionValues secondaryPosition = isBar ? C.AxisPositionValues.Top : C.AxisPositionValues.Right;
+            C.AxisPositionValues desired = axisGroup == OfficeChartAxisGroup.Primary ? primaryPosition : secondaryPosition;
+
+            C.ValueAxis? axis = axes.FirstOrDefault(ax => ax.AxisPosition?.Val?.Value == desired);
+            if (axis != null) {
+                return axis;
+            }
+
+            return axisGroup == OfficeChartAxisGroup.Primary
+                ? axes.FirstOrDefault()
+                : axes.Skip(1).FirstOrDefault() ?? axes.LastOrDefault();
+        }
+
+        private static bool HasHorizontalBarChart(C.PlotArea plotArea) {
+            return plotArea.Elements<C.BarChart>()
+                .Select(chart => chart.GetFirstChild<C.BarDirection>()?.Val?.Value ?? C.BarDirectionValues.Column)
+                .Any(direction => direction == C.BarDirectionValues.Bar);
+        }
+
+        private static C.ValueAxis? ResolveScatterXAxis(C.PlotArea plotArea) {
+            if (plotArea.Elements<C.CategoryAxis>().Any()) {
+                return null;
+            }
+
+            return plotArea.Elements<C.ValueAxis>()
+                .FirstOrDefault(ax => ax.AxisPosition?.Val?.Value == C.AxisPositionValues.Bottom);
+        }
+
+        private static C.ValueAxis? ResolveScatterYAxis(C.PlotArea plotArea) {
+            if (plotArea.Elements<C.CategoryAxis>().Any()) {
+                return null;
+            }
+
+            return plotArea.Elements<C.ValueAxis>()
+                .FirstOrDefault(ax => ax.AxisPosition?.Val?.Value == C.AxisPositionValues.Left);
+        }
+
+    }
+}

@@ -1,0 +1,63 @@
+namespace OfficeIMO.Markdown;
+
+/// <summary>
+/// Helper context passed to <see cref="ISyntaxMarkdownBlockWithContext"/> implementations when they build
+/// custom syntax-tree nodes.
+/// </summary>
+public sealed class MarkdownBlockSyntaxBuilderContext {
+    internal MarkdownBlockSyntaxBuilderContext() {
+    }
+
+    /// <summary>
+    /// Builds a syntax node for a child block using the core reader's standard mapping rules.
+    /// </summary>
+    public MarkdownSyntaxNode BuildBlock(IMarkdownBlock block, MarkdownSourceSpan? span = null) =>
+        MarkdownBlockSyntaxBuilder.BuildBlock(block, span);
+
+    /// <summary>
+    /// Builds child syntax nodes for a sequence of child blocks.
+    /// </summary>
+    public IReadOnlyList<MarkdownSyntaxNode> BuildChildSyntaxNodes(IEnumerable<IMarkdownBlock> children) =>
+        MarkdownBlockSyntaxBuilder.BuildChildSyntaxNodes(children);
+
+    /// <summary>
+    /// Builds child syntax nodes for a child-block container using the same owned-syntax projection rules
+    /// as the core reader, falling back to the container's public child blocks when no parsed syntax is available.
+    /// </summary>
+    public IReadOnlyList<MarkdownSyntaxNode> BuildOwnedChildSyntaxNodes(IChildMarkdownBlockContainer container) =>
+        MarkdownBlockSyntaxBuilder.GetOwnedSyntaxChildrenOrBuild(container);
+
+    /// <summary>
+    /// Builds a syntax node for inline content wrapped in a specific syntax kind.
+    /// </summary>
+    public MarkdownSyntaxNode BuildInlineContainerNode(
+        MarkdownSyntaxKind kind,
+        InlineSequence inlines,
+        MarkdownSourceSpan? span = null,
+        string? literal = null) =>
+        MarkdownBlockSyntaxBuilder.BuildInlineContainerNode(kind, inlines, span, literal);
+
+    /// <summary>
+    /// Builds a syntax node for inline content with an explicit associated object.
+    /// Use this when a wrapper syntax node represents a semantic owner other than the inline sequence itself.
+    /// </summary>
+    public MarkdownSyntaxNode BuildInlineContainerNode(
+        MarkdownSyntaxKind kind,
+        InlineSequence inlines,
+        MarkdownSourceSpan? span,
+        string? literal,
+        object? associatedObject) =>
+        MarkdownBlockSyntaxBuilder.BuildInlineContainerNode(kind, inlines, span, literal, associatedObject);
+
+    /// <summary>
+    /// Computes an aggregate source span covering the supplied child nodes when possible.
+    /// </summary>
+    public MarkdownSourceSpan? GetAggregateSpan(IReadOnlyList<MarkdownSyntaxNode>? nodes) =>
+        MarkdownBlockSyntaxBuilder.GetAggregateSpan(nodes ?? Array.Empty<MarkdownSyntaxNode>());
+
+    /// <summary>
+    /// Normalizes line endings for syntax-node literals to the reader's canonical newline form.
+    /// </summary>
+    public string NormalizeLiteralLineEndings(string? value) =>
+        MarkdownBlockSyntaxBuilder.NormalizeSyntaxLiteralLineEndings(value);
+}

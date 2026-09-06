@@ -57,11 +57,13 @@ dlldata.c
 
 # Benchmark Results
 BenchmarkDotNet.Artifacts/
+.benchmark-artifacts/
 
 # .NET Core
 project.lock.json
 project.fragment.lock.json
 artifacts/
+/output/
 
 # ASP.NET Scaffolding
 ScaffoldingReadMe.txt
@@ -237,6 +239,11 @@ ClientBin/
 *.dbproj.schemaview
 *.jfm
 *.pfx
+*.p12
+AuthKey_*.p8
+*.mobileprovision
+*.provisionprofile
+*.keychain-db
 *.publishsettings
 orleans.codegen.cs
 
@@ -366,5 +373,30 @@ FodyWeavers.xsd
 
 /.idea/
 Ignore/*
+Build/Artefacts/
+Artefacts/
+Artifacts/Studio/
 
 *.received.*
+dotnet-install.sh
+packages-microsoft-prod.deb
+CLAUDE.md
+.claude/*
+nul
+Website/_site/
+Website/_temp/
+Website/_reports/
+Website/data/apidocs/powershell/examples/*
+!Website/data/apidocs/powershell/examples/.gitkeep
+Website/.powerforge/git-sync-manifest.json
+Website/Build/
+Website/projects/
+Website/static/data/
+!Website/static/data/
+Website/static/data/*
+!Website/static/data/benchmarks/
+Website/static/data/benchmarks/*
+!Website/static/data/benchmarks/library-comparisons/
+!Website/static/data/benchmarks/library-comparisons/*.json
+Website/static/data/benchmarks/library-comparisons/.index.json.*.lock
+Website/data/ecosystem/stats.json
